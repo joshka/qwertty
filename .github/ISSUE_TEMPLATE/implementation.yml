@@ -1,0 +1,44 @@
+name: Implementation
+description: Plan a focused implementation slice.
+title: "Add "
+labels:
+  - implementation
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or maintainer problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included in this slice?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out Of Scope
+      description: What must not be pulled into this slice?
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Behavior References
+      description: Relevant behavior, files, tests, fixtures, standards, or prior decisions.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ] Public API is named and documented.
+        - [ ] Example shows practical use, or the issue explains why not.
+        - [ ] Tests cover advertised behavior.
+        - [ ] Validation commands pass.
+        - [ ] Docs are placed in the right layer.
+    validations:
+      required: true

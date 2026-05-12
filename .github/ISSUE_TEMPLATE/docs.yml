@@ -1,0 +1,36 @@
+name: Documentation
+description: Improve user, reference, or maintainer documentation.
+title: "Document "
+labels:
+  - documentation
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What reader need does this documentation solve?
+    validations:
+      required: true
+  - type: textarea
+    id: audience
+    attributes:
+      label: Audience And Layer
+      description: Is this README, guide, concept, reference, maintainer, or ADR material?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What should change, and what should stay out?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ] The useful answer appears before background.
+        - [ ] Examples are realistic where examples apply.
+        - [ ] Markdown is linted.
+        - [ ] Links point to the next useful layer.

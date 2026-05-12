@@ -1,0 +1,17 @@
+# Roadmap
+
+The project grows in reviewable slices.
+
+1. Project standards and scaffold.
+1. Minimal encode-only library.
+1. Terminal device layer.
+1. Session lifecycle.
+1. Input and queries.
+1. Capabilities and policy.
+1. Protocol families.
+1. Vendor protocol support.
+1. Registry and conformance tooling.
+1. Integrations and release polish.
+
+Each slice should be understandable on its own, with issue scope, acceptance criteria, tests, and
+documentation in the right layer.

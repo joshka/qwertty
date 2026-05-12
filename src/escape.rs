@@ -1,0 +1,32 @@
+//! Internal helpers for constructing escape-sequence command bytes.
+//!
+//! Public command helpers should describe the bytes they emit, but they should not each hand-roll
+//! the common `ESC [` Control Sequence Introducer prefix. Keeping that construction here gives the
+//! command modules a small shared vocabulary while the public API remains the byte-oriented
+//! [`Command`] envelope.
+
+use crate::Command;
+
+/// ASCII ESC, used to start 7-bit terminal control sequences.
+pub(crate) const ESC: u8 = 0x1b;
+
+/// Builds a 7-bit CSI command.
+///
+/// `parameters` are copied between `ESC [` and `final_byte`. For example,
+/// `csi("3;5", 'H')` emits `b"\x1b[3;5H"`.
+pub(crate) fn csi(parameters: impl AsRef<str>, final_byte: char) -> Command {
+    let parameters = parameters.as_ref();
+    let mut bytes = Vec::with_capacity(2 + parameters.len() + final_byte.len_utf8());
+    bytes.push(ESC);
+    bytes.push(b'[');
+    bytes.extend_from_slice(parameters.as_bytes());
+    bytes.extend_from_slice(final_byte.encode_utf8(&mut [0; 4]).as_bytes());
+    Command::raw(bytes)
+}
+
+/// Builds a two-byte escape command.
+///
+/// For example, `escape(b'7')` emits `b"\x1b7"`.
+pub(crate) fn escape(final_byte: u8) -> Command {
+    Command::raw([ESC, final_byte])
+}

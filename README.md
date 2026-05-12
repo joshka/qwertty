@@ -9,8 +9,22 @@ queries, and capability policy.
 
 ## Status
 
-qwertty is not ready for application use yet. The current crate exists so CI, documentation, and
-review standards are active before terminal behavior is added.
+qwertty has an encode-only command foundation. It can build terminal output bytes, but it does not
+open a terminal, manage raw mode, read input, or own a terminal session yet.
+
+## Small Example
+
+```rust
+use qwertty::{CommandBuffer, ProtocolPosition, commands};
+
+let mut output = CommandBuffer::new();
+output
+    .command(commands::screen::clear())
+    .command(commands::cursor::move_to(ProtocolPosition::new(3, 5)))
+    .text("Ready");
+
+assert_eq!(output.as_bytes(), b"\x1b[2J\x1b[3;5HReady");
+```
 
 ## Project Shape
 
@@ -23,4 +37,5 @@ review standards are active before terminal behavior is added.
 ## Contributing
 
 Use `just check` to run the local gate. See [docs/workflow.md](docs/agent/workflow.md) for the
-development workflow and [docs/roadmap.md](docs/roadmap.md) for the planned order of work.
+development workflow and [docs/roadmap.md](docs/roadmap.md) for the planned order of work. The API
+docs include the terminal protocol reference in `qwertty::docs`.

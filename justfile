@@ -4,16 +4,17 @@ default:
     just --list
 
 fmt:
-    cargo fmt --all
+    cargo +nightly fmt --all
 
 fmt-check:
-    cargo fmt --all -- --check
+    cargo +nightly fmt --all -- --check
 
 metadata:
     cargo metadata --format-version 1 --no-deps
 
 test:
     cargo test --workspace --all-features
+    cargo test --examples --workspace --all-features
 
 clippy:
     cargo clippy --workspace --all-features --all-targets -- -D warnings

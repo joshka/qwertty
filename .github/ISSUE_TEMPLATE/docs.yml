@@ -32,5 +32,6 @@ body:
       value: |
         - [ ] The useful answer appears before background.
         - [ ] Examples are realistic where examples apply.
+        - [ ] Protocol terms are expanded or linked where they affect reader understanding.
         - [ ] Markdown is linted.
         - [ ] Links point to the next useful layer.

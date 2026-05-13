@@ -15,8 +15,16 @@ Rust code should read like technical writing for future maintainers.
 - Treat dependency bumps and feature flags as public integration decisions.
 - Add abstractions only when they reduce concepts a reader must hold at once.
 
+## Formatting
+
+Use `cargo +nightly fmt --all` for Rust formatting. The repository uses nightly-only rustfmt
+settings to wrap code and doc comments at 100 columns, format Rust code in doc comments, normalize
+doc attributes, and keep imports grouped at module granularity. These settings keep API docs and
+examples readable while avoiding noisy one-import-per-line churn.
+
 ## Public APIs
 
 Public APIs need practical examples and Rustdoc that explains relevant errors, invariants, safety,
 policy, or protocol behavior. Examples should show realistic usage rather than isolated constructor
-calls.
+calls. Protocol-facing APIs should explain spec abbreviations, link stable references, and show the
+actual bytes emitted or interpreted for representative inputs.

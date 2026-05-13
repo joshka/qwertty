@@ -12,6 +12,8 @@ the terminal details beneath it.
 - Add abstractions only when they reduce the number of concepts a reader must hold at once.
 - Keep changes small, atomic, and reviewable.
 - Use issues, pull requests, and ADRs to show planned library evolution.
+- Treat user-facing documentation as part of each API increment, including practical examples,
+  protocol context, links to stable references, and concrete byte-level behavior where relevant.
 
 ## Influences
 

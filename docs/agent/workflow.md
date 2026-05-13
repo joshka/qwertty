@@ -10,6 +10,12 @@ just check
 
 The gate runs Cargo metadata, formatting, tests, clippy, docs, and Markdown linting.
 
+Rust formatting uses nightly rustfmt:
+
+```sh
+cargo +nightly fmt --all
+```
+
 ## Change Shape
 
 - Start separable work in a fresh `jj` change.

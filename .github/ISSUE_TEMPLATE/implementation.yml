@@ -38,6 +38,7 @@ body:
         - [ ] Public API is named and documented.
         - [ ] Example shows practical use, or the issue explains why not.
         - [ ] Tests cover advertised behavior.
+        - [ ] Protocol-facing APIs explain relevant terms, references, bytes, and side effects.
         - [ ] Validation commands pass.
         - [ ] Docs are placed in the right layer.
     validations:

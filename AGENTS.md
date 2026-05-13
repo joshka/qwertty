@@ -11,6 +11,7 @@ maintain.
 - Optimize for reader locality and low cognitive burden.
 - Keep public documentation task-first and concise.
 - Put durable design decisions in ADRs.
+- Format Rust with `cargo +nightly fmt --all`.
 - Run `just check` before handing off a change.
 
 ## Project Standards

@@ -4,3 +4,4 @@
 //! leave the crate documentation for protocol context.
 
 #![doc = include_str!("../docs/reference/terminal-control.md")]
+#![doc = include_str!("../docs/reference/terminal-device.md")]

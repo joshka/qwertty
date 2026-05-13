@@ -21,3 +21,6 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = "warn"
 pedantic = "warn"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "pty", "termios"] }

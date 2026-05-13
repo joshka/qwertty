@@ -16,6 +16,15 @@ ownership, stability, dependency isolation, or audience clarity.
 A module becomes a crate only when it has an independent audience, dependency set, stability policy,
 or ownership model. Tiny protocol surfaces should begin as modules or planned work.
 
+## Layer Boundary
+
+The terminal device layer should stay below the session layer. It owns the live terminal handle,
+raw/cooked mode transition, terminal size lookup, and byte-oriented write/flush boundary.
+
+It should not own application lifecycle policy yet. Session setup, alternate screen, ordered frame
+cleanup, feature cleanup, input parsing, query routing, and async event loops belong to later
+slices unless the implementation issue records a narrower reason to move one of those boundaries.
+
 ## Design Rule
 
 Public APIs are conservative until examples prove the shape. Durable choices about crate

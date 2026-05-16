@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use qwertty::{ControlInput, InputBytes, InputEvent, Terminal, TerminalSession};
+use qwertty::{ControlInput, InputBytes, InputEvent, KeyInput, Terminal, TerminalSession};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
 #[test]
@@ -38,14 +38,52 @@ fn input_bytes_classify_single_byte_text_and_controls() {
 }
 
 #[test]
-fn input_bytes_preserve_escape_prefixed_input_as_undecoded() {
+fn input_bytes_classify_basic_arrow_keys() {
     let input = InputBytes::new(b"A\x1b[A".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![InputEvent::Text('A'), InputEvent::Key(KeyInput::Up)]
+    );
+}
+
+#[test]
+fn input_bytes_classify_mixed_arrow_key_text_and_controls() {
+    let input = InputBytes::new(b"\x1b[Aok\r".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![
+            InputEvent::Key(KeyInput::Up),
+            InputEvent::Text('o'),
+            InputEvent::Text('k'),
+            InputEvent::Control(ControlInput::CarriageReturn),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_unknown_escape_prefixed_input_as_undecoded() {
+    let input = InputBytes::new(b"A\x1b[Z".to_vec());
 
     assert_eq!(
         input.events(),
         vec![
             InputEvent::Text('A'),
-            InputEvent::Undecoded(InputBytes::new(b"\x1b[A".to_vec())),
+            InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec())),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_incomplete_escape_prefixed_input_as_undecoded() {
+    let input = InputBytes::new(b"A\x1b[".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![
+            InputEvent::Text('A'),
+            InputEvent::Undecoded(InputBytes::new(b"\x1b[".to_vec())),
         ]
     );
 }
@@ -108,6 +146,14 @@ fn control_input_round_trips_named_bytes() {
     );
     assert_eq!(ControlInput::from_byte(b'A'), None);
     assert_eq!(ControlInput::Other(0x03).as_byte(), 0x03);
+}
+
+#[test]
+fn key_input_reports_documented_bytes() {
+    assert_eq!(KeyInput::Up.as_bytes(), b"\x1b[A");
+    assert_eq!(KeyInput::Down.as_bytes(), b"\x1b[B");
+    assert_eq!(KeyInput::Right.as_bytes(), b"\x1b[C");
+    assert_eq!(KeyInput::Left.as_bytes(), b"\x1b[D");
 }
 
 #[test]

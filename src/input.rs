@@ -1,9 +1,10 @@
 //! Terminal input byte values and basic events.
 //!
 //! The first input layer preserves raw bytes exactly as the terminal device reports them. It does
-//! not parse Escape, Control Sequence Introducer, paste, mouse, focus, query, or vendor extension
-//! protocols yet. It can classify complete UTF-8 text and ASCII control input so callers can
-//! separate simple input from bytes that still need a later parser.
+//! not parse the full Control Sequence Introducer grammar, paste, mouse, focus, query, or vendor
+//! extension protocols yet. It can classify complete UTF-8 text, ASCII control input, and a small
+//! documented set of Escape-prefixed keys so callers can separate simple input from bytes that
+//! still need a later parser.
 
 const ESCAPE: u8 = 0x1b;
 const DELETE: u8 = 0x7f;
@@ -11,9 +12,9 @@ const DELETE: u8 = 0x7f;
 /// A basic terminal input event.
 ///
 /// `InputEvent` is the first event classification layer above raw [`InputBytes`]. It classifies
-/// complete UTF-8 text and ASCII control bytes. Escape-prefixed input, incomplete or invalid
-/// UTF-8, query responses, paste, mouse input, focus reports, and vendor protocols remain
-/// [`InputEvent::Undecoded`].
+/// complete UTF-8 text, ASCII control bytes, and a small documented set of Escape-prefixed keys.
+/// Unsupported Escape-prefixed input, incomplete or invalid UTF-8, query responses, paste, mouse
+/// input, focus reports, and vendor protocols remain [`InputEvent::Undecoded`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InputEvent {
@@ -21,8 +22,40 @@ pub enum InputEvent {
     Text(char),
     /// ASCII control input.
     Control(ControlInput),
+    /// A parsed terminal key sequence.
+    Key(KeyInput),
     /// Bytes qwertty has not classified yet.
     Undecoded(InputBytes),
+}
+
+/// A terminal key sequence qwertty can classify.
+///
+/// This is intentionally small. The first Escape parser only recognizes the common arrow-key
+/// Control Sequence Introducer encodings `ESC [ A`, `ESC [ B`, `ESC [ C`, and `ESC [ D`.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum KeyInput {
+    /// Up arrow, `ESC [ A`.
+    Up,
+    /// Down arrow, `ESC [ B`.
+    Down,
+    /// Right arrow, `ESC [ C`.
+    Right,
+    /// Left arrow, `ESC [ D`.
+    Left,
+}
+
+impl KeyInput {
+    /// Returns this key's documented byte sequence.
+    #[must_use]
+    pub const fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Up => b"\x1b[A",
+            Self::Down => b"\x1b[B",
+            Self::Right => b"\x1b[C",
+            Self::Left => b"\x1b[D",
+        }
+    }
 }
 
 /// A classified ASCII control input byte.
@@ -125,8 +158,9 @@ impl InputBytes {
     /// Classifies these bytes into basic input events.
     ///
     /// Complete UTF-8 text becomes [`InputEvent::Text`]. Single ASCII control bytes become
-    /// [`InputEvent::Control`]. Escape-prefixed input, incomplete or invalid UTF-8, query
-    /// responses, paste, mouse input, focus reports, and vendor protocols remain undecoded.
+    /// [`InputEvent::Control`]. The documented arrow-key sequences become [`InputEvent::Key`].
+    /// Unsupported Escape-prefixed input, incomplete or invalid UTF-8, query responses, paste,
+    /// mouse input, focus reports, and vendor protocols remain undecoded.
     ///
     /// Classification is scoped to this byte value. This method does not buffer incomplete UTF-8
     /// across multiple terminal reads.
@@ -160,10 +194,13 @@ fn classify_events(bytes: &[u8]) -> Vec<InputEvent> {
     while index < bytes.len() {
         let byte = bytes[index];
         if byte == ESCAPE && index + 1 < bytes.len() {
-            events.push(InputEvent::Undecoded(InputBytes::new(
-                bytes[index..].to_vec(),
-            )));
-            break;
+            match classify_escape_from(bytes, index, &mut events) {
+                Some(next_index) => {
+                    index = next_index;
+                    continue;
+                }
+                None => break,
+            }
         }
 
         if let Some(control) = ControlInput::from_byte(byte) {
@@ -181,6 +218,28 @@ fn classify_events(bytes: &[u8]) -> Vec<InputEvent> {
         index = classify_utf8_from(bytes, index, &mut events);
     }
     events
+}
+
+fn classify_escape_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> Option<usize> {
+    let remaining = &bytes[index..];
+    if remaining.len() < 3 {
+        events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
+        return None;
+    }
+
+    let key = match remaining[..3] {
+        [ESCAPE, b'[', b'A'] => KeyInput::Up,
+        [ESCAPE, b'[', b'B'] => KeyInput::Down,
+        [ESCAPE, b'[', b'C'] => KeyInput::Right,
+        [ESCAPE, b'[', b'D'] => KeyInput::Left,
+        _ => {
+            events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
+            return None;
+        }
+    };
+
+    events.push(InputEvent::Key(key));
+    Some(index + 3)
 }
 
 fn classify_utf8_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> usize {

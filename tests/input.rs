@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use qwertty::{InputBytes, Terminal, TerminalSession};
+use qwertty::{ControlInput, InputBytes, InputEvent, Terminal, TerminalSession};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
 #[test]
@@ -18,6 +18,68 @@ fn input_bytes_preserve_raw_terminal_bytes() {
     assert_eq!(input.len(), 5);
     assert!(!input.is_empty());
     assert_eq!(input.into_bytes(), b"A\x1b[A\x03");
+}
+
+#[test]
+fn input_bytes_classify_single_byte_text_and_controls() {
+    let input = InputBytes::new(b"A \t\r\x03\x7f".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![
+            InputEvent::Text('A'),
+            InputEvent::Text(' '),
+            InputEvent::Control(ControlInput::Tab),
+            InputEvent::Control(ControlInput::CarriageReturn),
+            InputEvent::Control(ControlInput::Other(0x03)),
+            InputEvent::Control(ControlInput::Delete),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_escape_prefixed_input_as_undecoded() {
+    let input = InputBytes::new(b"A\x1b[A".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![
+            InputEvent::Text('A'),
+            InputEvent::Undecoded(InputBytes::new(b"\x1b[A".to_vec())),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_non_ascii_input_as_undecoded() {
+    let input = InputBytes::new("é".as_bytes().to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![InputEvent::Undecoded(InputBytes::new(
+            "é".as_bytes().to_vec()
+        ))]
+    );
+}
+
+#[test]
+fn control_input_round_trips_named_bytes() {
+    assert_eq!(ControlInput::from_byte(0x00), Some(ControlInput::Null));
+    assert_eq!(ControlInput::from_byte(0x08), Some(ControlInput::Backspace));
+    assert_eq!(ControlInput::from_byte(0x09), Some(ControlInput::Tab));
+    assert_eq!(ControlInput::from_byte(0x0a), Some(ControlInput::LineFeed));
+    assert_eq!(
+        ControlInput::from_byte(0x0d),
+        Some(ControlInput::CarriageReturn)
+    );
+    assert_eq!(ControlInput::from_byte(0x1b), Some(ControlInput::Escape));
+    assert_eq!(ControlInput::from_byte(0x7f), Some(ControlInput::Delete));
+    assert_eq!(
+        ControlInput::from_byte(0x03),
+        Some(ControlInput::Other(0x03))
+    );
+    assert_eq!(ControlInput::from_byte(b'A'), None);
+    assert_eq!(ControlInput::Other(0x03).as_byte(), 0x03);
 }
 
 #[test]

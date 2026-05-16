@@ -1,8 +1,9 @@
 # Terminal Input Reference
 
 `InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
-session before qwertty has parsed those bytes into keys, text, terminal events, query responses, or
-protocol-specific messages.
+session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
+printable single-byte ASCII text, ASCII control bytes, and bytes qwertty intentionally leaves
+undecoded.
 
 ## Runtime Boundary
 
@@ -56,12 +57,51 @@ In byte form:
 
 `InputBytes::as_bytes` returns that byte sequence exactly as read.
 
+## Basic Events
+
+`InputBytes::events` classifies the small subset qwertty can name honestly today:
+
+```rust
+use qwertty::{ControlInput, InputBytes, InputEvent};
+
+let input = InputBytes::new(b"A\r\x03".to_vec());
+
+assert_eq!(
+    input.events(),
+    vec![
+        InputEvent::Text('A'),
+        InputEvent::Control(ControlInput::CarriageReturn),
+        InputEvent::Control(ControlInput::Other(0x03)),
+    ]
+);
+```
+
+The classified text set is printable single-byte ASCII, including space. Non-ASCII bytes are not
+decoded into Unicode text yet.
+
+The classified control set is ASCII C0 controls and Delete. Common controls have named
+`ControlInput` variants such as `Tab`, `LineFeed`, `CarriageReturn`, `Escape`, and `Delete`. Less
+common controls remain available as `ControlInput::Other(byte)`.
+
+Escape is classified as `ControlInput::Escape` only when it appears by itself. Escape-prefixed
+input remains undecoded:
+
+```rust
+use qwertty::{InputBytes, InputEvent};
+
+let input = InputBytes::new(b"\x1b[A".to_vec());
+
+assert_eq!(
+    input.events(),
+    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[A".to_vec()))]
+);
+```
+
 ## What Remains Undecoded
 
-The first input boundary does not classify or interpret:
+The basic event layer does not classify or interpret:
 
 - UTF-8 text;
-- control bytes such as `Ctrl-C`;
 - Escape-prefixed key sequences;
 - Control Sequence Introducer messages;
 - terminal query responses;
@@ -69,8 +109,8 @@ The first input boundary does not classify or interpret:
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 
 Those behaviors belong to later parser, query-routing, and policy slices. Until those layers exist,
-callers that need interpretation should treat `InputBytes` as raw terminal data and apply their own
-temporary parser at the application boundary.
+callers that need richer interpretation should handle `InputEvent::Undecoded` at the application
+boundary.
 
 ## Cleanup
 

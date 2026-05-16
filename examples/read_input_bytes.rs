@@ -9,10 +9,15 @@ fn main() -> qwertty::Result<()> {
 
     let mut buffer = [0; 32];
     let input = session.read_input(&mut buffer)?;
+    let events = input.events();
 
     session
         .command(commands::screen::clear())?
-        .text(format!("read {} byte(s)\r\n", input.len()))?
+        .text(format!(
+            "read {} byte(s), classified {} event(s)\r\n",
+            input.len(),
+            events.len()
+        ))?
         .flush()?;
 
     session.leave()

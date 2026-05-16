@@ -13,11 +13,11 @@ qwertty has an encode-only command foundation, a Unix terminal device layer, a s
 session lifecycle, raw terminal input bytes, basic input events, and a small stateful input decoder.
 It can build terminal output bytes, open the current terminal, manage raw mode, query terminal
 size, write ordered session output, read input bytes, classify simple UTF-8 text/control/key input
-across chunks, preserve complete CSI input syntax, parse and match cursor position reports, flush
-explicitly, and leave with reported cleanup errors. With the optional `tokio` feature on Unix, it
-also exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events,
-explicit cleanup, and a live cursor position query. It does not include a general terminal query
-router yet.
+across chunks, preserve complete CSI input syntax, parse and match cursor position reports, parse
+terminal status reports, flush explicitly, and leave with reported cleanup errors. With the optional
+`tokio` feature on Unix, it also exposes a Tokio-backed session owner for runtime-backed reads,
+writes, decoded input events, explicit cleanup, and a live cursor position query. It does not
+include a general terminal query router yet.
 
 ## Small Example
 

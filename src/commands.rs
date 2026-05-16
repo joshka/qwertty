@@ -23,3 +23,4 @@
 
 pub mod cursor;
 pub mod screen;
+pub mod terminal;

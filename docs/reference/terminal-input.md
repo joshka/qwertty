@@ -258,6 +258,39 @@ assert_eq!(
 assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
 ```
 
+## Terminal Status Reports
+
+`TerminalStatusReport` parses ECMA-48 Device Status Report terminal status replies. Terminals
+commonly answer a terminal status query with `CSI 0 n` for ready or `CSI 3 n` for malfunction:
+
+```rust
+use qwertty::{CsiInput, TerminalStatus, TerminalStatusReport};
+
+let ready = CsiInput::from_bytes(b"\x1b[0n").unwrap();
+let report = TerminalStatusReport::from_csi(&ready).unwrap();
+
+assert_eq!(report.status(), TerminalStatus::Ready);
+
+let malfunction = CsiInput::from_bytes(b"\x1b[3n").unwrap();
+let report = TerminalStatusReport::from_csi(&malfunction).unwrap();
+
+assert_eq!(report.status(), TerminalStatus::Malfunction);
+```
+
+Malformed reports, private reports, reports with intermediate bytes, and unsupported status codes
+do not produce a terminal status report:
+
+```rust
+use qwertty::{CsiInput, TerminalStatusReport};
+
+let csi = CsiInput::from_bytes(b"\x1b[?0n").unwrap();
+
+assert_eq!(TerminalStatusReport::from_csi(&csi), None);
+```
+
+This parser does not prove which query caused the report. qwertty does not yet expose a live Tokio
+terminal status query helper.
+
 ## Query Routing
 
 The input layer owns byte-to-event decoding and typed response matching. It does not own live query
@@ -280,8 +313,9 @@ The basic event layer does not classify or interpret:
 
 - incomplete or invalid UTF-8;
 - unsupported or incomplete Escape-prefixed sequences;
-- terminal query responses other than cursor position reports;
-- interpreted Control Sequence Introducer meanings other than cursor position reports;
+- terminal query responses other than cursor position and terminal status reports;
+- interpreted Control Sequence Introducer meanings other than cursor position and terminal status
+  reports;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 

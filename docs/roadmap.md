@@ -13,8 +13,9 @@ The project grows in reviewable slices.
 - UTF-8 input text decoding is on `main`.
 - Basic Escape input parsing is on `main`.
 - Stateful input decoding is on `main`.
-- CSI input sequence values are the current implementation slice:
-  [Add CSI input sequence values](https://github.com/joshka/qwertty/issues/37).
+- CSI input sequence values are on `main`.
+- Cursor position query report parsing is the current implementation slice:
+  [Add cursor position query report parsing](https://github.com/joshka/qwertty/issues/41).
 
 ## Slices
 

@@ -7,8 +7,9 @@ The project grows in reviewable slices.
 - Project standards and scaffold are on `main`.
 - The minimal encode-only library is on `main`.
 - The terminal device layer is on `main`.
-- Session lifecycle is the current implementation slice:
-  [Add terminal session lifecycle](https://github.com/joshka/qwertty/issues/13).
+- Session lifecycle is on `main`.
+- Input byte events is the current implementation slice:
+  [Add terminal input byte events](https://github.com/joshka/qwertty/issues/17).
 
 ## Slices
 

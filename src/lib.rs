@@ -1,14 +1,16 @@
 //! Encode terminal output without opening a terminal.
 //!
-//! qwertty is growing in small slices. The current public surface is encode-only: it builds the
-//! bytes a terminal would receive, but it does not open a terminal, switch raw mode, read input, or
-//! own session cleanup yet.
+//! qwertty is growing in small slices. The current public surface can build the bytes a terminal
+//! would receive and, on Unix, open a terminal device for explicit byte output and raw-mode
+//! management. It does not own async input, query routing, or session cleanup yet.
 //!
 //! The main types are:
 //!
 //! - [`Command`], a small envelope for encoded terminal command bytes.
 //! - [`CommandBuffer`], an ordered byte buffer for commands, raw bytes, and text.
 //! - [`ProtocolPosition`], a one-based terminal protocol coordinate.
+//! - [`Terminal`], a low-level terminal device owner.
+//! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - [`commands`], user-intent helpers that return [`Command`].
 //!
 //! # Example
@@ -34,5 +36,7 @@ mod command;
 pub mod commands;
 pub mod docs;
 mod escape;
+mod terminal;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
+pub use terminal::{Error, Result, Terminal, TerminalSize};

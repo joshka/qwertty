@@ -9,8 +9,9 @@ queries, and capability policy.
 
 ## Status
 
-qwertty has an encode-only command foundation. It can build terminal output bytes, but it does not
-open a terminal, manage raw mode, read input, or own a terminal session yet.
+qwertty has an encode-only command foundation and a Unix terminal device layer. It can build
+terminal output bytes, open the current terminal, manage raw mode, query terminal size, and write
+bytes. It does not read input, route terminal queries, or own a terminal session yet.
 
 ## Small Example
 

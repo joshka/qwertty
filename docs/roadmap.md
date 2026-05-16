@@ -2,6 +2,16 @@
 
 The project grows in reviewable slices.
 
+## Status
+
+- Project standards and scaffold are on `main`.
+- The minimal encode-only library is on `main`.
+- The terminal device layer is the current implementation slice:
+  [Add terminal device layer](https://github.com/joshka/qwertty/issues/3).
+- Session lifecycle is the next planned implementation slice.
+
+## Slices
+
 1. Project standards and scaffold.
 1. Minimal encode-only library.
 1. Terminal device layer.

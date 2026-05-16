@@ -58,6 +58,11 @@ pub struct TokioTerminalSession {
     original_mode: Termios,
     path: PathBuf,
     decoder: InputDecoder,
+    query_routing: QueryRouting,
+}
+
+#[derive(Debug, Default)]
+struct QueryRouting {
     events: VecDeque<InputEvent>,
 }
 
@@ -116,7 +121,7 @@ impl TokioTerminalSession {
             original_mode,
             path,
             decoder: InputDecoder::new(),
-            events: VecDeque::new(),
+            query_routing: QueryRouting::default(),
         })
     }
 
@@ -245,7 +250,7 @@ impl TokioTerminalSession {
     /// another event is available.
     pub async fn next_event(&mut self) -> terminal::Result<InputEvent> {
         loop {
-            if let Some(event) = self.events.pop_front() {
+            if let Some(event) = self.query_routing.next_event() {
                 return Ok(event);
             }
 
@@ -258,7 +263,7 @@ impl TokioTerminalSession {
                 )));
             }
 
-            self.events.extend(self.decoder.decode(input));
+            self.query_routing.push_events(self.decoder.decode(input));
         }
     }
 
@@ -309,7 +314,7 @@ impl TokioTerminalSession {
         self.flush().await?;
 
         let deadline = Instant::now() + timeout;
-        if let Some(report) = self.match_queued_cursor_position_report() {
+        if let Some(report) = self.query_routing.match_cursor_position_report() {
             return Ok(report);
         }
 
@@ -334,8 +339,7 @@ impl TokioTerminalSession {
             }
 
             let matched = CursorPositionReport::match_events(self.decoder.decode(input));
-            let (report, remaining) = matched.into_parts();
-            self.push_back_events(remaining);
+            let report = self.query_routing.push_cursor_position_match(matched);
 
             if let Some(report) = report {
                 return Ok(report);
@@ -394,8 +398,18 @@ impl TokioTerminalSession {
     fn set_cooked_mode(&self) -> terminal::Result<()> {
         set_cooked_mode(self.file(), &self.original_mode)
     }
+}
 
-    fn match_queued_cursor_position_report(&mut self) -> Option<CursorPositionReport> {
+impl QueryRouting {
+    fn next_event(&mut self) -> Option<InputEvent> {
+        self.events.pop_front()
+    }
+
+    fn push_events(&mut self, events: Vec<InputEvent>) {
+        self.events.extend(events);
+    }
+
+    fn match_cursor_position_report(&mut self) -> Option<CursorPositionReport> {
         if self.events.is_empty() {
             return None;
         }
@@ -407,14 +421,19 @@ impl TokioTerminalSession {
         report
     }
 
+    fn push_cursor_position_match(
+        &mut self,
+        matched: crate::CursorPositionReportMatch,
+    ) -> Option<CursorPositionReport> {
+        let (report, remaining) = matched.into_parts();
+        self.push_events(remaining);
+        report
+    }
+
     fn push_front_events(&mut self, events: Vec<InputEvent>) {
         for event in events.into_iter().rev() {
             self.events.push_front(event);
         }
-    }
-
-    fn push_back_events(&mut self, events: Vec<InputEvent>) {
-        self.events.extend(events);
     }
 }
 

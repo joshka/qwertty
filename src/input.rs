@@ -7,6 +7,8 @@
 //! Control Sequence Introducer input across chunks so callers can separate simple input from bytes
 //! that still need later parser or policy layers.
 
+use crate::ProtocolPosition;
+
 const ESCAPE: u8 = 0x1b;
 const DELETE: u8 = 0x7f;
 
@@ -208,6 +210,77 @@ impl CsiInput {
     #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
+    }
+}
+
+/// A parsed terminal cursor position report.
+///
+/// Cursor position reports are commonly sent by a terminal in response to a `CSI 6 n` cursor
+/// position query. The report shape qwertty recognizes is `CSI row ; column R`, where row and
+/// column are one-based decimal protocol coordinates.
+///
+/// This value does not route query responses or prove which request caused the report. It only
+/// interprets one complete [`CsiInput`] value.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::{CsiInput, CursorPositionReport, ProtocolPosition};
+///
+/// let csi = CsiInput::from_bytes(b"\x1b[12;34R").expect("complete CSI input");
+/// let report = CursorPositionReport::from_csi(&csi).expect("cursor position report");
+///
+/// assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CursorPositionReport {
+    position: ProtocolPosition,
+}
+
+impl CursorPositionReport {
+    /// Creates a cursor position report value.
+    #[must_use]
+    pub const fn new(position: ProtocolPosition) -> Self {
+        Self { position }
+    }
+
+    /// Parses a cursor position report from a complete CSI input value.
+    ///
+    /// Returns `None` when the CSI value is not exactly `CSI row ; column R`, when either field is
+    /// missing, when either field is not decimal, when either coordinate is zero, or when either
+    /// coordinate does not fit in `u16`.
+    #[must_use]
+    pub fn from_csi(csi: &CsiInput) -> Option<Self> {
+        if csi.final_byte() != b'R' || !csi.intermediate_bytes().is_empty() {
+            return None;
+        }
+
+        let mut fields = csi.parameter_bytes().split(|&byte| byte == b';');
+        let row = parse_one_based_u16(fields.next()?)?;
+        let column = parse_one_based_u16(fields.next()?)?;
+        if fields.next().is_some() {
+            return None;
+        }
+
+        Some(Self::new(ProtocolPosition::new(row, column)))
+    }
+
+    /// Returns the reported one-based terminal protocol position.
+    #[must_use]
+    pub const fn position(self) -> ProtocolPosition {
+        self.position
+    }
+
+    /// Returns the reported one-based row.
+    #[must_use]
+    pub const fn row(self) -> u16 {
+        self.position.row()
+    }
+
+    /// Returns the reported one-based column.
+    #[must_use]
+    pub const fn column(self) -> u16 {
+        self.position.column()
     }
 }
 
@@ -627,6 +700,24 @@ fn is_csi_intermediate_byte(byte: u8) -> bool {
 
 fn is_csi_final_byte(byte: u8) -> bool {
     matches!(byte, 0x40..=0x7e)
+}
+
+fn parse_one_based_u16(bytes: &[u8]) -> Option<u16> {
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut value: u16 = 0;
+    for &byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+
+        let digit = u16::from(byte - b'0');
+        value = value.checked_mul(10)?.checked_add(digit)?;
+    }
+
+    (value != 0).then_some(value)
 }
 
 fn classify_utf8_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> usize {

@@ -199,8 +199,39 @@ assert_eq!(csi.intermediate_bytes(), b"");
 assert_eq!(csi.final_byte(), b'n');
 ```
 
-This is syntax, not policy. qwertty does not yet decide whether a CSI value is a cursor position
-report, device status report, keyboard enhancement response, mouse event, or vendor extension.
+Most CSI input is syntax, not policy. qwertty does not yet decide whether a generic CSI value is a
+device status report, keyboard enhancement response, mouse event, or vendor extension.
+
+## Cursor Position Reports
+
+`CursorPositionReport` parses the first interpreted query-shaped CSI input. Terminals commonly
+answer a cursor position query with `CSI row ; column R`, using one-based terminal protocol
+coordinates:
+
+```rust
+use qwertty::{CsiInput, CursorPositionReport, ProtocolPosition};
+
+let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
+let report = CursorPositionReport::from_csi(&csi).unwrap();
+
+assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+assert_eq!(report.row(), 12);
+assert_eq!(report.column(), 34);
+```
+
+Malformed reports, unrelated CSI input, private reports, and reports with intermediate bytes do not
+produce a cursor position report:
+
+```rust
+use qwertty::{CsiInput, CursorPositionReport};
+
+let csi = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
+
+assert_eq!(CursorPositionReport::from_csi(&csi), None);
+```
+
+This parser does not prove which query caused the report. Request/response routing, timeouts,
+async event delivery, and unrelated input preservation belong to later query-routing work.
 
 ## What Remains Undecoded
 
@@ -209,7 +240,7 @@ The basic event layer does not classify or interpret:
 - incomplete or invalid UTF-8;
 - unsupported or incomplete Escape-prefixed sequences;
 - terminal query responses;
-- interpreted Control Sequence Introducer meanings;
+- interpreted Control Sequence Introducer meanings other than cursor position reports;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 

@@ -52,6 +52,30 @@ pub fn move_to(position: ProtocolPosition) -> Command {
     escape::csi(format!("{};{}", position.row(), position.column()), 'H')
 }
 
+/// Requests the current cursor position.
+///
+/// This encodes the ECMA-48 Device Status Report request `CSI 6 n`, emitted as `b"\x1b[6n"`.
+/// Terminals commonly answer with a cursor position report in the form `CSI row ; column R`.
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a
+/// response, route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::cursor;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(cursor::request_position());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[6n");
+/// ```
+#[must_use]
+pub fn request_position() -> Command {
+    escape::csi("6", 'n')
+}
+
 /// Hides the cursor.
 ///
 /// This encodes the commonly supported xterm/DEC private cursor-visibility mode reset:

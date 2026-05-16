@@ -14,8 +14,9 @@ The project grows in reviewable slices.
 - Basic Escape input parsing is on `main`.
 - Stateful input decoding is on `main`.
 - CSI input sequence values are on `main`.
-- Cursor position query report parsing is the current implementation slice:
-  [Add cursor position query report parsing](https://github.com/joshka/qwertty/issues/41).
+- Cursor position query report parsing is on `main`.
+- Cursor position query response matching is the current implementation slice:
+  [Add cursor position query response matching](https://github.com/joshka/qwertty/issues/45).
 
 ## Slices
 

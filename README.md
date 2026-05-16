@@ -10,10 +10,10 @@ queries, and capability policy.
 ## Status
 
 qwertty has an encode-only command foundation, a Unix terminal device layer, a small terminal
-session lifecycle, and raw terminal input bytes. It can build terminal output bytes, open the
-current terminal, manage raw mode, query terminal size, write ordered session output, read
-undecoded input bytes, flush explicitly, and leave with reported cleanup errors. It does not parse
-input events or route terminal queries yet.
+session lifecycle, raw terminal input bytes, and basic input events. It can build terminal output
+bytes, open the current terminal, manage raw mode, query terminal size, write ordered session
+output, read input bytes, classify simple text/control input, flush explicitly, and leave with
+reported cleanup errors. It does not parse terminal query responses yet.
 
 ## Small Example
 

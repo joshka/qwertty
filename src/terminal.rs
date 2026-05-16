@@ -5,6 +5,7 @@
 //! size, and writes bytes. It does not parse input, route terminal queries, enter the alternate
 //! screen, or clean up emulator protocol state.
 
+use std::time::Duration;
 use std::{error, fmt, io};
 
 #[cfg(unix)]
@@ -84,6 +85,13 @@ pub enum Error {
         /// Source I/O error.
         source: io::Error,
     },
+    /// A live terminal query did not receive its expected response before the timeout elapsed.
+    QueryTimeout {
+        /// Query operation that timed out.
+        operation: &'static str,
+        /// Timeout used for the query.
+        timeout: Duration,
+    },
     /// The current platform does not support the requested operation yet.
     Unsupported {
         /// Operation that was requested.
@@ -122,6 +130,11 @@ impl Error {
         Self::ReadTerminal { source }
     }
 
+    #[cfg(all(feature = "tokio", unix))]
+    pub(crate) const fn query_timeout(operation: &'static str, timeout: Duration) -> Self {
+        Self::QueryTimeout { operation, timeout }
+    }
+
     #[cfg(not(unix))]
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
@@ -140,6 +153,9 @@ impl fmt::Display for Error {
             Self::GetTerminalSize { .. } => f.write_str("failed to get terminal size"),
             Self::WriteTerminal { .. } => f.write_str("failed to write terminal output"),
             Self::ReadTerminal { .. } => f.write_str("failed to read terminal input"),
+            Self::QueryTimeout { operation, timeout } => {
+                write!(f, "{operation} timed out after {timeout:?}")
+            }
             Self::Unsupported {
                 operation,
                 platform,
@@ -159,7 +175,7 @@ impl error::Error for Error {
             | Self::GetTerminalSize { source }
             | Self::WriteTerminal { source }
             | Self::ReadTerminal { source } => Some(source),
-            Self::Unsupported { .. } => None,
+            Self::QueryTimeout { .. } | Self::Unsupported { .. } => None,
         }
     }
 }

@@ -9,12 +9,17 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::termios::{OptionalActions, Termios, tcgetattr, tcgetwinsize, tcsetattr};
 use tokio::io::unix::AsyncFd;
+use tokio::time::{Instant, timeout_at};
 
-use crate::{Command, InputBytes, InputDecoder, InputEvent, TerminalSize, terminal};
+use crate::{
+    Command, CursorPositionReport, InputBytes, InputDecoder, InputEvent, TerminalSize, commands,
+    terminal,
+};
 
 const DEV_TTY: &str = "/dev/tty";
 const READ_BUFFER_LEN: usize = 1024;
@@ -257,6 +262,87 @@ impl TokioTerminalSession {
         }
     }
 
+    /// Requests and reads the current terminal cursor position.
+    ///
+    /// This method emits the Device Status Report request `CSI 6 n`, flushes output, and reads
+    /// decoded input events until it sees a `CSI row ; column R` cursor position report. Events
+    /// read before the report that are not the report remain queued in their original order for
+    /// later [`TokioTerminalSession::next_event`] calls.
+    ///
+    /// `timeout` bounds the whole request/response operation. If the timeout elapses,
+    /// [`terminal::Error::QueryTimeout`] is returned. Canceling the future while it is waiting for
+    /// terminal input leaves the session usable, and unrelated decoded events already seen by the
+    /// query remain queued for later calls.
+    ///
+    /// This is a single-query convenience method. It does not implement a general query registry,
+    /// concurrent query routing, capability probing, or terminal feature detection.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use qwertty::TokioTerminalSession;
+    ///
+    /// # async fn run() -> qwertty::Result<()> {
+    /// let mut session = TokioTerminalSession::open()?;
+    /// let report = session
+    ///     .request_cursor_position(Duration::from_secs(1))
+    ///     .await?;
+    ///
+    /// assert!(report.row() > 0);
+    /// assert!(report.column() > 0);
+    ///
+    /// session.leave().await
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the timeout
+    /// elapses before a cursor position report is received.
+    pub async fn request_cursor_position(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<CursorPositionReport> {
+        self.command(commands::cursor::request_position()).await?;
+        self.flush().await?;
+
+        let deadline = Instant::now() + timeout;
+        if let Some(report) = self.match_queued_cursor_position_report() {
+            return Ok(report);
+        }
+
+        loop {
+            let mut buffer = [0; READ_BUFFER_LEN];
+            let input = match timeout_at(deadline, self.read_input(&mut buffer)).await {
+                Ok(Ok(input)) => input,
+                Ok(Err(err)) => return Err(err),
+                Err(_elapsed) => {
+                    return Err(terminal::Error::query_timeout(
+                        "cursor position query",
+                        timeout,
+                    ));
+                }
+            };
+
+            if input.is_empty() {
+                return Err(terminal::Error::read_terminal(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "terminal input closed before a cursor position report was available",
+                )));
+            }
+
+            let matched = CursorPositionReport::match_events(self.decoder.decode(input));
+            let (report, remaining) = matched.into_parts();
+            self.push_back_events(remaining);
+
+            if let Some(report) = report {
+                return Ok(report);
+            }
+        }
+    }
+
     /// Flushes buffered terminal output through Tokio readiness.
     ///
     /// Call this when the preceding command, byte, and text writes must be visible before later
@@ -307,6 +393,28 @@ impl TokioTerminalSession {
 
     fn set_cooked_mode(&self) -> terminal::Result<()> {
         set_cooked_mode(self.file(), &self.original_mode)
+    }
+
+    fn match_queued_cursor_position_report(&mut self) -> Option<CursorPositionReport> {
+        if self.events.is_empty() {
+            return None;
+        }
+
+        let events = self.events.drain(..);
+        let matched = CursorPositionReport::match_events(events);
+        let (report, remaining) = matched.into_parts();
+        self.push_front_events(remaining);
+        report
+    }
+
+    fn push_front_events(&mut self, events: Vec<InputEvent>) {
+        for event in events.into_iter().rev() {
+            self.events.push_front(event);
+        }
+    }
+
+    fn push_back_events(&mut self, events: Vec<InputEvent>) {
+        self.events.extend(events);
     }
 }
 

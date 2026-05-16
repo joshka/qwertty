@@ -125,8 +125,49 @@ session.leave().await
 
 If a task waiting in `next_event` is canceled before another terminal read completes, the session
 remains usable. Events already decoded from earlier reads stay queued for later calls. This
-boundary does not add live query routing, query timeouts, alternate screen cleanup, mouse mode,
-paste mode, graphics, clipboard, or vendor protocol policy.
+boundary does not add alternate screen cleanup, mouse mode, paste mode, graphics, clipboard, or
+vendor protocol policy.
+
+## Live Cursor Position Query
+
+`TokioTerminalSession::request_cursor_position` is the first live query helper. It writes the
+cursor position Device Status Report request, flushes output, and reads decoded events until it
+matches `CSI row ; column R`:
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::TokioTerminalSession;
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+let report = session.request_cursor_position(Duration::from_secs(1)).await?;
+
+assert!(report.row() > 0);
+assert!(report.column() > 0);
+
+session.leave().await
+# }
+```
+
+The emitted request bytes are:
+
+```text
+\x1b[6n
+```
+
+Terminals commonly answer with:
+
+```text
+\x1b[row;columnR
+```
+
+The timeout bounds the whole request/response operation. When the timeout elapses, the method
+returns `Error::QueryTimeout`. Unrelated decoded events that arrive before the report remain queued
+for later `next_event` calls.
+
+This is not a general query router. qwertty does not yet support multiple simultaneous live
+queries, capability probing, or query registration.
 
 ## Platform Support
 

@@ -8,8 +8,9 @@ The project grows in reviewable slices.
 - The minimal encode-only library is on `main`.
 - The terminal device layer is on `main`.
 - Session lifecycle is on `main`.
-- Input byte events is the current implementation slice:
-  [Add terminal input byte events](https://github.com/joshka/qwertty/issues/17).
+- Input byte events is on `main`.
+- Basic input events is the current implementation slice:
+  [Add basic terminal input events](https://github.com/joshka/qwertty/issues/21).
 
 ## Slices
 

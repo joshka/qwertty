@@ -15,8 +15,9 @@ The project grows in reviewable slices.
 - Stateful input decoding is on `main`.
 - CSI input sequence values are on `main`.
 - Cursor position query report parsing is on `main`.
-- Cursor position query response matching is the current implementation slice:
-  [Add cursor position query response matching](https://github.com/joshka/qwertty/issues/45).
+- Cursor position query response matching is on `main`.
+- Async runtime boundary is the current decision slice:
+  [Decide async runtime boundary](https://github.com/joshka/qwertty/issues/49).
 
 ## Slices
 

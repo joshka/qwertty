@@ -17,8 +17,9 @@ The project grows in reviewable slices.
 - Cursor position query report parsing is on `main`.
 - Cursor position query response matching is on `main`.
 - Async runtime boundary decision is on `main`.
-- Feature-gated Tokio terminal session owner is the current implementation slice:
-  [Add feature-gated Tokio terminal session owner](https://github.com/joshka/qwertty/issues/52).
+- Feature-gated Tokio terminal session owner is on `main`.
+- Tokio cursor position query routing is the current implementation slice:
+  [Add Tokio cursor position query routing](https://github.com/joshka/qwertty/issues/55).
 
 ## Slices
 

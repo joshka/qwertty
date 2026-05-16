@@ -11,8 +11,9 @@ The project grows in reviewable slices.
 - Input byte events is on `main`.
 - Basic input events is on `main`.
 - UTF-8 input text decoding is on `main`.
-- Basic Escape input parsing is the current implementation slice:
-  [Add basic Escape input parsing](https://github.com/joshka/qwertty/issues/29).
+- Basic Escape input parsing is on `main`.
+- Stateful input decoding is the current implementation slice:
+  [Add stateful input decoder](https://github.com/joshka/qwertty/issues/33).
 
 ## Slices
 

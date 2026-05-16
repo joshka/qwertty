@@ -9,8 +9,9 @@ The project grows in reviewable slices.
 - The terminal device layer is on `main`.
 - Session lifecycle is on `main`.
 - Input byte events is on `main`.
-- Basic input events is the current implementation slice:
-  [Add basic terminal input events](https://github.com/joshka/qwertty/issues/21).
+- Basic input events is on `main`.
+- UTF-8 input text decoding is the current implementation slice:
+  [Add UTF-8 input text decoding](https://github.com/joshka/qwertty/issues/25).
 
 ## Slices
 

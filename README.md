@@ -16,7 +16,8 @@ size, write ordered session output, read input bytes, classify simple UTF-8 text
 across chunks, preserve complete CSI input syntax, parse and match cursor position reports, flush
 explicitly, and leave with reported cleanup errors. With the optional `tokio` feature on Unix, it
 also exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events,
-and explicit cleanup. It does not route live terminal query responses yet.
+explicit cleanup, and a live cursor position query. It does not include a general terminal query
+router yet.
 
 ## Small Example
 
@@ -62,6 +63,11 @@ async fn run() -> qwertty::Result<()> {
         .command(commands::cursor::move_to(ProtocolPosition::ORIGIN))
         .await?;
     session.text("Ready\r\n").await?;
+    let position = session
+        .request_cursor_position(std::time::Duration::from_secs(1))
+        .await?;
+    session.text(format!("cursor: {:?}\r\n", position.position()))
+        .await?;
     session.flush().await?;
     session.leave().await
 }

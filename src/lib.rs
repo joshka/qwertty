@@ -6,7 +6,7 @@
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
 //! position report matching. With the optional `tokio` feature on Unix, it also exposes a
 //! Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and explicit
-//! cleanup. It does not route live terminal query responses yet.
+//! cleanup, including a live cursor position query.
 //!
 //! The main types are:
 //!

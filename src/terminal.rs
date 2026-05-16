@@ -79,6 +79,11 @@ pub enum Error {
         /// Source I/O error.
         source: io::Error,
     },
+    /// Reading terminal input failed.
+    ReadTerminal {
+        /// Source I/O error.
+        source: io::Error,
+    },
     /// The current platform does not support the requested operation yet.
     Unsupported {
         /// Operation that was requested.
@@ -113,6 +118,10 @@ impl Error {
         Self::WriteTerminal { source }
     }
 
+    pub(crate) fn read_terminal(source: io::Error) -> Self {
+        Self::ReadTerminal { source }
+    }
+
     #[cfg(not(unix))]
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
@@ -130,6 +139,7 @@ impl fmt::Display for Error {
             Self::SetTerminalMode { .. } => f.write_str("failed to set terminal mode"),
             Self::GetTerminalSize { .. } => f.write_str("failed to get terminal size"),
             Self::WriteTerminal { .. } => f.write_str("failed to write terminal output"),
+            Self::ReadTerminal { .. } => f.write_str("failed to read terminal input"),
             Self::Unsupported {
                 operation,
                 platform,
@@ -147,7 +157,8 @@ impl error::Error for Error {
             | Self::GetTerminalMode { source }
             | Self::SetTerminalMode { source }
             | Self::GetTerminalSize { source }
-            | Self::WriteTerminal { source } => Some(source),
+            | Self::WriteTerminal { source }
+            | Self::ReadTerminal { source } => Some(source),
             Self::Unsupported { .. } => None,
         }
     }

@@ -265,6 +265,31 @@ impl CursorPositionReport {
         Some(Self::new(ProtocolPosition::new(row, column)))
     }
 
+    /// Matches the first cursor position report from decoded input events.
+    ///
+    /// The returned [`CursorPositionReportMatch`] preserves every event that is not the first
+    /// matched cursor position report. This is deterministic event-level matching only; it does not
+    /// read from a terminal, prove which request caused the report, or apply timeout policy.
+    #[must_use]
+    pub fn match_events(events: impl IntoIterator<Item = InputEvent>) -> CursorPositionReportMatch {
+        let mut report = None;
+        let mut remaining = Vec::new();
+
+        for event in events {
+            if report.is_none()
+                && let InputEvent::Csi(csi) = &event
+                && let Some(parsed) = Self::from_csi(csi)
+            {
+                report = Some(parsed);
+                continue;
+            }
+
+            remaining.push(event);
+        }
+
+        CursorPositionReportMatch { report, remaining }
+    }
+
     /// Returns the reported one-based terminal protocol position.
     #[must_use]
     pub const fn position(self) -> ProtocolPosition {
@@ -281,6 +306,37 @@ impl CursorPositionReport {
     #[must_use]
     pub const fn column(self) -> u16 {
         self.position.column()
+    }
+}
+
+/// Result of matching a cursor position report from decoded input events.
+///
+/// The first matched report is separated from the remaining events. Text, controls, keys,
+/// unrelated CSI input, malformed reports, undecoded bytes, and duplicate cursor reports after the
+/// first match remain available to the caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CursorPositionReportMatch {
+    report: Option<CursorPositionReport>,
+    remaining: Vec<InputEvent>,
+}
+
+impl CursorPositionReportMatch {
+    /// Returns the matched cursor position report, if one was present.
+    #[must_use]
+    pub const fn report(&self) -> Option<CursorPositionReport> {
+        self.report
+    }
+
+    /// Returns the events that were not consumed by the match.
+    #[must_use]
+    pub fn remaining_events(&self) -> &[InputEvent] {
+        &self.remaining
+    }
+
+    /// Consumes the match result into the report and remaining events.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<CursorPositionReport>, Vec<InputEvent>) {
+        (self.report, self.remaining)
     }
 }
 

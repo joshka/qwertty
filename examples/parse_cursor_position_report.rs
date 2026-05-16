@@ -1,7 +1,7 @@
 //! Parse a cursor position report without routing terminal queries.
 
 use qwertty::commands::cursor;
-use qwertty::{CommandBuffer, CsiInput, CursorPositionReport, ProtocolPosition};
+use qwertty::{CommandBuffer, CsiInput, CursorPositionReport, InputEvent, ProtocolPosition};
 
 fn main() {
     let mut query = CommandBuffer::new();
@@ -12,4 +12,13 @@ fn main() {
     let report = CursorPositionReport::from_csi(&csi).expect("cursor position report");
 
     assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+
+    let matched =
+        CursorPositionReport::match_events(vec![InputEvent::Text('x'), InputEvent::Csi(csi)]);
+
+    assert_eq!(
+        matched.report().map(CursorPositionReport::position),
+        Some(report.position())
+    );
+    assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
 }

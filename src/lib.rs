@@ -4,7 +4,7 @@
 //! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
 //! management, a small terminal session lifecycle, raw terminal input bytes, and basic terminal
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
-//! position reports. It does not route terminal query responses yet.
+//! position report matching. It does not route live terminal query responses yet.
 //!
 //! The main types are:
 //!
@@ -17,6 +17,7 @@
 //! - [`InputBytes`], raw terminal input bytes read through a session.
 //! - [`CsiInput`], lossless syntax for complete Control Sequence Introducer input.
 //! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
+//! - [`CursorPositionReportMatch`], event-level cursor position report matching.
 //! - [`InputDecoder`], stateful classification for input split across byte chunks.
 //! - [`InputEvent`], basic classification for simple text, control, key, and undecoded input.
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
@@ -51,7 +52,8 @@ mod terminal;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use input::{
-    ControlInput, CsiInput, CursorPositionReport, InputBytes, InputDecoder, InputEvent, KeyInput,
+    ControlInput, CsiInput, CursorPositionReport, CursorPositionReportMatch, InputBytes,
+    InputDecoder, InputEvent, KeyInput,
 };
 pub use session::TerminalSession;
 pub use terminal::{Error, Result, Terminal, TerminalSize};

@@ -13,8 +13,9 @@ qwertty has an encode-only command foundation, a Unix terminal device layer, a s
 session lifecycle, raw terminal input bytes, basic input events, and a small stateful input decoder.
 It can build terminal output bytes, open the current terminal, manage raw mode, query terminal
 size, write ordered session output, read input bytes, classify simple UTF-8 text/control/key input
-across chunks, preserve complete CSI input syntax, parse cursor position reports, flush explicitly,
-and leave with reported cleanup errors. It does not route terminal query responses yet.
+across chunks, preserve complete CSI input syntax, parse and match cursor position reports, flush
+explicitly, and leave with reported cleanup errors. It does not route live terminal query responses
+yet.
 
 ## Small Example
 

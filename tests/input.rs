@@ -8,7 +8,8 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
 use qwertty::{
-    ControlInput, InputBytes, InputDecoder, InputEvent, KeyInput, Terminal, TerminalSession,
+    ControlInput, CsiInput, InputBytes, InputDecoder, InputEvent, KeyInput, Terminal,
+    TerminalSession,
 };
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
@@ -65,14 +66,27 @@ fn input_bytes_classify_mixed_arrow_key_text_and_controls() {
 }
 
 #[test]
-fn input_bytes_preserve_unknown_escape_prefixed_input_as_undecoded() {
+fn input_bytes_classify_complete_csi_input() {
     let input = InputBytes::new(b"A\x1b[Z".to_vec());
 
     assert_eq!(
         input.events(),
         vec![
             InputEvent::Text('A'),
-            InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec())),
+            InputEvent::Csi(CsiInput::from_bytes(b"\x1b[Z").expect("complete CSI input")),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_unsupported_non_csi_escape_input_as_undecoded() {
+    let input = InputBytes::new(b"A\x1bZ".to_vec());
+
+    assert_eq!(
+        input.events(),
+        vec![
+            InputEvent::Text('A'),
+            InputEvent::Undecoded(InputBytes::new(b"\x1bZ".to_vec())),
         ]
     );
 }
@@ -168,6 +182,48 @@ fn input_decoder_classifies_mixed_input_after_buffered_key() {
 }
 
 #[test]
+fn input_decoder_buffers_split_csi_input() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"\x1b[?"), Vec::<InputEvent>::new());
+    assert_eq!(decoder.pending_bytes(), b"\x1b[?");
+    assert_eq!(decoder.decode(b"25"), Vec::<InputEvent>::new());
+    assert_eq!(decoder.pending_bytes(), b"\x1b[?25");
+    assert_eq!(
+        decoder.decode(b"n"),
+        vec![InputEvent::Csi(
+            CsiInput::from_bytes(b"\x1b[?25n").expect("complete CSI input")
+        )]
+    );
+    assert!(decoder.pending_bytes().is_empty());
+}
+
+#[test]
+fn input_decoder_keeps_arrow_keys_as_key_events() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(
+        decoder.decode(b"\x1b[A\x1b[?25n"),
+        vec![
+            InputEvent::Key(KeyInput::Up),
+            InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").expect("complete CSI input")),
+        ]
+    );
+}
+
+#[test]
+fn input_decoder_preserves_split_unsupported_non_csi_escape_input_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"\x1b"), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.decode(b"Z"),
+        vec![InputEvent::Undecoded(InputBytes::new(b"\x1bZ".to_vec())),]
+    );
+    assert!(decoder.pending_bytes().is_empty());
+}
+
+#[test]
 fn input_decoder_preserves_split_invalid_utf8_as_undecoded() {
     let mut decoder = InputDecoder::new();
 
@@ -180,13 +236,15 @@ fn input_decoder_preserves_split_invalid_utf8_as_undecoded() {
 }
 
 #[test]
-fn input_decoder_preserves_split_unsupported_escape_input_as_undecoded() {
+fn input_decoder_preserves_invalid_csi_input_as_undecoded() {
     let mut decoder = InputDecoder::new();
 
     assert_eq!(decoder.decode(b"\x1b["), Vec::<InputEvent>::new());
     assert_eq!(
-        decoder.decode(b"Z"),
-        vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec())),]
+        decoder.decode([0xc3]),
+        vec![InputEvent::Undecoded(InputBytes::new(vec![
+            0x1b, b'[', 0xc3
+        ])),]
     );
     assert!(decoder.pending_bytes().is_empty());
 }
@@ -217,6 +275,18 @@ fn input_decoder_finish_flushes_incomplete_escape_as_undecoded() {
 }
 
 #[test]
+fn input_decoder_finish_flushes_incomplete_csi_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"\x1b[?25"), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.finish(),
+        vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[?25".to_vec()))]
+    );
+    assert!(decoder.pending_bytes().is_empty());
+}
+
+#[test]
 fn control_input_round_trips_named_bytes() {
     assert_eq!(ControlInput::from_byte(0x00), Some(ControlInput::Null));
     assert_eq!(ControlInput::from_byte(0x08), Some(ControlInput::Backspace));
@@ -242,6 +312,36 @@ fn key_input_reports_documented_bytes() {
     assert_eq!(KeyInput::Down.as_bytes(), b"\x1b[B");
     assert_eq!(KeyInput::Right.as_bytes(), b"\x1b[C");
     assert_eq!(KeyInput::Left.as_bytes(), b"\x1b[D");
+}
+
+#[test]
+fn csi_input_reports_documented_bytes() {
+    let csi = CsiInput::from_bytes(b"\x1b[?25n").expect("complete CSI input");
+
+    assert_eq!(csi.as_bytes(), b"\x1b[?25n");
+    assert_eq!(csi.parameter_bytes(), b"?25");
+    assert_eq!(csi.private_marker_bytes(), b"?");
+    assert_eq!(csi.intermediate_bytes(), b"");
+    assert_eq!(csi.final_byte(), b'n');
+    assert_eq!(csi.clone().into_bytes(), b"\x1b[?25n");
+}
+
+#[test]
+fn csi_input_reports_intermediate_bytes() {
+    let csi = CsiInput::from_bytes(b"\x1b[1$u").expect("complete CSI input");
+
+    assert_eq!(csi.parameter_bytes(), b"1");
+    assert_eq!(csi.private_marker_bytes(), b"");
+    assert_eq!(csi.intermediate_bytes(), b"$");
+    assert_eq!(csi.final_byte(), b'u');
+}
+
+#[test]
+fn csi_input_rejects_non_csi_and_incomplete_bytes() {
+    assert_eq!(CsiInput::from_bytes(b"\x1bZ"), None);
+    assert_eq!(CsiInput::from_bytes(b"\x1b["), None);
+    assert_eq!(CsiInput::from_bytes(b"\x1b[?25"), None);
+    assert_eq!(CsiInput::from_bytes(b"\x1b[?25nX"), None);
 }
 
 #[test]

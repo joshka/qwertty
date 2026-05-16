@@ -4,8 +4,8 @@
 //! not parse the full Control Sequence Introducer grammar, paste, mouse, focus, query, or vendor
 //! extension protocols yet. It can classify complete UTF-8 text, ASCII control input, and a small
 //! documented set of Escape-prefixed keys. `InputDecoder` can also buffer incomplete UTF-8 and
-//! documented Escape-prefixed keys across chunks so callers can separate simple input from bytes
-//! that still need a later parser.
+//! Control Sequence Introducer input across chunks so callers can separate simple input from bytes
+//! that still need later parser or policy layers.
 
 const ESCAPE: u8 = 0x1b;
 const DELETE: u8 = 0x7f;
@@ -13,9 +13,10 @@ const DELETE: u8 = 0x7f;
 /// A basic terminal input event.
 ///
 /// `InputEvent` is the first event classification layer above raw [`InputBytes`]. It classifies
-/// complete UTF-8 text, ASCII control bytes, and a small documented set of Escape-prefixed keys.
-/// Unsupported Escape-prefixed input, incomplete or invalid UTF-8, query responses, paste, mouse
-/// input, focus reports, and vendor protocols remain [`InputEvent::Undecoded`].
+/// complete UTF-8 text, ASCII control bytes, a small documented set of Escape-prefixed keys, and
+/// complete Control Sequence Introducer input. Unsupported Escape-prefixed input, incomplete or
+/// invalid UTF-8, query responses, paste, mouse input, focus reports, and vendor protocols remain
+/// [`InputEvent::Undecoded`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InputEvent {
@@ -25,6 +26,8 @@ pub enum InputEvent {
     Control(ControlInput),
     /// A parsed terminal key sequence.
     Key(KeyInput),
+    /// A complete uninterpreted Control Sequence Introducer input sequence.
+    Csi(CsiInput),
     /// Bytes qwertty has not classified yet.
     Undecoded(InputBytes),
 }
@@ -32,9 +35,9 @@ pub enum InputEvent {
 /// Stateful decoder for terminal input chunks.
 ///
 /// `InputDecoder` owns the small amount of state needed when a terminal read splits a UTF-8
-/// scalar value or one of qwertty's documented Escape-prefixed key sequences across byte chunks.
-/// It does not route terminal query responses, resolve Escape timing ambiguity, parse paste,
-/// mouse, focus, graphics, clipboard, keyboard enhancement, or vendor protocols.
+/// scalar value or Control Sequence Introducer input across byte chunks. It does not route
+/// terminal query responses, resolve Escape timing ambiguity, parse paste, mouse, focus, graphics,
+/// clipboard, keyboard enhancement, or vendor protocols.
 ///
 /// # Example
 ///
@@ -66,10 +69,11 @@ impl InputDecoder {
     ///
     /// Complete UTF-8 text becomes [`InputEvent::Text`]. Single ASCII control bytes become
     /// [`InputEvent::Control`]. The documented arrow-key sequences become [`InputEvent::Key`].
+    /// Other complete Control Sequence Introducer input becomes [`InputEvent::Csi`].
     ///
-    /// Incomplete UTF-8 and incomplete documented Escape-prefixed key sequences are buffered until
-    /// a later call makes them complete or unsupported. Unsupported Escape-prefixed bytes and
-    /// invalid UTF-8 are emitted as [`InputEvent::Undecoded`] without losing the original bytes.
+    /// Incomplete UTF-8 and incomplete Control Sequence Introducer input are buffered until a later
+    /// call makes them complete or unsupported. Unsupported Escape-prefixed bytes and invalid UTF-8
+    /// are emitted as [`InputEvent::Undecoded`] without losing the original bytes.
     #[must_use]
     pub fn decode(&mut self, input: impl AsRef<[u8]>) -> Vec<InputEvent> {
         let input = input.as_ref();
@@ -110,6 +114,100 @@ impl InputDecoder {
         vec![InputEvent::Undecoded(InputBytes::new(std::mem::take(
             &mut self.pending,
         )))]
+    }
+}
+
+/// A complete Control Sequence Introducer input sequence.
+///
+/// `CsiInput` preserves the original bytes and exposes the syntactic pieces qwertty can identify
+/// without assigning protocol meaning. The recognized shape is the common 7-bit CSI spelling:
+/// `ESC [`, followed by parameter bytes `0x30..=0x3f`, intermediate bytes `0x20..=0x2f`, and one
+/// final byte `0x40..=0x7e`.
+///
+/// The value does not say whether the sequence is a cursor report, device status report, keyboard
+/// enhancement response, mouse event, vendor extension, or unsupported protocol. Later parser and
+/// query-routing layers own that interpretation.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CsiInput;
+///
+/// let csi = CsiInput::from_bytes(b"\x1b[?25n").expect("complete CSI input");
+///
+/// assert_eq!(csi.as_bytes(), b"\x1b[?25n");
+/// assert_eq!(csi.parameter_bytes(), b"?25");
+/// assert_eq!(csi.private_marker_bytes(), b"?");
+/// assert_eq!(csi.intermediate_bytes(), b"");
+/// assert_eq!(csi.final_byte(), b'n');
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CsiInput {
+    bytes: Vec<u8>,
+    parameters: Vec<u8>,
+    intermediates: Vec<u8>,
+    final_byte: u8,
+}
+
+impl CsiInput {
+    /// Parses a complete 7-bit CSI input sequence.
+    ///
+    /// Returns `None` when the bytes are not exactly one complete `ESC [` CSI sequence in the
+    /// syntactic shape qwertty currently recognizes.
+    #[must_use]
+    pub fn from_bytes(bytes: impl Into<Vec<u8>>) -> Option<Self> {
+        let bytes = bytes.into();
+        match parse_csi_from(&bytes, 0) {
+            CsiParse::Complete(csi, end) if end == bytes.len() => Some(csi),
+            _ => None,
+        }
+    }
+
+    /// Returns the original CSI bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Returns all CSI parameter bytes.
+    ///
+    /// These bytes may include private marker bytes such as `?`. qwertty preserves them here and
+    /// also exposes the leading private marker run through [`CsiInput::private_marker_bytes`].
+    #[must_use]
+    pub fn parameter_bytes(&self) -> &[u8] {
+        &self.parameters
+    }
+
+    /// Returns leading private marker parameter bytes.
+    ///
+    /// ECMA-48 reserves parameter bytes `0x3c..=0x3f` for private use. Common terminal protocols
+    /// use marker bytes such as `?` before numeric parameters.
+    #[must_use]
+    pub fn private_marker_bytes(&self) -> &[u8] {
+        let marker_len = self
+            .parameters
+            .iter()
+            .take_while(|&&byte| is_private_parameter_byte(byte))
+            .count();
+        &self.parameters[..marker_len]
+    }
+
+    /// Returns CSI intermediate bytes.
+    #[must_use]
+    pub fn intermediate_bytes(&self) -> &[u8] {
+        &self.intermediates
+    }
+
+    /// Returns the CSI final byte.
+    #[must_use]
+    pub fn final_byte(&self) -> u8 {
+        self.final_byte
+    }
+
+    /// Consumes the value and returns the original CSI bytes.
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 }
 
@@ -244,8 +342,9 @@ impl InputBytes {
     ///
     /// Complete UTF-8 text becomes [`InputEvent::Text`]. Single ASCII control bytes become
     /// [`InputEvent::Control`]. The documented arrow-key sequences become [`InputEvent::Key`].
-    /// Unsupported Escape-prefixed input, incomplete or invalid UTF-8, query responses, paste,
-    /// mouse input, focus reports, and vendor protocols remain undecoded.
+    /// Other complete Control Sequence Introducer input becomes [`InputEvent::Csi`]. Unsupported
+    /// Escape-prefixed input, incomplete or invalid UTF-8, query responses, paste, mouse input,
+    /// focus reports, and vendor protocols remain undecoded.
     ///
     /// Classification is scoped to this byte value. This method does not buffer incomplete UTF-8
     /// across multiple terminal reads.
@@ -364,24 +463,14 @@ fn classify_buffered_escape_from(
         return BufferedStep::Pending;
     }
 
-    if remaining.len() < 3 {
-        events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
-        return BufferedStep::Stopped;
-    }
-
-    let key = match remaining[..3] {
-        [ESCAPE, b'[', b'A'] => KeyInput::Up,
-        [ESCAPE, b'[', b'B'] => KeyInput::Down,
-        [ESCAPE, b'[', b'C'] => KeyInput::Right,
-        [ESCAPE, b'[', b'D'] => KeyInput::Left,
-        _ => {
+    match classify_escape_sequence_from(bytes, index, events) {
+        EscapeStep::Consumed(next_index) => BufferedStep::Consumed(next_index),
+        EscapeStep::Incomplete => BufferedStep::Pending,
+        EscapeStep::Undecoded => {
             events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
-            return BufferedStep::Stopped;
+            BufferedStep::Stopped
         }
-    };
-
-    events.push(InputEvent::Key(key));
-    BufferedStep::Consumed(index + 3)
+    }
 }
 
 fn is_supported_escape_prefix(bytes: &[u8]) -> bool {
@@ -430,19 +519,114 @@ fn classify_escape_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>
         return None;
     }
 
-    let key = match remaining[..3] {
-        [ESCAPE, b'[', b'A'] => KeyInput::Up,
-        [ESCAPE, b'[', b'B'] => KeyInput::Down,
-        [ESCAPE, b'[', b'C'] => KeyInput::Right,
-        [ESCAPE, b'[', b'D'] => KeyInput::Left,
-        _ => {
+    match classify_escape_sequence_from(bytes, index, events) {
+        EscapeStep::Consumed(next_index) => Some(next_index),
+        EscapeStep::Incomplete | EscapeStep::Undecoded => {
             events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
-            return None;
+            None
         }
+    }
+}
+
+enum EscapeStep {
+    Consumed(usize),
+    Incomplete,
+    Undecoded,
+}
+
+fn classify_escape_sequence_from(
+    bytes: &[u8],
+    index: usize,
+    events: &mut Vec<InputEvent>,
+) -> EscapeStep {
+    if let Some(key) = key_input_from_bytes(&bytes[index..]) {
+        events.push(InputEvent::Key(key));
+        return EscapeStep::Consumed(index + 3);
+    }
+
+    match parse_csi_from(bytes, index) {
+        CsiParse::Complete(csi, next_index) => {
+            events.push(InputEvent::Csi(csi));
+            EscapeStep::Consumed(next_index)
+        }
+        CsiParse::Incomplete => EscapeStep::Incomplete,
+        CsiParse::Invalid => EscapeStep::Undecoded,
+    }
+}
+
+fn key_input_from_bytes(bytes: &[u8]) -> Option<KeyInput> {
+    match bytes.get(..3)? {
+        [ESCAPE, b'[', b'A'] => Some(KeyInput::Up),
+        [ESCAPE, b'[', b'B'] => Some(KeyInput::Down),
+        [ESCAPE, b'[', b'C'] => Some(KeyInput::Right),
+        [ESCAPE, b'[', b'D'] => Some(KeyInput::Left),
+        _ => None,
+    }
+}
+
+enum CsiParse {
+    Complete(CsiInput, usize),
+    Incomplete,
+    Invalid,
+}
+
+fn parse_csi_from(bytes: &[u8], index: usize) -> CsiParse {
+    let start = index;
+    if bytes.get(start..start + 2) != Some(b"\x1b[") {
+        return CsiParse::Invalid;
+    }
+
+    let mut index = start + 2;
+    let parameter_start = index;
+    while bytes
+        .get(index)
+        .is_some_and(|&byte| is_csi_parameter_byte(byte))
+    {
+        index += 1;
+    }
+
+    let intermediate_start = index;
+    while bytes
+        .get(index)
+        .is_some_and(|&byte| is_csi_intermediate_byte(byte))
+    {
+        index += 1;
+    }
+
+    let Some(&final_byte) = bytes.get(index) else {
+        return CsiParse::Incomplete;
     };
 
-    events.push(InputEvent::Key(key));
-    Some(index + 3)
+    if !is_csi_final_byte(final_byte) {
+        return CsiParse::Invalid;
+    }
+
+    let end = index + 1;
+    CsiParse::Complete(
+        CsiInput {
+            bytes: bytes[start..end].to_vec(),
+            parameters: bytes[parameter_start..intermediate_start].to_vec(),
+            intermediates: bytes[intermediate_start..index].to_vec(),
+            final_byte,
+        },
+        end,
+    )
+}
+
+fn is_csi_parameter_byte(byte: u8) -> bool {
+    matches!(byte, 0x30..=0x3f)
+}
+
+fn is_private_parameter_byte(byte: u8) -> bool {
+    matches!(byte, 0x3c..=0x3f)
+}
+
+fn is_csi_intermediate_byte(byte: u8) -> bool {
+    matches!(byte, 0x20..=0x2f)
+}
+
+fn is_csi_final_byte(byte: u8) -> bool {
+    matches!(byte, 0x40..=0x7e)
 }
 
 fn classify_utf8_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> usize {

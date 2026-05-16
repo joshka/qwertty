@@ -12,7 +12,7 @@ use qwertty::{Error, InputEvent, KeyInput, ProtocolPosition, TokioTerminalSessio
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 use rustix::termios::{LocalModes, Termios, tcgetattr};
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, sleep, timeout};
 
 #[tokio::test]
 async fn tokio_session_preserves_output_order() {
@@ -111,7 +111,7 @@ async fn tokio_session_requests_cursor_position() {
         (session, report)
     };
     let peer = async {
-        let request = read_available_after_quiet(&mut master)
+        let request = read_until_available(&mut master)
             .await
             .expect("read cursor position request");
         assert_eq!(request, b"\x1b[6n");
@@ -143,7 +143,7 @@ async fn tokio_session_cursor_query_preserves_unrelated_events() {
         (session, report)
     };
     let peer = async {
-        let request = read_available_after_quiet(&mut master)
+        let request = read_until_available(&mut master)
             .await
             .expect("read cursor position request");
         assert_eq!(request, b"\x1b[6n");
@@ -181,7 +181,7 @@ async fn tokio_session_cursor_query_timeout_preserves_unrelated_events() {
         (session, result)
     };
     let peer = async {
-        let request = read_available_after_quiet(&mut master)
+        let request = read_until_available(&mut master)
             .await
             .expect("read cursor position request");
         assert_eq!(request, b"\x1b[6n");
@@ -197,6 +197,44 @@ async fn tokio_session_cursor_query_timeout_preserves_unrelated_events() {
             ..
         })
     ));
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unrelated event"),
+        InputEvent::Text('x')
+    );
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_cursor_query_cancellation_preserves_unrelated_events() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let mut query = Box::pin(session.request_cursor_position(Duration::from_secs(1)));
+    let cancellation = async {
+        let result = timeout(Duration::from_millis(100), &mut query).await;
+        assert!(
+            result.is_err(),
+            "query should stay pending until its response or timeout"
+        );
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read cursor position request");
+        assert_eq!(request, b"\x1b[6n");
+        master.write_all(b"x").expect("write unrelated input");
+    };
+
+    let ((), ()) = tokio::join!(cancellation, peer);
+    drop(query);
+
     assert_eq!(
         session
             .next_event()
@@ -286,6 +324,19 @@ async fn read_available_after_quiet(master: &mut File) -> io::Result<Vec<u8>> {
         }
     }
     Ok(out)
+}
+
+async fn read_until_available(master: &mut File) -> io::Result<Vec<u8>> {
+    for _ in 0..20 {
+        let bytes = read_available(master)?;
+        if !bytes.is_empty() {
+            return Ok(bytes);
+        }
+
+        sleep(Duration::from_millis(10)).await;
+    }
+
+    Ok(Vec::new())
 }
 
 fn termios_without_pending_input(mut termios: Termios) -> String {

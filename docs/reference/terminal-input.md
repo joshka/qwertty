@@ -237,7 +237,7 @@ assert_eq!(CursorPositionReport::from_csi(&csi), None);
 This parser does not prove which query caused the report. With the optional `tokio` feature on
 Unix, `TokioTerminalSession::request_cursor_position` writes the request, flushes output, waits for
 this report shape, applies a timeout, and preserves unrelated decoded input. General query routing
-belongs to later work.
+starts as Tokio-session-owned state rather than a public router.
 
 `CursorPositionReport::match_events` separates the first cursor position report from decoded input
 events while returning all unrelated events to the caller:
@@ -257,6 +257,19 @@ assert_eq!(
 );
 assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
 ```
+
+## Query Routing
+
+The input layer owns byte-to-event decoding and typed response matching. It does not own live query
+requests, terminal writes, timeouts, cancellation, or runtime readiness.
+
+Those live concerns belong to `TokioTerminalSession` for the first async query helpers. When a
+query helper reads unrelated decoded input before its response, that input must remain queued for
+later `TokioTerminalSession::next_event` calls.
+
+The first router boundary is internal to the Tokio session owner. qwertty does not yet expose a
+generic query router, multiple simultaneous live queries, capability probing, or a runtime-agnostic
+async query trait.
 
 When no cursor position report is present, the match result contains no report and all events remain
 available.

@@ -4,7 +4,9 @@
 //! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
 //! management, a small terminal session lifecycle, raw terminal input bytes, and basic terminal
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
-//! position report matching. It does not route live terminal query responses yet.
+//! position report matching. With the optional `tokio` feature on Unix, it also exposes a
+//! Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and explicit
+//! cleanup. It does not route live terminal query responses yet.
 //!
 //! The main types are:
 //!
@@ -21,6 +23,7 @@
 //! - [`InputDecoder`], stateful classification for input split across byte chunks.
 //! - [`InputEvent`], basic classification for simple text, control, key, and undecoded input.
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
+//! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
 //! - [`commands`], user-intent helpers that return [`Command`].
 //!
 //! # Example
@@ -49,6 +52,8 @@ mod escape;
 mod input;
 mod session;
 mod terminal;
+#[cfg(all(feature = "tokio", unix))]
+mod tokio_session;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use input::{
@@ -57,3 +62,5 @@ pub use input::{
 };
 pub use session::TerminalSession;
 pub use terminal::{Error, Result, Terminal, TerminalSize};
+#[cfg(all(feature = "tokio", unix))]
+pub use tokio_session::TokioTerminalSession;

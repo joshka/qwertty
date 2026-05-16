@@ -74,13 +74,59 @@ the user-facing behavior.
 qwertty is an async-first terminal library, but `TerminalSession` stays runtime-neutral. It does
 not add async methods that only wrap synchronous file reads or writes.
 
-The first async public surface is a separate Tokio session owner behind an optional `tokio` Cargo
-feature. That owner should use runtime-backed terminal reads and writes, preserve output ordering,
-feed input through `InputDecoder`, deliver decoded events without swallowing unrelated input, and
-document cancellation at the event-delivery boundary.
+The first async public surface is `TokioTerminalSession`, a separate Tokio session owner behind an
+optional `tokio` Cargo feature on Unix. It uses runtime-backed terminal reads and writes, preserves
+output ordering, feeds input through `InputDecoder`, delivers decoded events without swallowing
+unrelated input, and documents cancellation at the event-delivery boundary.
 
 Keeping this boundary explicit avoids making every user compile Tokio and avoids adding a
 runtime-agnostic async trait before one real runtime implementation proves the shape.
+
+Enable the feature in `Cargo.toml`:
+
+```toml
+qwertty = { version = "0.0.0", features = ["tokio"] }
+```
+
+Then use `TokioTerminalSession` inside a Tokio runtime:
+
+```rust,no_run
+use qwertty::{ProtocolPosition, TokioTerminalSession, commands};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+session.command(commands::screen::clear()).await?;
+session
+    .command(commands::cursor::move_to(ProtocolPosition::ORIGIN))
+    .await?;
+session.text("Ready\r\n").await?;
+session.flush().await?;
+session.leave().await
+# }
+```
+
+`TokioTerminalSession::next_event` reads from the terminal through Tokio readiness and returns the
+next decoded `InputEvent`:
+
+```rust,no_run
+use qwertty::{InputEvent, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+
+match session.next_event().await? {
+    InputEvent::Text('q') => {}
+    _ => {}
+}
+
+session.leave().await
+# }
+```
+
+If a task waiting in `next_event` is canceled before another terminal read completes, the session
+remains usable. Events already decoded from earlier reads stay queued for later calls. This
+boundary does not add live query routing, query timeouts, alternate screen cleanup, mouse mode,
+paste mode, graphics, clipboard, or vendor protocol policy.
 
 ## Platform Support
 

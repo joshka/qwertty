@@ -14,6 +14,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+tokio = ["dep:tokio"]
+
 [lints.rust]
 missing_docs = "warn"
 unsafe_code = "forbid"
@@ -24,3 +28,9 @@ pedantic = "warn"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "pty", "termios"] }
+tokio = { version = "1", optional = true, default-features = false, features = [
+    "macros",
+    "net",
+    "rt",
+    "time",
+] }

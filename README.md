@@ -9,9 +9,10 @@ queries, and capability policy.
 
 ## Status
 
-qwertty has an encode-only command foundation and a Unix terminal device layer. It can build
-terminal output bytes, open the current terminal, manage raw mode, query terminal size, and write
-bytes. It does not read input, route terminal queries, or own a terminal session yet.
+qwertty has an encode-only command foundation, a Unix terminal device layer, and a small terminal
+session lifecycle. It can build terminal output bytes, open the current terminal, manage raw mode,
+query terminal size, write ordered session output, flush explicitly, and leave with reported
+cleanup errors. It does not read input or route terminal queries yet.
 
 ## Small Example
 
@@ -25,6 +26,22 @@ output
     .text("Ready");
 
 assert_eq!(output.as_bytes(), b"\x1b[2J\x1b[3;5HReady");
+```
+
+## Session Example
+
+```rust,no_run
+use qwertty::{ProtocolPosition, TerminalSession, commands};
+
+fn main() -> qwertty::Result<()> {
+    let mut session = TerminalSession::open()?;
+    session
+        .command(commands::screen::clear())?
+        .command(commands::cursor::move_to(ProtocolPosition::ORIGIN))?
+        .text("Ready\r\n")?
+        .flush()?;
+    session.leave()
+}
 ```
 
 ## Project Shape

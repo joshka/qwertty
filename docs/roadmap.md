@@ -18,8 +18,9 @@ The project grows in reviewable slices.
 - Cursor position query response matching is on `main`.
 - Async runtime boundary decision is on `main`.
 - Feature-gated Tokio terminal session owner is on `main`.
-- Tokio cursor position query routing is the current implementation slice:
-  [Add Tokio cursor position query routing](https://github.com/joshka/qwertty/issues/55).
+- Tokio cursor position query routing is on `main`.
+- Terminal query routing boundary is the current decision slice:
+  [Decide terminal query routing boundary](https://github.com/joshka/qwertty/issues/59).
 
 ## Slices
 

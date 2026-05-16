@@ -118,7 +118,8 @@ assert_eq!(report.position(), ProtocolPosition::new(12, 34));
 ```
 
 This is not query routing. qwertty does not yet write the request, wait for the matching response,
-time out, or preserve unrelated input through a request/response owner.
+or time out through a live request/response owner. The event-level matcher can separate a decoded
+cursor position report from unrelated events, but live query ownership remains future work.
 
 ### Erase In Display
 

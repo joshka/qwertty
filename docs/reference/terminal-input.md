@@ -233,6 +233,28 @@ assert_eq!(CursorPositionReport::from_csi(&csi), None);
 This parser does not prove which query caused the report. Request/response routing, timeouts,
 async event delivery, and unrelated input preservation belong to later query-routing work.
 
+`CursorPositionReport::match_events` separates the first cursor position report from decoded input
+events while returning all unrelated events to the caller:
+
+```rust
+use qwertty::{CsiInput, CursorPositionReport, InputEvent, ProtocolPosition};
+
+let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
+let matched = CursorPositionReport::match_events(vec![
+    InputEvent::Text('x'),
+    InputEvent::Csi(csi),
+]);
+
+assert_eq!(
+    matched.report().map(CursorPositionReport::position),
+    Some(ProtocolPosition::new(12, 34))
+);
+assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
+```
+
+When no cursor position report is present, the match result contains no report and all events remain
+available.
+
 ## What Remains Undecoded
 
 The basic event layer does not classify or interpret:

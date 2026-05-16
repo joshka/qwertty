@@ -3,8 +3,9 @@
 //! The first input layer preserves raw bytes exactly as the terminal device reports them. It does
 //! not parse the full Control Sequence Introducer grammar, paste, mouse, focus, query, or vendor
 //! extension protocols yet. It can classify complete UTF-8 text, ASCII control input, and a small
-//! documented set of Escape-prefixed keys so callers can separate simple input from bytes that
-//! still need a later parser.
+//! documented set of Escape-prefixed keys. `InputDecoder` can also buffer incomplete UTF-8 and
+//! documented Escape-prefixed keys across chunks so callers can separate simple input from bytes
+//! that still need a later parser.
 
 const ESCAPE: u8 = 0x1b;
 const DELETE: u8 = 0x7f;
@@ -26,6 +27,90 @@ pub enum InputEvent {
     Key(KeyInput),
     /// Bytes qwertty has not classified yet.
     Undecoded(InputBytes),
+}
+
+/// Stateful decoder for terminal input chunks.
+///
+/// `InputDecoder` owns the small amount of state needed when a terminal read splits a UTF-8
+/// scalar value or one of qwertty's documented Escape-prefixed key sequences across byte chunks.
+/// It does not route terminal query responses, resolve Escape timing ambiguity, parse paste,
+/// mouse, focus, graphics, clipboard, keyboard enhancement, or vendor protocols.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::{InputDecoder, InputEvent, KeyInput};
+///
+/// let mut decoder = InputDecoder::new();
+///
+/// assert!(decoder.decode([0xc3]).is_empty());
+/// assert_eq!(decoder.decode([0xa9]), vec![InputEvent::Text('é')]);
+///
+/// assert!(decoder.decode(b"\x1b[").is_empty());
+/// assert_eq!(decoder.decode(b"A"), vec![InputEvent::Key(KeyInput::Up)]);
+/// assert!(decoder.finish().is_empty());
+/// ```
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InputDecoder {
+    pending: Vec<u8>,
+}
+
+impl InputDecoder {
+    /// Creates an empty input decoder.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Decodes the next raw terminal input chunk into basic input events.
+    ///
+    /// Complete UTF-8 text becomes [`InputEvent::Text`]. Single ASCII control bytes become
+    /// [`InputEvent::Control`]. The documented arrow-key sequences become [`InputEvent::Key`].
+    ///
+    /// Incomplete UTF-8 and incomplete documented Escape-prefixed key sequences are buffered until
+    /// a later call makes them complete or unsupported. Unsupported Escape-prefixed bytes and
+    /// invalid UTF-8 are emitted as [`InputEvent::Undecoded`] without losing the original bytes.
+    #[must_use]
+    pub fn decode(&mut self, input: impl AsRef<[u8]>) -> Vec<InputEvent> {
+        let input = input.as_ref();
+        if self.pending.is_empty() {
+            let (events, pending) = classify_buffered_events(input);
+            self.pending = pending;
+            return events;
+        }
+
+        let mut bytes = std::mem::take(&mut self.pending);
+        bytes.extend_from_slice(input);
+        let (events, pending) = classify_buffered_events(&bytes);
+        self.pending = pending;
+        events
+    }
+
+    /// Returns buffered bytes that need more input before qwertty can classify them.
+    ///
+    /// These bytes are the exact bytes retained from previous [`InputDecoder::decode`] calls.
+    /// They remain owned by the decoder until another decode call resolves them or
+    /// [`InputDecoder::finish`] returns them as undecoded input.
+    #[must_use]
+    pub fn pending_bytes(&self) -> &[u8] {
+        &self.pending
+    }
+
+    /// Finishes decoding and returns any remaining buffered bytes as undecoded input.
+    ///
+    /// This method does not guess whether a pending Escape byte was a standalone Escape key or the
+    /// start of a longer sequence. Timing policy belongs to a later input layer, so buffered bytes
+    /// are preserved as [`InputEvent::Undecoded`].
+    #[must_use]
+    pub fn finish(&mut self) -> Vec<InputEvent> {
+        if self.pending.is_empty() {
+            return Vec::new();
+        }
+
+        vec![InputEvent::Undecoded(InputBytes::new(std::mem::take(
+            &mut self.pending,
+        )))]
+    }
 }
 
 /// A terminal key sequence qwertty can classify.
@@ -188,6 +273,12 @@ impl InputBytes {
     }
 }
 
+impl AsRef<[u8]> for InputBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 fn classify_events(bytes: &[u8]) -> Vec<InputEvent> {
     let mut events = Vec::new();
     let mut index = 0;
@@ -218,6 +309,118 @@ fn classify_events(bytes: &[u8]) -> Vec<InputEvent> {
         index = classify_utf8_from(bytes, index, &mut events);
     }
     events
+}
+
+fn classify_buffered_events(bytes: &[u8]) -> (Vec<InputEvent>, Vec<u8>) {
+    let mut events = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == ESCAPE {
+            match classify_buffered_escape_from(bytes, index, &mut events) {
+                BufferedStep::Consumed(next_index) => {
+                    index = next_index;
+                    continue;
+                }
+                BufferedStep::Pending => return (events, bytes[index..].to_vec()),
+                BufferedStep::Stopped => return (events, Vec::new()),
+            }
+        }
+
+        if let Some(control) = ControlInput::from_byte(byte) {
+            events.push(InputEvent::Control(control));
+            index += 1;
+            continue;
+        }
+
+        if byte.is_ascii_graphic() || byte == b' ' {
+            events.push(InputEvent::Text(char::from(byte)));
+            index += 1;
+            continue;
+        }
+
+        match classify_buffered_utf8_from(bytes, index, &mut events) {
+            BufferedStep::Consumed(next_index) => index = next_index,
+            BufferedStep::Pending => return (events, bytes[index..].to_vec()),
+            BufferedStep::Stopped => return (events, Vec::new()),
+        }
+    }
+    (events, Vec::new())
+}
+
+enum BufferedStep {
+    Consumed(usize),
+    Pending,
+    Stopped,
+}
+
+fn classify_buffered_escape_from(
+    bytes: &[u8],
+    index: usize,
+    events: &mut Vec<InputEvent>,
+) -> BufferedStep {
+    let remaining = &bytes[index..];
+    if is_supported_escape_prefix(remaining) {
+        return BufferedStep::Pending;
+    }
+
+    if remaining.len() < 3 {
+        events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
+        return BufferedStep::Stopped;
+    }
+
+    let key = match remaining[..3] {
+        [ESCAPE, b'[', b'A'] => KeyInput::Up,
+        [ESCAPE, b'[', b'B'] => KeyInput::Down,
+        [ESCAPE, b'[', b'C'] => KeyInput::Right,
+        [ESCAPE, b'[', b'D'] => KeyInput::Left,
+        _ => {
+            events.push(InputEvent::Undecoded(InputBytes::new(remaining.to_vec())));
+            return BufferedStep::Stopped;
+        }
+    };
+
+    events.push(InputEvent::Key(key));
+    BufferedStep::Consumed(index + 3)
+}
+
+fn is_supported_escape_prefix(bytes: &[u8]) -> bool {
+    matches!(bytes, [ESCAPE] | [ESCAPE, b'['])
+}
+
+fn classify_buffered_utf8_from(
+    bytes: &[u8],
+    index: usize,
+    events: &mut Vec<InputEvent>,
+) -> BufferedStep {
+    let Some(width) = utf8_width(bytes[index]) else {
+        let invalid_end = index + 1;
+        events.push(InputEvent::Undecoded(InputBytes::new(
+            bytes[index..invalid_end].to_vec(),
+        )));
+        return BufferedStep::Consumed(invalid_end);
+    };
+
+    let end = index + width;
+    if end > bytes.len() {
+        return BufferedStep::Pending;
+    }
+
+    match std::str::from_utf8(&bytes[index..end]) {
+        Ok(text) => {
+            let character = text
+                .chars()
+                .next()
+                .expect("non-empty UTF-8 sequence should decode one character");
+            events.push(InputEvent::Text(character));
+        }
+        Err(_) => {
+            events.push(InputEvent::Undecoded(InputBytes::new(
+                bytes[index..end].to_vec(),
+            )));
+        }
+    }
+    BufferedStep::Consumed(end)
 }
 
 fn classify_escape_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> Option<usize> {

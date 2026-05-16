@@ -7,7 +7,9 @@ use std::io::{self, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use qwertty::{ControlInput, InputBytes, InputEvent, KeyInput, Terminal, TerminalSession};
+use qwertty::{
+    ControlInput, InputBytes, InputDecoder, InputEvent, KeyInput, Terminal, TerminalSession,
+};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
 #[test]
@@ -126,6 +128,92 @@ fn input_bytes_preserve_invalid_utf8_as_undecoded() {
         input.events(),
         vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3, b'A'])),]
     );
+}
+
+#[test]
+fn input_decoder_buffers_split_utf8_text() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode([0xc3]), Vec::<InputEvent>::new());
+    assert_eq!(decoder.pending_bytes(), &[0xc3]);
+    assert_eq!(decoder.decode([0xa9]), vec![InputEvent::Text('é')]);
+    assert!(decoder.pending_bytes().is_empty());
+    assert_eq!(decoder.finish(), Vec::<InputEvent>::new());
+}
+
+#[test]
+fn input_decoder_buffers_split_arrow_key_input() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode([0x1b]), Vec::<InputEvent>::new());
+    assert_eq!(decoder.pending_bytes(), b"\x1b");
+    assert_eq!(decoder.decode(b"["), Vec::<InputEvent>::new());
+    assert_eq!(decoder.pending_bytes(), b"\x1b[");
+    assert_eq!(decoder.decode(b"A"), vec![InputEvent::Key(KeyInput::Up)]);
+    assert!(decoder.pending_bytes().is_empty());
+}
+
+#[test]
+fn input_decoder_classifies_mixed_input_after_buffered_key() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"A\x1b["), vec![InputEvent::Text('A')],);
+    assert_eq!(
+        decoder.decode(b"B\r"),
+        vec![
+            InputEvent::Key(KeyInput::Down),
+            InputEvent::Control(ControlInput::CarriageReturn),
+        ]
+    );
+}
+
+#[test]
+fn input_decoder_preserves_split_invalid_utf8_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode([0xc3]), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.decode([b'A']),
+        vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3, b'A'])),]
+    );
+    assert_eq!(decoder.finish(), Vec::<InputEvent>::new());
+}
+
+#[test]
+fn input_decoder_preserves_split_unsupported_escape_input_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"\x1b["), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.decode(b"Z"),
+        vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec())),]
+    );
+    assert!(decoder.pending_bytes().is_empty());
+}
+
+#[test]
+fn input_decoder_finish_flushes_incomplete_utf8_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode([0xc3]), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.finish(),
+        vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3]))]
+    );
+    assert!(decoder.pending_bytes().is_empty());
+    assert_eq!(decoder.finish(), Vec::<InputEvent>::new());
+}
+
+#[test]
+fn input_decoder_finish_flushes_incomplete_escape_as_undecoded() {
+    let mut decoder = InputDecoder::new();
+
+    assert_eq!(decoder.decode(b"\x1b["), Vec::<InputEvent>::new());
+    assert_eq!(
+        decoder.finish(),
+        vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[".to_vec()))]
+    );
+    assert!(decoder.pending_bytes().is_empty());
 }
 
 #[test]

@@ -31,11 +31,11 @@ The first session layer owns raw-mode entry, ordered output writes, explicit flu
 leave cleanup. It does not yet own input parsing, query routing, alternate screen policy, feature
 cleanup, or async runtime integration.
 
-The first input layer owns raw bytes read from a terminal session, basic text/control
-classification, complete UTF-8 text within one input chunk, and a tiny documented Escape parser for
-common arrow keys. It intentionally leaves UTF-8 buffering across reads, broader Control Sequence
-Introducer parsing, paste, mouse, focus, query response, and vendor protocol interpretation to
-later parser and policy slices.
+The input layer owns raw bytes read from a terminal session, basic text/control classification,
+complete UTF-8 text, a tiny documented Escape parser for common arrow keys, and a small stateful
+decoder for incomplete UTF-8 and documented Escape-prefixed input split across chunks. It
+intentionally leaves broader Control Sequence Introducer parsing, paste, mouse, focus, query
+response, and vendor protocol interpretation to later parser and policy slices.
 
 ## Design Rule
 

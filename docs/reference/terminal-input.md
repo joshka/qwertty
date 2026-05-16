@@ -3,7 +3,8 @@
 `InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
 session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
 complete UTF-8 text, ASCII control bytes, a small set of Escape-prefixed keys, and bytes qwertty
-intentionally leaves undecoded.
+intentionally leaves undecoded. `InputDecoder` owns the first stateful decoding boundary for input
+that arrives split across terminal reads.
 
 ## Runtime Boundary
 
@@ -57,7 +58,7 @@ In byte form:
 
 `InputBytes::as_bytes` returns that byte sequence exactly as read.
 
-## Basic Events
+## Chunk-Local Events
 
 `InputBytes::events` classifies the small subset qwertty can name honestly today:
 
@@ -92,8 +93,46 @@ assert_eq!(
 ```
 
 This method does not buffer across terminal reads. If a multi-byte UTF-8 character is split across
-two `TerminalSession::read_input` calls, each incomplete chunk remains undecoded until a later
-stateful input decoder owns buffering policy.
+two `TerminalSession::read_input` calls, each incomplete chunk remains undecoded. Use
+`InputDecoder` when the caller wants qwertty to carry incomplete input across reads.
+
+## Stateful Decoding
+
+`InputDecoder` buffers the boundary cases qwertty can describe today: incomplete UTF-8 scalar
+values and incomplete documented Escape-prefixed key sequences. It accepts byte slices or
+`InputBytes` values and returns the same `InputEvent` values as the chunk-local classifier:
+
+```rust
+use qwertty::{InputDecoder, InputEvent, KeyInput};
+
+let mut decoder = InputDecoder::new();
+
+assert!(decoder.decode([0xc3]).is_empty());
+assert_eq!(decoder.decode([0xa9]), vec![InputEvent::Text('é')]);
+
+assert!(decoder.decode(b"\x1b[").is_empty());
+assert_eq!(decoder.decode(b"A"), vec![InputEvent::Key(KeyInput::Up)]);
+```
+
+`InputDecoder::pending_bytes` exposes the exact buffered bytes for diagnostics and tests. The
+decoder keeps those bytes until a later `decode` call resolves them or `finish` returns them as
+undecoded input:
+
+```rust
+use qwertty::{InputBytes, InputDecoder, InputEvent};
+
+let mut decoder = InputDecoder::new();
+
+assert!(decoder.decode(b"\x1b[").is_empty());
+assert_eq!(decoder.pending_bytes(), b"\x1b[");
+assert_eq!(
+    decoder.finish(),
+    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[".to_vec()))]
+);
+```
+
+`finish` does not guess whether a pending Escape byte was a standalone Escape key or the start of a
+longer sequence. That timing and ambiguity policy belongs to a later input layer.
 
 The classified control set is ASCII C0 controls and Delete. Common controls have named
 `ControlInput` variants such as `Tab`, `LineFeed`, `CarriageReturn`, `Escape`, and `Delete`. Less

@@ -2,8 +2,7 @@
 
 `InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
 session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
-printable single-byte ASCII text, ASCII control bytes, and bytes qwertty intentionally leaves
-undecoded.
+complete UTF-8 text, ASCII control bytes, and bytes qwertty intentionally leaves undecoded.
 
 ## Runtime Boundary
 
@@ -42,8 +41,8 @@ session.leave()?;
 # }
 ```
 
-The bytes are not decoded. For example, if the terminal reports the `A` key followed by an Up arrow,
-the raw bytes may be:
+The raw bytes stay available exactly as read. For example, if the terminal reports the `A` key
+followed by an Up arrow, the raw bytes may be:
 
 ```text
 A ESC [ A
@@ -64,20 +63,36 @@ In byte form:
 ```rust
 use qwertty::{ControlInput, InputBytes, InputEvent};
 
-let input = InputBytes::new(b"A\r\x03".to_vec());
+let input = InputBytes::new("Aé\r\u{3}".as_bytes().to_vec());
 
 assert_eq!(
     input.events(),
     vec![
         InputEvent::Text('A'),
+        InputEvent::Text('é'),
         InputEvent::Control(ControlInput::CarriageReturn),
         InputEvent::Control(ControlInput::Other(0x03)),
     ]
 );
 ```
 
-The classified text set is printable single-byte ASCII, including space. Non-ASCII bytes are not
-decoded into Unicode text yet.
+The classified text set is complete UTF-8 text within the current `InputBytes` chunk. Incomplete or
+invalid UTF-8 remains `InputEvent::Undecoded` with the original bytes preserved:
+
+```rust
+use qwertty::{InputBytes, InputEvent};
+
+let input = InputBytes::new(vec![0xc3]);
+
+assert_eq!(
+    input.events(),
+    vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3]))]
+);
+```
+
+This method does not buffer across terminal reads. If a multi-byte UTF-8 character is split across
+two `TerminalSession::read_input` calls, each incomplete chunk remains undecoded until a later
+stateful input decoder owns buffering policy.
 
 The classified control set is ASCII C0 controls and Delete. Common controls have named
 `ControlInput` variants such as `Tab`, `LineFeed`, `CarriageReturn`, `Escape`, and `Delete`. Less
@@ -101,7 +116,7 @@ assert_eq!(
 
 The basic event layer does not classify or interpret:
 
-- UTF-8 text;
+- incomplete or invalid UTF-8;
 - Escape-prefixed key sequences;
 - Control Sequence Introducer messages;
 - terminal query responses;

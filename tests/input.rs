@@ -51,14 +51,42 @@ fn input_bytes_preserve_escape_prefixed_input_as_undecoded() {
 }
 
 #[test]
-fn input_bytes_preserve_non_ascii_input_as_undecoded() {
+fn input_bytes_classify_complete_utf8_text() {
     let input = InputBytes::new("é".as_bytes().to_vec());
+
+    assert_eq!(input.events(), vec![InputEvent::Text('é')]);
+}
+
+#[test]
+fn input_bytes_classify_utf8_without_swallowing_later_controls() {
+    let input = InputBytes::new("é\r".as_bytes().to_vec());
 
     assert_eq!(
         input.events(),
-        vec![InputEvent::Undecoded(InputBytes::new(
-            "é".as_bytes().to_vec()
-        ))]
+        vec![
+            InputEvent::Text('é'),
+            InputEvent::Control(ControlInput::CarriageReturn),
+        ]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_incomplete_utf8_as_undecoded() {
+    let input = InputBytes::new(vec![0xc3]);
+
+    assert_eq!(
+        input.events(),
+        vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3]))]
+    );
+}
+
+#[test]
+fn input_bytes_preserve_invalid_utf8_as_undecoded() {
+    let input = InputBytes::new(vec![0xc3, b'A']);
+
+    assert_eq!(
+        input.events(),
+        vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3, b'A'])),]
     );
 }
 

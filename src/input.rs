@@ -1,9 +1,9 @@
 //! Terminal input byte values and basic events.
 //!
 //! The first input layer preserves raw bytes exactly as the terminal device reports them. It does
-//! not parse Escape, Control Sequence Introducer, UTF-8, paste, mouse, focus, query, or vendor
-//! extension protocols yet. It can classify single-byte printable ASCII and ASCII control input so
-//! callers can separate simple input from bytes that still need a later parser.
+//! not parse Escape, Control Sequence Introducer, paste, mouse, focus, query, or vendor extension
+//! protocols yet. It can classify complete UTF-8 text and ASCII control input so callers can
+//! separate simple input from bytes that still need a later parser.
 
 const ESCAPE: u8 = 0x1b;
 const DELETE: u8 = 0x7f;
@@ -11,13 +11,13 @@ const DELETE: u8 = 0x7f;
 /// A basic terminal input event.
 ///
 /// `InputEvent` is the first event classification layer above raw [`InputBytes`]. It classifies
-/// printable single-byte ASCII text and ASCII control bytes. Escape-prefixed input, non-ASCII
-/// bytes, UTF-8 sequences, query responses, paste, mouse input, focus reports, and vendor
-/// protocols remain [`InputEvent::Undecoded`].
+/// complete UTF-8 text and ASCII control bytes. Escape-prefixed input, incomplete or invalid
+/// UTF-8, query responses, paste, mouse input, focus reports, and vendor protocols remain
+/// [`InputEvent::Undecoded`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InputEvent {
-    /// Printable single-byte ASCII text.
+    /// One complete Unicode scalar value decoded from terminal input.
     Text(char),
     /// ASCII control input.
     Control(ControlInput),
@@ -90,8 +90,8 @@ impl ControlInput {
 /// Raw bytes read from terminal input.
 ///
 /// `InputBytes` is the first caller-visible input value in qwertty. It keeps terminal bytes
-/// undecoded so later parser and query-routing slices can be built on behavior that is easy to
-/// test and inspect.
+/// available exactly as read while [`InputBytes::events`] provides basic UTF-8 text and control
+/// classification.
 ///
 /// # Example
 ///
@@ -124,9 +124,12 @@ impl InputBytes {
 
     /// Classifies these bytes into basic input events.
     ///
-    /// Printable single-byte ASCII becomes [`InputEvent::Text`]. Single ASCII control bytes become
-    /// [`InputEvent::Control`]. Escape-prefixed input, non-ASCII bytes, UTF-8 sequences, query
+    /// Complete UTF-8 text becomes [`InputEvent::Text`]. Single ASCII control bytes become
+    /// [`InputEvent::Control`]. Escape-prefixed input, incomplete or invalid UTF-8, query
     /// responses, paste, mouse input, focus reports, and vendor protocols remain undecoded.
+    ///
+    /// Classification is scoped to this byte value. This method does not buffer incomplete UTF-8
+    /// across multiple terminal reads.
     #[must_use]
     pub fn events(&self) -> Vec<InputEvent> {
         classify_events(&self.bytes)
@@ -175,10 +178,50 @@ fn classify_events(bytes: &[u8]) -> Vec<InputEvent> {
             continue;
         }
 
+        index = classify_utf8_from(bytes, index, &mut events);
+    }
+    events
+}
+
+fn classify_utf8_from(bytes: &[u8], index: usize, events: &mut Vec<InputEvent>) -> usize {
+    let Some(width) = utf8_width(bytes[index]) else {
+        let invalid_end = index + 1;
+        events.push(InputEvent::Undecoded(InputBytes::new(
+            bytes[index..invalid_end].to_vec(),
+        )));
+        return invalid_end;
+    };
+
+    let end = index + width;
+    if end > bytes.len() {
         events.push(InputEvent::Undecoded(InputBytes::new(
             bytes[index..].to_vec(),
         )));
-        break;
+        return bytes.len();
     }
-    events
+
+    match std::str::from_utf8(&bytes[index..end]) {
+        Ok(text) => {
+            let character = text
+                .chars()
+                .next()
+                .expect("non-empty UTF-8 sequence should decode one character");
+            events.push(InputEvent::Text(character));
+        }
+        Err(_) => {
+            events.push(InputEvent::Undecoded(InputBytes::new(
+                bytes[index..end].to_vec(),
+            )));
+        }
+    }
+    end
+}
+
+fn utf8_width(byte: u8) -> Option<usize> {
+    match byte {
+        0xc2..=0xdf => Some(2),
+        0xe0..=0xef => Some(3),
+        0xf0..=0xf4 => Some(4),
+        _ => None,
+    }
 }

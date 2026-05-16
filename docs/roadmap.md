@@ -10,8 +10,9 @@ The project grows in reviewable slices.
 - Session lifecycle is on `main`.
 - Input byte events is on `main`.
 - Basic input events is on `main`.
-- UTF-8 input text decoding is the current implementation slice:
-  [Add UTF-8 input text decoding](https://github.com/joshka/qwertty/issues/25).
+- UTF-8 input text decoding is on `main`.
+- Basic Escape input parsing is the current implementation slice:
+  [Add basic Escape input parsing](https://github.com/joshka/qwertty/issues/29).
 
 ## Slices
 

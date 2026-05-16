@@ -1,7 +1,7 @@
 //! Unix terminal device implementation.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use rustix::termios::{OptionalActions, Termios, tcgetattr, tcgetwinsize, tcsetattr};
@@ -123,6 +123,19 @@ impl Terminal {
     /// Returns an I/O error when the operating system cannot write all bytes.
     pub fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
         self.device.write_all(bytes).map_err(Error::write_terminal)
+    }
+
+    /// Reads bytes from the terminal device.
+    ///
+    /// This method reads raw bytes from the terminal device without parsing or decoding them. In
+    /// raw mode, ordinary keys, control bytes, Escape-prefixed sequences, query responses, paste
+    /// payloads, and vendor protocol bytes all pass through this same boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the operating system cannot read terminal input.
+    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        self.device.read(buffer).map_err(Error::read_terminal)
     }
 
     /// Flushes buffered terminal output.

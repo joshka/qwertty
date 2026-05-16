@@ -2,8 +2,8 @@
 //!
 //! qwertty is growing in small slices. The current public surface can build the bytes a terminal
 //! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
-//! management, and a small terminal session lifecycle. It does not own async input or query routing
-//! yet.
+//! management, a small terminal session lifecycle, and raw terminal input bytes. It does not parse
+//! input events or route terminal queries yet.
 //!
 //! The main types are:
 //!
@@ -13,6 +13,7 @@
 //! - [`Terminal`], a low-level terminal device owner.
 //! - [`TerminalSession`], an application-facing owner for raw mode, ordered output, flushing, and
 //!   explicit leave cleanup.
+//! - [`InputBytes`], raw terminal input bytes read through a session.
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - [`commands`], user-intent helpers that return [`Command`].
 //!
@@ -39,9 +40,11 @@ mod command;
 pub mod commands;
 pub mod docs;
 mod escape;
+mod input;
 mod session;
 mod terminal;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
+pub use input::InputBytes;
 pub use session::TerminalSession;
 pub use terminal::{Error, Result, Terminal, TerminalSize};

@@ -76,6 +76,16 @@ impl Terminal {
         Err(Error::unsupported("write terminal output", PLATFORM))
     }
 
+    /// Reads bytes from the terminal device.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`Error::Unsupported`] on this platform.
+    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        let _ = buffer;
+        Err(Error::unsupported("read terminal input", PLATFORM))
+    }
+
     /// Flushes buffered terminal output.
     ///
     /// # Errors

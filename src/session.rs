@@ -1,10 +1,10 @@
 //! Terminal session lifecycle.
 //!
 //! A session is the first application-facing owner above the low-level terminal device. It enters
-//! raw mode, preserves output ordering, exposes explicit flushing, and gives callers an explicit
-//! leave path for terminal-mode cleanup errors.
+//! raw mode, preserves output ordering, reads raw input bytes, exposes explicit flushing, and gives
+//! callers an explicit leave path for terminal-mode cleanup errors.
 
-use crate::{Command, Terminal, TerminalSize, terminal};
+use crate::{Command, InputBytes, Terminal, TerminalSize, terminal};
 
 /// An active terminal session.
 ///
@@ -17,7 +17,8 @@ use crate::{Command, Terminal, TerminalSize, terminal};
 /// [`Terminal`] drop fallback to restore cooked mode, but drop-time failures cannot be reported.
 ///
 /// The first session API is runtime-neutral and writes through the synchronous terminal-device
-/// boundary. Async input, query routing, and runtime-owned I/O belong to later session slices.
+/// boundary. Input is exposed as raw bytes; async input, query routing, and runtime-owned I/O
+/// belong to later session slices.
 ///
 /// # Example
 ///
@@ -117,6 +118,27 @@ impl TerminalSession {
     /// Returns an error when the terminal device cannot write all text bytes.
     pub fn text(&mut self, text: impl AsRef<str>) -> terminal::Result<&mut Self> {
         self.bytes(text.as_ref())
+    }
+
+    /// Reads raw terminal input bytes into `buffer`.
+    ///
+    /// This method returns one operating-system read as [`InputBytes`]. It does not decode UTF-8,
+    /// parse Escape sequences, match terminal query responses, classify keys, or apply paste,
+    /// mouse, focus, graphics, clipboard, or vendor protocol policy.
+    ///
+    /// In raw mode, the returned bytes are the foundation for later event and query-routing
+    /// layers. A zero-length buffer returns an empty input value without reading from the terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot read input.
+    pub fn read_input(&mut self, buffer: &mut [u8]) -> terminal::Result<InputBytes> {
+        if buffer.is_empty() {
+            return Ok(InputBytes::default());
+        }
+
+        let len = self.terminal_mut().read(buffer)?;
+        Ok(InputBytes::new(buffer[..len].to_vec()))
     }
 
     /// Flushes buffered terminal output.

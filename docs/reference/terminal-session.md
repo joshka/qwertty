@@ -1,8 +1,8 @@
 # Terminal Session Reference
 
 `TerminalSession` is the first application-facing owner above the low-level terminal device. It
-opens or accepts a `Terminal`, enters raw mode, writes output bytes in method-call order, flushes
-explicitly, and restores cooked mode through an explicit `leave` path.
+opens or accepts a `Terminal`, enters raw mode, writes output bytes in method-call order, reads raw
+input bytes, flushes explicitly, and restores cooked mode through an explicit `leave` path.
 
 ## Lifecycle
 
@@ -50,6 +50,13 @@ In byte form:
 escape sequences, or enforce a text policy. Renderers that accept user-controlled text should apply
 their own escaping policy before writing to the session.
 
+## Input Bytes
+
+`TerminalSession::read_input` reads one chunk of raw terminal input bytes into a caller-provided
+buffer and returns those bytes as `InputBytes`. It does not parse keys, UTF-8, Escape sequences,
+query responses, paste, mouse input, or vendor protocols. See the
+[terminal input reference](crate::docs) for the input byte contract.
+
 ## Flush And Leave
 
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible
@@ -64,9 +71,10 @@ the user-facing behavior.
 
 ## Async Boundary
 
-qwertty is an async-first terminal library, but this first session slice stays runtime-neutral. It
-does not add an async method that only wraps a synchronous file write. Async terminal I/O belongs in
-the slice that introduces runtime-owned reads, writes, input events, or query response routing.
+qwertty is an async-first terminal library, but this first session surface stays runtime-neutral. It
+does not add async methods that only wrap synchronous file reads or writes. Async terminal I/O
+belongs in the slice that introduces runtime-owned reads, writes, input events, or query response
+routing.
 
 Keeping this boundary explicit avoids committing to a runtime dependency or trait shape before the
 event model proves what callers need.

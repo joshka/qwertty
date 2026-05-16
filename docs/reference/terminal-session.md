@@ -71,13 +71,16 @@ the user-facing behavior.
 
 ## Async Boundary
 
-qwertty is an async-first terminal library, but this first session surface stays runtime-neutral. It
-does not add async methods that only wrap synchronous file reads or writes. Async terminal I/O
-belongs in the slice that introduces runtime-owned reads, writes, input events, or query response
-routing.
+qwertty is an async-first terminal library, but `TerminalSession` stays runtime-neutral. It does
+not add async methods that only wrap synchronous file reads or writes.
 
-Keeping this boundary explicit avoids committing to a runtime dependency or trait shape before the
-event model proves what callers need.
+The first async public surface is a separate Tokio session owner behind an optional `tokio` Cargo
+feature. That owner should use runtime-backed terminal reads and writes, preserve output ordering,
+feed input through `InputDecoder`, deliver decoded events without swallowing unrelated input, and
+document cancellation at the event-delivery boundary.
+
+Keeping this boundary explicit avoids making every user compile Tokio and avoids adding a
+runtime-agnostic async trait before one real runtime implementation proves the shape.
 
 ## Platform Support
 

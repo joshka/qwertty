@@ -34,8 +34,9 @@ cleanup, or async runtime integration.
 The input layer owns raw bytes read from a terminal session, basic text/control classification,
 complete UTF-8 text, a tiny documented Escape parser for common arrow keys, and a small stateful
 decoder for incomplete UTF-8 and Control Sequence Introducer input split across chunks. It can
-preserve complete CSI syntax without assigning query, key, paste, mouse, focus, response, or vendor
-protocol meaning. Those interpretations belong to later parser and policy slices.
+preserve complete CSI syntax and parse cursor position reports without assigning broader query,
+key, paste, mouse, focus, response, or vendor protocol meaning. Those interpretations belong to
+later parser and policy slices.
 
 ## Design Rule
 

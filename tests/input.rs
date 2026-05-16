@@ -8,8 +8,8 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
 use qwertty::{
-    ControlInput, CsiInput, InputBytes, InputDecoder, InputEvent, KeyInput, Terminal,
-    TerminalSession,
+    ControlInput, CsiInput, CursorPositionReport, InputBytes, InputDecoder, InputEvent, KeyInput,
+    ProtocolPosition, Terminal, TerminalSession,
 };
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
@@ -342,6 +342,46 @@ fn csi_input_rejects_non_csi_and_incomplete_bytes() {
     assert_eq!(CsiInput::from_bytes(b"\x1b["), None);
     assert_eq!(CsiInput::from_bytes(b"\x1b[?25"), None);
     assert_eq!(CsiInput::from_bytes(b"\x1b[?25nX"), None);
+}
+
+#[test]
+fn cursor_position_report_parses_csi_position() {
+    let csi = CsiInput::from_bytes(b"\x1b[12;34R").expect("complete CSI input");
+    let report = CursorPositionReport::from_csi(&csi).expect("cursor position report");
+
+    assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+    assert_eq!(report.row(), 12);
+    assert_eq!(report.column(), 34);
+}
+
+#[test]
+fn cursor_position_report_rejects_unrelated_csi() {
+    let cursor_up = CsiInput::from_bytes(b"\x1b[12;34A").expect("complete CSI input");
+    let private_status = CsiInput::from_bytes(b"\x1b[?25n").expect("complete CSI input");
+    let with_intermediate = CsiInput::from_bytes(b"\x1b[12$R").expect("complete CSI input");
+
+    assert_eq!(CursorPositionReport::from_csi(&cursor_up), None);
+    assert_eq!(CursorPositionReport::from_csi(&private_status), None);
+    assert_eq!(CursorPositionReport::from_csi(&with_intermediate), None);
+}
+
+#[test]
+fn cursor_position_report_rejects_invalid_parameters() {
+    for bytes in [
+        b"\x1b[R".as_slice(),
+        b"\x1b[12R".as_slice(),
+        b"\x1b[12;R".as_slice(),
+        b"\x1b[;34R".as_slice(),
+        b"\x1b[0;34R".as_slice(),
+        b"\x1b[12;0R".as_slice(),
+        b"\x1b[12;34;56R".as_slice(),
+        b"\x1b[70000;34R".as_slice(),
+        b"\x1b[?;34R".as_slice(),
+    ] {
+        let csi = CsiInput::from_bytes(bytes).expect("complete CSI input");
+
+        assert_eq!(CursorPositionReport::from_csi(&csi), None);
+    }
 }
 
 #[test]

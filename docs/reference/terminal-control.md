@@ -90,6 +90,36 @@ assert_eq!(frame.as_bytes(), b"\x1b[3;5H");
 
 Terminal protocol coordinates are one-based. Row 1, column 1 is the top-left cell.
 
+### Cursor Position Query And Report
+
+`commands::cursor::request_position` emits the ECMA-48 Device Status Report request for the
+current cursor position:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::cursor;
+
+let mut frame = CommandBuffer::new();
+frame.command(cursor::request_position());
+
+assert_eq!(frame.as_bytes(), b"\x1b[6n");
+```
+
+Terminals commonly answer with `CSI row ; column R`. qwertty can parse that report from a complete
+CSI input value:
+
+```rust
+use qwertty::{CsiInput, CursorPositionReport, ProtocolPosition};
+
+let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
+let report = CursorPositionReport::from_csi(&csi).unwrap();
+
+assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+```
+
+This is not query routing. qwertty does not yet write the request, wait for the matching response,
+time out, or preserve unrelated input through a request/response owner.
+
 ### Erase In Display
 
 `ED` means "Erase in Display". qwertty's first screen clear helper uses mode `2`, which erases the

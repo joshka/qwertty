@@ -21,12 +21,13 @@ fn command_buffer_preserves_command_order() {
         .command(commands::screen::clear())
         .command(commands::cursor::move_to(ProtocolPosition::new(2, 3)))
         .command(commands::cursor::request_position())
+        .command(commands::terminal::request_status())
         .text("Ready")
         .command(commands::cursor::show());
 
     assert_eq!(
         output.as_bytes(),
-        b"\x1b[?25l\x1b[2J\x1b[2;3H\x1b[6nReady\x1b[?25h"
+        b"\x1b[?25l\x1b[2J\x1b[2;3H\x1b[6n\x1b[5nReady\x1b[?25h"
     );
 }
 
@@ -37,6 +38,15 @@ fn cursor_position_query_encodes_device_status_report_request() {
     output.command(commands::cursor::request_position());
 
     assert_eq!(output.as_bytes(), b"\x1b[6n");
+}
+
+#[test]
+fn terminal_status_query_encodes_device_status_report_request() {
+    let mut output = CommandBuffer::new();
+
+    output.command(commands::terminal::request_status());
+
+    assert_eq!(output.as_bytes(), b"\x1b[5n");
 }
 
 #[test]

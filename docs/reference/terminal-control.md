@@ -144,6 +144,36 @@ Future live query helpers should keep this boundary: command helpers describe em
 response parsers describe interpreted input, and `TokioTerminalSession` owns the live routing
 state that connects a request to a response without hiding unrelated input.
 
+### Terminal Status Query And Report
+
+`commands::terminal::request_status` emits the ECMA-48 Device Status Report request for terminal
+status:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal;
+
+let mut frame = CommandBuffer::new();
+frame.command(terminal::request_status());
+
+assert_eq!(frame.as_bytes(), b"\x1b[5n");
+```
+
+Terminals commonly answer with `CSI 0 n` for ready or `CSI 3 n` for malfunction. qwertty can parse
+those reports from complete CSI input values:
+
+```rust
+use qwertty::{CsiInput, TerminalStatus, TerminalStatusReport};
+
+let csi = CsiInput::from_bytes(b"\x1b[0n").unwrap();
+let report = TerminalStatusReport::from_csi(&csi).unwrap();
+
+assert_eq!(report.status(), TerminalStatus::Ready);
+```
+
+This slice only adds command encoding and report parsing. qwertty does not yet expose a live Tokio
+terminal status query helper.
+
 ### Erase In Display
 
 `ED` means "Erase in Display". qwertty's first screen clear helper uses mode `2`, which erases the

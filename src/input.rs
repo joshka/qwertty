@@ -340,6 +340,87 @@ impl CursorPositionReportMatch {
     }
 }
 
+/// Reported terminal status.
+///
+/// These values are commonly sent by a terminal in response to a `CSI 5 n` Device Status Report
+/// status query.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum TerminalStatus {
+    /// Terminal is ready, reported as `CSI 0 n`.
+    Ready,
+    /// Terminal reports a malfunction, reported as `CSI 3 n`.
+    Malfunction,
+}
+
+impl TerminalStatus {
+    /// Returns the report parameter bytes for this status.
+    #[must_use]
+    pub const fn parameter_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Ready => b"0",
+            Self::Malfunction => b"3",
+        }
+    }
+}
+
+/// A parsed terminal status report.
+///
+/// Terminal status reports are commonly sent by a terminal in response to a `CSI 5 n` Device
+/// Status Report status query. The report shape qwertty recognizes is `CSI 0 n` for ready and
+/// `CSI 3 n` for malfunction.
+///
+/// This value does not route query responses or prove which request caused the report. It only
+/// interprets one complete [`CsiInput`] value.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::{CsiInput, TerminalStatus, TerminalStatusReport};
+///
+/// let csi = CsiInput::from_bytes(b"\x1b[0n").expect("complete CSI input");
+/// let report = TerminalStatusReport::from_csi(&csi).expect("terminal status report");
+///
+/// assert_eq!(report.status(), TerminalStatus::Ready);
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TerminalStatusReport {
+    status: TerminalStatus,
+}
+
+impl TerminalStatusReport {
+    /// Creates a terminal status report value.
+    #[must_use]
+    pub const fn new(status: TerminalStatus) -> Self {
+        Self { status }
+    }
+
+    /// Parses a terminal status report from a complete CSI input value.
+    ///
+    /// Returns `None` when the CSI value is not exactly `CSI 0 n` or `CSI 3 n`, when it uses
+    /// private markers or intermediate bytes, or when it has any unsupported status parameter.
+    #[must_use]
+    pub fn from_csi(csi: &CsiInput) -> Option<Self> {
+        if csi.final_byte() != b'n' || !csi.intermediate_bytes().is_empty() {
+            return None;
+        }
+
+        let status = match csi.parameter_bytes() {
+            b"0" => TerminalStatus::Ready,
+            b"3" => TerminalStatus::Malfunction,
+            _ => return None,
+        };
+
+        Some(Self::new(status))
+    }
+
+    /// Returns the reported terminal status.
+    #[must_use]
+    pub const fn status(self) -> TerminalStatus {
+        self.status
+    }
+}
+
 /// A terminal key sequence qwertty can classify.
 ///
 /// This is intentionally small. The first Escape parser only recognizes the common arrow-key

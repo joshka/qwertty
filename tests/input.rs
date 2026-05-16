@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use qwertty::{
     ControlInput, CsiInput, CursorPositionReport, InputBytes, InputDecoder, InputEvent, KeyInput,
-    ProtocolPosition, Terminal, TerminalSession,
+    ProtocolPosition, Terminal, TerminalSession, TerminalStatus, TerminalStatusReport,
 };
 use rustix::pty::{grantpt, ptsname, unlockpt};
 
@@ -363,6 +363,48 @@ fn cursor_position_report_rejects_unrelated_csi() {
     assert_eq!(CursorPositionReport::from_csi(&cursor_up), None);
     assert_eq!(CursorPositionReport::from_csi(&private_status), None);
     assert_eq!(CursorPositionReport::from_csi(&with_intermediate), None);
+}
+
+#[test]
+fn terminal_status_report_parses_ready_status() {
+    let csi = CsiInput::from_bytes(b"\x1b[0n").expect("complete CSI input");
+    let report = TerminalStatusReport::from_csi(&csi).expect("terminal status report");
+
+    assert_eq!(report.status(), TerminalStatus::Ready);
+    assert_eq!(report.status().parameter_bytes(), b"0");
+}
+
+#[test]
+fn terminal_status_report_parses_malfunction_status() {
+    let csi = CsiInput::from_bytes(b"\x1b[3n").expect("complete CSI input");
+    let report = TerminalStatusReport::from_csi(&csi).expect("terminal status report");
+
+    assert_eq!(report.status(), TerminalStatus::Malfunction);
+    assert_eq!(report.status().parameter_bytes(), b"3");
+}
+
+#[test]
+fn terminal_status_report_rejects_invalid_parameters() {
+    for bytes in [
+        b"\x1b[n".as_slice(),
+        b"\x1b[1n",
+        b"\x1b[03n",
+        b"\x1b[0;3n",
+        b"\x1b[?0n",
+    ] {
+        let csi = CsiInput::from_bytes(bytes).expect("complete CSI input");
+
+        assert_eq!(TerminalStatusReport::from_csi(&csi), None);
+    }
+}
+
+#[test]
+fn terminal_status_report_rejects_unrelated_csi() {
+    for bytes in [b"\x1b[0R".as_slice(), b"\x1b[0 n", b"\x1b[?25n"] {
+        let csi = CsiInput::from_bytes(bytes).expect("complete CSI input");
+
+        assert_eq!(TerminalStatusReport::from_csi(&csi), None);
+    }
 }
 
 #[test]

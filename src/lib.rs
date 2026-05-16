@@ -4,9 +4,9 @@
 //! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
 //! management, a small terminal session lifecycle, raw terminal input bytes, and basic terminal
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
-//! position report matching. With the optional `tokio` feature on Unix, it also exposes a
-//! Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and explicit
-//! cleanup, including a live cursor position query.
+//! position and terminal status report parsing. With the optional `tokio` feature on Unix, it also
+//! exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and
+//! explicit cleanup, including a live cursor position query.
 //!
 //! The main types are:
 //!
@@ -20,6 +20,7 @@
 //! - [`CsiInput`], lossless syntax for complete Control Sequence Introducer input.
 //! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
 //! - [`CursorPositionReportMatch`], event-level cursor position report matching.
+//! - [`TerminalStatusReport`], parsed `CSI 0 n` and `CSI 3 n` terminal status reports.
 //! - [`InputDecoder`], stateful classification for input split across byte chunks.
 //! - [`InputEvent`], basic classification for simple text, control, key, and undecoded input.
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
@@ -58,7 +59,7 @@ mod tokio_session;
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use input::{
     ControlInput, CsiInput, CursorPositionReport, CursorPositionReportMatch, InputBytes,
-    InputDecoder, InputEvent, KeyInput,
+    InputDecoder, InputEvent, KeyInput, TerminalStatus, TerminalStatusReport,
 };
 pub use session::TerminalSession;
 pub use terminal::{Error, Result, Terminal, TerminalSize};

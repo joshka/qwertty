@@ -169,6 +169,20 @@ for later `next_event` calls.
 This is not a general query router. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.
 
+## Query Routing Boundary
+
+Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal
+write, flush, runtime-backed read, decoder state, timeout, and preserved event queue needed for
+typed query helpers.
+
+The public API remains method-based for now. New live queries should start as typed session methods
+that document the bytes they emit, the response shape they wait for, timeout behavior, and which
+unrelated input stays visible through `next_event`.
+
+An internal session-owned router may share mechanics between those helpers, but qwertty does not
+yet expose a generic query router, concurrent query registry, capability probing API, or
+runtime-agnostic async query trait.
+
 ## Platform Support
 
 The live terminal implementation currently supports Unix. Unsupported platforms expose the same

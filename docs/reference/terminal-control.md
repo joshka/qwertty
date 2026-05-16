@@ -140,6 +140,10 @@ Unrelated decoded events that arrive before the matching report remain available
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
 support multiple simultaneous live queries, capability probing, or query registration.
 
+Future live query helpers should keep this boundary: command helpers describe emitted bytes,
+response parsers describe interpreted input, and `TokioTerminalSession` owns the live routing
+state that connects a request to a response without hiding unrelated input.
+
 ### Erase In Display
 
 `ED` means "Erase in Display". qwertty's first screen clear helper uses mode `2`, which erases the

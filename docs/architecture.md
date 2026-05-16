@@ -52,6 +52,21 @@ cancellation at the event-delivery boundary. It is not a thin async wrapper arou
 Runtime-agnostic async traits are deferred until a concrete Tokio implementation proves behavior
 that another runtime can share without adding unnecessary abstraction.
 
+## Query Routing Boundary
+
+Live query routing starts inside `TokioTerminalSession`. The session owns terminal writes, flushes,
+runtime-backed reads, decoder state, unrelated decoded input, query timeouts, and cancellation
+semantics for the first async query helpers.
+
+Public query APIs should remain narrow typed session methods until qwertty has enough query shapes
+to prove a broader abstraction. A private session-owned router may collect pending query state and
+shared matching mechanics, but a public generic router, concurrent query registry, capability
+probing surface, and runtime-agnostic query trait are deferred.
+
+Unrelated decoded input is always part of the session event stream. Query helpers that read events
+before their response must keep those events queued for later `TokioTerminalSession::next_event`
+calls.
+
 ## Design Rule
 
 Public APIs are conservative until examples prove the shape. Durable choices about crate

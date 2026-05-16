@@ -32,9 +32,10 @@ leave cleanup. It does not yet own input parsing, query routing, alternate scree
 cleanup, or async runtime integration.
 
 The first input layer owns raw bytes read from a terminal session, basic text/control
-classification, and complete UTF-8 text within one input chunk. It intentionally leaves UTF-8
-buffering across reads, Escape, Control Sequence Introducer, paste, mouse, focus, query response,
-and vendor protocol interpretation to later parser and policy slices.
+classification, complete UTF-8 text within one input chunk, and a tiny documented Escape parser for
+common arrow keys. It intentionally leaves UTF-8 buffering across reads, broader Control Sequence
+Introducer parsing, paste, mouse, focus, query response, and vendor protocol interpretation to
+later parser and policy slices.
 
 ## Design Rule
 

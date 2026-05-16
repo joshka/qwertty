@@ -2,7 +2,8 @@
 
 `InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
 session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
-complete UTF-8 text, ASCII control bytes, and bytes qwertty intentionally leaves undecoded.
+complete UTF-8 text, ASCII control bytes, a small set of Escape-prefixed keys, and bytes qwertty
+intentionally leaves undecoded.
 
 ## Runtime Boundary
 
@@ -61,15 +62,15 @@ In byte form:
 `InputBytes::events` classifies the small subset qwertty can name honestly today:
 
 ```rust
-use qwertty::{ControlInput, InputBytes, InputEvent};
+use qwertty::{ControlInput, InputBytes, InputEvent, KeyInput};
 
-let input = InputBytes::new("Aé\r\u{3}".as_bytes().to_vec());
+let input = InputBytes::new(b"A\x1b[A\r\x03".to_vec());
 
 assert_eq!(
     input.events(),
     vec![
         InputEvent::Text('A'),
-        InputEvent::Text('é'),
+        InputEvent::Key(KeyInput::Up),
         InputEvent::Control(ControlInput::CarriageReturn),
         InputEvent::Control(ControlInput::Other(0x03)),
     ]
@@ -98,17 +99,26 @@ The classified control set is ASCII C0 controls and Delete. Common controls have
 `ControlInput` variants such as `Tab`, `LineFeed`, `CarriageReturn`, `Escape`, and `Delete`. Less
 common controls remain available as `ControlInput::Other(byte)`.
 
-Escape is classified as `ControlInput::Escape` only when it appears by itself. Escape-prefixed
-input remains undecoded:
+## Escape-Prefixed Keys
+
+Escape is classified as `ControlInput::Escape` only when it appears by itself. The first Escape
+parser recognizes these common arrow-key encodings:
+
+- Up arrow: `ESC [ A`, byte form `\x1b[A`.
+- Down arrow: `ESC [ B`, byte form `\x1b[B`.
+- Right arrow: `ESC [ C`, byte form `\x1b[C`.
+- Left arrow: `ESC [ D`, byte form `\x1b[D`.
+
+Unknown or incomplete Escape-prefixed input remains undecoded:
 
 ```rust
 use qwertty::{InputBytes, InputEvent};
 
-let input = InputBytes::new(b"\x1b[A".to_vec());
+let input = InputBytes::new(b"\x1b[Z".to_vec());
 
 assert_eq!(
     input.events(),
-    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[A".to_vec()))]
+    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec()))]
 );
 ```
 
@@ -117,8 +127,8 @@ assert_eq!(
 The basic event layer does not classify or interpret:
 
 - incomplete or invalid UTF-8;
-- Escape-prefixed key sequences;
-- Control Sequence Introducer messages;
+- unsupported or incomplete Escape-prefixed key sequences;
+- broader Control Sequence Introducer messages;
 - terminal query responses;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.

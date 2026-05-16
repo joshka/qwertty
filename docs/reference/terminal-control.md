@@ -41,6 +41,19 @@ let command = b"\x1b[3;5H";
 assert_eq!(command, &[0x1b, b'[', b'3', b';', b'5', b'H']);
 ```
 
+CSI input uses the same syntax shape. qwertty preserves complete CSI input as bytes plus
+parameters, intermediates, and the final byte before later query-routing or policy layers interpret
+it.
+
+```rust
+use qwertty::CsiInput;
+
+let report = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
+
+assert_eq!(report.parameter_bytes(), b"?25");
+assert_eq!(report.final_byte(), b'n');
+```
+
 ### ECMA-48
 
 ECMA-48 is the control-function standard behind many terminal cursor, screen, and text controls.

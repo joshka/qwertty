@@ -2,9 +2,9 @@
 
 `InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
 session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
-complete UTF-8 text, ASCII control bytes, a small set of Escape-prefixed keys, and bytes qwertty
-intentionally leaves undecoded. `InputDecoder` owns the first stateful decoding boundary for input
-that arrives split across terminal reads.
+complete UTF-8 text, ASCII control bytes, a small set of Escape-prefixed keys, complete Control
+Sequence Introducer input, and bytes qwertty intentionally leaves undecoded. `InputDecoder` owns the
+first stateful decoding boundary for input that arrives split across terminal reads.
 
 ## Runtime Boundary
 
@@ -63,15 +63,16 @@ In byte form:
 `InputBytes::events` classifies the small subset qwertty can name honestly today:
 
 ```rust
-use qwertty::{ControlInput, InputBytes, InputEvent, KeyInput};
+use qwertty::{ControlInput, CsiInput, InputBytes, InputEvent, KeyInput};
 
-let input = InputBytes::new(b"A\x1b[A\r\x03".to_vec());
+let input = InputBytes::new(b"A\x1b[A\x1b[?25n\r\x03".to_vec());
 
 assert_eq!(
     input.events(),
     vec![
         InputEvent::Text('A'),
         InputEvent::Key(KeyInput::Up),
+        InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap()),
         InputEvent::Control(ControlInput::CarriageReturn),
         InputEvent::Control(ControlInput::Other(0x03)),
     ]
@@ -99,11 +100,11 @@ two `TerminalSession::read_input` calls, each incomplete chunk remains undecoded
 ## Stateful Decoding
 
 `InputDecoder` buffers the boundary cases qwertty can describe today: incomplete UTF-8 scalar
-values and incomplete documented Escape-prefixed key sequences. It accepts byte slices or
-`InputBytes` values and returns the same `InputEvent` values as the chunk-local classifier:
+values and incomplete Control Sequence Introducer input. It accepts byte slices or `InputBytes`
+values and returns the same `InputEvent` values as the chunk-local classifier:
 
 ```rust
-use qwertty::{InputDecoder, InputEvent, KeyInput};
+use qwertty::{CsiInput, InputDecoder, InputEvent, KeyInput};
 
 let mut decoder = InputDecoder::new();
 
@@ -112,6 +113,12 @@ assert_eq!(decoder.decode([0xa9]), vec![InputEvent::Text('é')]);
 
 assert!(decoder.decode(b"\x1b[").is_empty());
 assert_eq!(decoder.decode(b"A"), vec![InputEvent::Key(KeyInput::Up)]);
+
+assert!(decoder.decode(b"\x1b[?25").is_empty());
+assert_eq!(
+    decoder.decode(b"n"),
+    vec![InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap())]
+);
 ```
 
 `InputDecoder::pending_bytes` exposes the exact buffered bytes for diagnostics and tests. The
@@ -148,27 +155,61 @@ parser recognizes these common arrow-key encodings:
 - Right arrow: `ESC [ C`, byte form `\x1b[C`.
 - Left arrow: `ESC [ D`, byte form `\x1b[D`.
 
-Unknown or incomplete Escape-prefixed input remains undecoded:
+Other complete CSI input is preserved as `CsiInput` instead of being interpreted:
+
+```rust
+use qwertty::{CsiInput, InputBytes, InputEvent};
+
+let input = InputBytes::new(b"\x1b[?25n".to_vec());
+
+assert_eq!(
+    input.events(),
+    vec![InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap())]
+);
+```
+
+Unsupported non-CSI Escape-prefixed input remains undecoded:
 
 ```rust
 use qwertty::{InputBytes, InputEvent};
 
-let input = InputBytes::new(b"\x1b[Z".to_vec());
+let input = InputBytes::new(b"\x1bZ".to_vec());
 
 assert_eq!(
     input.events(),
-    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[Z".to_vec()))]
+    vec![InputEvent::Undecoded(InputBytes::new(b"\x1bZ".to_vec()))]
 );
 ```
+
+## CSI Input
+
+`CsiInput` preserves the original bytes and exposes the syntax qwertty can identify without
+assigning meaning. The supported shape is `ESC [`, followed by parameter bytes `0x30..=0x3f`,
+intermediate bytes `0x20..=0x2f`, and one final byte `0x40..=0x7e`.
+
+```rust
+use qwertty::CsiInput;
+
+let csi = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
+
+assert_eq!(csi.as_bytes(), b"\x1b[?25n");
+assert_eq!(csi.parameter_bytes(), b"?25");
+assert_eq!(csi.private_marker_bytes(), b"?");
+assert_eq!(csi.intermediate_bytes(), b"");
+assert_eq!(csi.final_byte(), b'n');
+```
+
+This is syntax, not policy. qwertty does not yet decide whether a CSI value is a cursor position
+report, device status report, keyboard enhancement response, mouse event, or vendor extension.
 
 ## What Remains Undecoded
 
 The basic event layer does not classify or interpret:
 
 - incomplete or invalid UTF-8;
-- unsupported or incomplete Escape-prefixed key sequences;
-- broader Control Sequence Introducer messages;
+- unsupported or incomplete Escape-prefixed sequences;
 - terminal query responses;
+- interpreted Control Sequence Introducer meanings;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 

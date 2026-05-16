@@ -40,13 +40,14 @@ meaning. Those interpretations belong to later parser and policy slices.
 
 ## Async Runtime Boundary
 
-The first async public surface is a Tokio-specific session owner behind an optional `tokio` Cargo
-feature. The feature is disabled by default so command, protocol, terminal device, and
-runtime-neutral session users do not compile Tokio unless they opt in.
+The first async public surface is `TokioTerminalSession`, a Tokio-specific session owner behind an
+optional `tokio` Cargo feature. The feature is disabled by default so command, protocol, terminal
+device, and runtime-neutral session users do not compile Tokio unless they opt in.
 
-The Tokio session owner should use runtime-backed terminal reads and writes, feed reads through
-`InputDecoder`, preserve unrelated decoded input, and document cancellation at the event-delivery
-boundary. It should not be a thin async wrapper around the synchronous `TerminalSession` methods.
+The Tokio session owner uses runtime-backed terminal reads and writes, feeds reads through
+`InputDecoder`, preserves unrelated decoded input in its internal event queue, and documents
+cancellation at the event-delivery boundary. It is not a thin async wrapper around the synchronous
+`TerminalSession` methods.
 
 Runtime-agnostic async traits are deferred until a concrete Tokio implementation proves behavior
 that another runtime can share without adding unnecessary abstraction.

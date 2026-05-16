@@ -11,10 +11,10 @@ first stateful decoding boundary for input that arrives split across terminal re
 This slice adds no runtime dependency and no Cargo feature. `TerminalSession::read_input` uses the
 same runtime-neutral terminal device owner as output and cleanup.
 
-qwertty remains async-first. The first async public surface should be a Tokio-specific session
-owner behind an optional `tokio` Cargo feature. That owner should read through runtime-backed
-terminal I/O, feed bytes through `InputDecoder`, preserve unrelated decoded events, and document
-cancellation behavior at the event-delivery boundary.
+qwertty remains async-first. The first async public surface is `TokioTerminalSession`, a
+Tokio-specific session owner behind an optional `tokio` Cargo feature. It reads through
+runtime-backed terminal I/O, feeds bytes through `InputDecoder`, preserves unrelated decoded
+events, and documents cancellation behavior at the event-delivery boundary.
 
 Adding an async method that only wraps a blocking file read would make the public API look async
 without proving the event boundary. Runtime-agnostic async traits are also deferred until the Tokio

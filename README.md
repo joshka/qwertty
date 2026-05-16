@@ -14,8 +14,9 @@ session lifecycle, raw terminal input bytes, basic input events, and a small sta
 It can build terminal output bytes, open the current terminal, manage raw mode, query terminal
 size, write ordered session output, read input bytes, classify simple UTF-8 text/control/key input
 across chunks, preserve complete CSI input syntax, parse and match cursor position reports, flush
-explicitly, and leave with reported cleanup errors. It does not route live terminal query responses
-yet.
+explicitly, and leave with reported cleanup errors. With the optional `tokio` feature on Unix, it
+also exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events,
+and explicit cleanup. It does not route live terminal query responses yet.
 
 ## Small Example
 
@@ -44,6 +45,25 @@ fn main() -> qwertty::Result<()> {
         .text("Ready\r\n")?
         .flush()?;
     session.leave()
+}
+```
+
+## Tokio Session Example
+
+Enable the optional `tokio` feature to use the Tokio-backed session owner on Unix:
+
+```rust,no_run
+use qwertty::{ProtocolPosition, TokioTerminalSession, commands};
+
+async fn run() -> qwertty::Result<()> {
+    let mut session = TokioTerminalSession::open()?;
+    session.command(commands::screen::clear()).await?;
+    session
+        .command(commands::cursor::move_to(ProtocolPosition::ORIGIN))
+        .await?;
+    session.text("Ready\r\n").await?;
+    session.flush().await?;
+    session.leave().await
 }
 ```
 

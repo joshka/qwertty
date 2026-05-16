@@ -5,3 +5,4 @@
 
 #![doc = include_str!("../docs/reference/terminal-control.md")]
 #![doc = include_str!("../docs/reference/terminal-device.md")]
+#![doc = include_str!("../docs/reference/terminal-session.md")]

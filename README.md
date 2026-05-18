@@ -77,6 +77,9 @@ See `qwertty::docs` for the checked-in examples reference page on docs.rs. It gr
 examples by purpose and points at the smallest runnable example for each session, input, and
 query-routing contract.
 
+See `qwertty::docs` for the platform support reference page as well. It explains the current
+Unix-first live terminal boundary and what unsupported platforms return today.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

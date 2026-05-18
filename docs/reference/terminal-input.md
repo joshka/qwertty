@@ -378,3 +378,6 @@ errors can be reported. Drop remains a best-effort fallback through the underlyi
 
 The live terminal implementation currently supports Unix. Unsupported platforms expose the same
 public types where possible and return `Error::Unsupported` for live terminal operations.
+
+See [Platform Support](crate::docs#platform-support) for the durable user-facing summary of that
+boundary.

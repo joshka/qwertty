@@ -298,3 +298,6 @@ real event loop and child-process handoff.
 
 The live terminal implementation currently supports Unix. Unsupported platforms expose the same
 public types where possible and return `Error::Unsupported` for live terminal operations.
+
+See [Platform Support](crate::docs#platform-support) for the current Unix-first support boundary
+and the documented unsupported behavior on other platforms.

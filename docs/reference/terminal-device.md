@@ -71,3 +71,6 @@ fn main() -> qwertty::Result<()> {
 
 The first terminal device implementation is Unix-only. Other platforms return a documented
 unsupported error until their device behavior is implemented.
+
+See [Platform Support](crate::docs#platform-support) for the durable user-facing summary of what is
+implemented on Unix today and what unsupported platforms return.

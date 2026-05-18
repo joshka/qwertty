@@ -86,6 +86,9 @@ See [Tokio Input Ownership And Query Handoff](
 crate::docs#tokio-input-ownership-and-query-handoff) for the single-owner model, query/event
 interaction, timeout behavior, and orderly handoff pattern.
 
+See [Checked-In Examples](crate::docs#checked-in-examples) for a durable index of the runnable
+session, input, and query-routing examples shipped with the crate.
+
 Enable the feature in `Cargo.toml`:
 
 ```toml

@@ -73,41 +73,9 @@ async fn run() -> qwertty::Result<()> {
 }
 ```
 
-See `examples/tokio_terminal_queries.rs` for a small checked-in Tokio example that opens a session,
-issues live queries, and leaves explicitly.
-
-See `examples/tokio_input_events.rs` for a small checked-in Tokio example centered on
-`TokioTerminalSession::next_event`.
-
-See `examples/tokio_query_error_handling.rs` for a small checked-in Tokio example that matches
-live query success, timeout, and terminal read failure explicitly.
-
-See `examples/tokio_query_cancellation.rs` for a small checked-in Tokio example that starts a live
-query, cancels it explicitly, and continues using the session.
-
-See `examples/tokio_terminal_status_cancellation.rs` for a small checked-in Tokio example that
-starts a live terminal-status query, cancels it explicitly, and continues using the session.
-
-See `examples/tokio_late_query_reply.rs` for a small checked-in Tokio example that times out a
-live query and then treats a late reply as ordinary decoded input.
-
-See `examples/tokio_wrong_report_query.rs` for a small checked-in Tokio example that times out one
-live query helper and then treats another helper's report as ordinary decoded input.
-
-See `examples/tokio_unmatched_query_input.rs` for a small checked-in Tokio example that times out
-one live query helper and then treats unmatched query-shaped CSI as ordinary decoded input.
-
-See `examples/tokio_preserved_unrelated_input.rs` for a small checked-in Tokio example that keeps
-ordinary unrelated input visible after a live query helper waits.
-
-See `examples/tokio_terminal_status_preserved_input.rs` for a small checked-in Tokio example that
-keeps ordinary unrelated input visible after a terminal-status query waits.
-
-See `examples/tokio_terminal_status_wrong_report.rs` for a small checked-in Tokio example that
-keeps a cursor-position report visible after a terminal-status query waits.
-
-See `examples/tokio_terminal_status_unmatched_query_input.rs` for a small checked-in Tokio example
-that keeps unmatched query-shaped CSI visible after a terminal-status query waits.
+See `qwertty::docs` for the checked-in examples reference page on docs.rs. It groups the current
+examples by purpose and points at the smallest runnable example for each session, input, and
+query-routing contract.
 
 ## Project Shape
 

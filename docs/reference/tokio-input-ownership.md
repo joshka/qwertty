@@ -67,6 +67,9 @@ session.leave().await
 qwertty still does not expose a generic public query router, concurrent live queries, or capability
 probing. Keep live query use narrow and session-owned.
 
+For a small checked-in example that opens a Tokio session, performs live queries, writes output,
+and leaves explicitly, see `examples/tokio_terminal_queries.rs` in the repository.
+
 ## Cancellation And Timeouts
 
 Cancellation is defined at the session boundary.

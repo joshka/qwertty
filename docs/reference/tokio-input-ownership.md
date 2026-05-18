@@ -125,6 +125,10 @@ cursor-position query sees a terminal-status report, or a live terminal-status q
 cursor-position report, the waiting helper does not consume the wrong report. A later
 `next_event` call receives it through the normal decoded event stream.
 
+The same is true for query-shaped CSI that does not match any current helper. Unsupported or
+malformed query-shaped CSI remains in the normal decoded event stream instead of being swallowed by
+the waiting helper.
+
 ## Handoff To Another Program
 
 When a TUI or terminal application needs to hand control to another program, such as an editor or

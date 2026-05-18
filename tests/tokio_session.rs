@@ -254,6 +254,50 @@ async fn tokio_session_cursor_query_wrong_report_becomes_next_csi_event() {
 }
 
 #[tokio::test]
+async fn tokio_session_cursor_query_unmatched_csi_becomes_next_event() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let result = session
+            .request_cursor_position(Duration::from_millis(100))
+            .await;
+        (session, result)
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read cursor position request");
+        assert_eq!(request, b"\x1b[6n");
+        master
+            .write_all(b"\x1b[?25n")
+            .expect("write unmatched query-shaped csi");
+    };
+
+    let ((mut session, result), ()) = tokio::join!(query, peer);
+
+    assert!(matches!(
+        result,
+        Err(Error::QueryTimeout {
+            operation: "cursor position query",
+            ..
+        })
+    ));
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unmatched csi"),
+        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[?25n").expect("parse unmatched csi"))
+    );
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
 async fn tokio_session_cursor_query_late_reply_becomes_next_csi_event() {
     let Some((mut master, slave_path)) = open_test_pty() else {
         return;
@@ -515,6 +559,50 @@ async fn tokio_session_terminal_status_query_wrong_report_becomes_next_csi_event
         InputEvent::Csi(
             qwertty::CsiInput::from_bytes(b"\x1b[12;34R").expect("parse wrong-report csi")
         )
+    );
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_terminal_status_query_unmatched_csi_becomes_next_event() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let result = session
+            .request_terminal_status(Duration::from_millis(100))
+            .await;
+        (session, result)
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        master
+            .write_all(b"\x1b[?25n")
+            .expect("write unmatched query-shaped csi");
+    };
+
+    let ((mut session, result), ()) = tokio::join!(query, peer);
+
+    assert!(matches!(
+        result,
+        Err(Error::QueryTimeout {
+            operation: "terminal status query",
+            ..
+        })
+    ));
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unmatched csi"),
+        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[?25n").expect("parse unmatched csi"))
     );
     session.leave().await.expect("leave Tokio session");
 }

@@ -333,6 +333,10 @@ cursor-position query does not consume terminal-status reports, and a live termi
 does not consume cursor-position reports. Those reports remain visible through the ordinary
 decoded input path.
 
+Query-shaped CSI that does not form a valid cursor-position report or terminal-status report also
+remains visible through the ordinary decoded input path. The live helper does not consume it just
+because it looked like query-related CSI.
+
 The first router boundary is internal to the Tokio session owner. qwertty does not yet expose a
 generic query router, multiple simultaneous live queries, capability probing, or a runtime-agnostic
 async query trait.

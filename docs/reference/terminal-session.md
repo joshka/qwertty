@@ -178,6 +178,10 @@ The same rule applies to typed reports that belong to some other helper. If a cu
 query sees `CSI 0 n` or `CSI 3 n` while it is still waiting for `CSI row ; column R`, the
 cursor-position helper leaves that terminal-status report in the ordinary decoded input path.
 
+The helper also leaves query-shaped CSI input alone when that input is not a valid
+cursor-position report at all. Unsupported or malformed query-shaped CSI remains available through
+the ordinary decoded input path.
+
 `TokioTerminalSession::request_terminal_status` uses the same session-owned boundary for terminal
 status reports:
 
@@ -218,6 +222,9 @@ timed-out helper.
 Likewise, if a terminal-status query sees a cursor-position report while it is waiting for a
 status reply, that cursor-position report remains available through the ordinary decoded input
 path instead of being consumed as a status result.
+
+Unsupported or malformed query-shaped CSI follows the same rule. If the input does not form a
+valid terminal-status report, the helper leaves it in the ordinary decoded input path.
 
 These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.

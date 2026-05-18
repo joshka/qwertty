@@ -85,6 +85,9 @@ live query success, timeout, and terminal read failure explicitly.
 See `examples/tokio_query_cancellation.rs` for a small checked-in Tokio example that starts a live
 query, cancels it explicitly, and continues using the session.
 
+See `examples/tokio_late_query_reply.rs` for a small checked-in Tokio example that times out a
+live query and then treats a late reply as ordinary decoded input.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

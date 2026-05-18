@@ -229,6 +229,9 @@ Late matching replies follow the same rule. After a timeout, a later `CSI 0 n` o
 reply is delivered through the ordinary decoded input path instead of being consumed by the
 timed-out helper.
 
+For a small checked-in Tokio example that times out a live query and then handles a late reply
+through `next_event`, see `examples/tokio_late_query_reply.rs` in the repository.
+
 Likewise, if a terminal-status query sees a cursor-position report while it is waiting for a
 status reply, that cursor-position report remains available through the ordinary decoded input
 path instead of being consumed as a status result.

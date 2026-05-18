@@ -126,6 +126,9 @@ terminal-status reply reaches the session after the timeout has already been ret
 timed-out helper does not consume it later. Under the current API, a later `next_event` call
 receives that late reply through the normal decoded event stream, typically as `InputEvent::Csi(...)`.
 
+For a small checked-in example that times out a live query and then handles a late reply through
+`next_event`, see `examples/tokio_late_query_reply.rs` in the repository.
+
 If the terminal path closes before a matching reply arrives, the helper returns a terminal read
 error instead of waiting for the timeout. Under the current implementation, that error is
 `Error::ReadTerminal` with an `UnexpectedEof` source.

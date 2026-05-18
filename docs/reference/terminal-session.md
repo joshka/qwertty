@@ -189,6 +189,10 @@ preserved unmatched query-shaped CSI through `next_event`, see
 For a small checked-in Tokio example that starts a live query, cancels it explicitly, and keeps
 using the session afterward, see `examples/tokio_query_cancellation.rs` in the repository.
 
+For a small checked-in Tokio example that starts `request_terminal_status`, cancels it explicitly,
+and keeps using the session afterward, see
+`examples/tokio_terminal_status_cancellation.rs` in the repository.
+
 If the terminal path closes before any matching report arrives, the helper returns
 `Error::ReadTerminal` with an `UnexpectedEof` source instead of waiting until the timeout.
 

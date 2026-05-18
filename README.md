@@ -91,6 +91,9 @@ live query and then treats a late reply as ordinary decoded input.
 See `examples/tokio_wrong_report_query.rs` for a small checked-in Tokio example that times out one
 live query helper and then treats another helper's report as ordinary decoded input.
 
+See `examples/tokio_unmatched_query_input.rs` for a small checked-in Tokio example that times out
+one live query helper and then treats unmatched query-shaped CSI as ordinary decoded input.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

@@ -146,6 +146,9 @@ The same is true for query-shaped CSI that does not match any current helper. Un
 malformed query-shaped CSI remains in the normal decoded event stream instead of being swallowed by
 the waiting helper.
 
+For a small checked-in example that times out a live query and then handles unmatched query-shaped
+CSI through `next_event`, see `examples/tokio_unmatched_query_input.rs` in the repository.
+
 ## Handoff To Another Program
 
 When a TUI or terminal application needs to hand control to another program, such as an editor or

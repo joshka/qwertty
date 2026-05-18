@@ -243,6 +243,10 @@ repository.
 Unsupported or malformed query-shaped CSI follows the same rule. If the input does not form a
 valid terminal-status report, the helper leaves it in the ordinary decoded input path.
 
+For a small checked-in Tokio example that times out a live query and then handles unmatched
+query-shaped CSI through `next_event`, see `examples/tokio_unmatched_query_input.rs` in the
+repository.
+
 These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.
 

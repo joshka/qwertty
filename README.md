@@ -76,6 +76,9 @@ async fn run() -> qwertty::Result<()> {
 See `examples/tokio_terminal_queries.rs` for a small checked-in Tokio example that opens a session,
 issues live queries, and leaves explicitly.
 
+See `examples/tokio_input_events.rs` for a small checked-in Tokio example centered on
+`TokioTerminalSession::next_event`.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

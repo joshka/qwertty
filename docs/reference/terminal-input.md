@@ -288,8 +288,28 @@ let csi = CsiInput::from_bytes(b"\x1b[?0n").unwrap();
 assert_eq!(TerminalStatusReport::from_csi(&csi), None);
 ```
 
-This parser does not prove which query caused the report. qwertty does not yet expose a live Tokio
-terminal status query helper.
+`TerminalStatusReport::match_events` separates the first terminal status report from decoded input
+events while returning all unrelated events to the caller:
+
+```rust
+use qwertty::{CsiInput, InputEvent, TerminalStatus, TerminalStatusReport};
+
+let csi = CsiInput::from_bytes(b"\x1b[0n").unwrap();
+let matched = TerminalStatusReport::match_events(vec![
+    InputEvent::Text('x'),
+    InputEvent::Csi(csi),
+]);
+
+assert_eq!(
+    matched.report().map(TerminalStatusReport::status),
+    Some(TerminalStatus::Ready)
+);
+assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
+```
+
+This parser and matcher do not prove which query caused the report. Live status requests belong to
+`TokioTerminalSession::request_terminal_status`, which owns terminal writes, flushing, timeout
+policy, and preserved unrelated input.
 
 ## Query Routing
 

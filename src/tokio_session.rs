@@ -17,8 +17,8 @@ use tokio::io::unix::AsyncFd;
 use tokio::time::{Instant, timeout_at};
 
 use crate::{
-    Command, CursorPositionReport, InputBytes, InputDecoder, InputEvent, TerminalSize, commands,
-    terminal,
+    Command, CursorPositionReport, InputBytes, InputDecoder, InputEvent, TerminalSize,
+    TerminalStatusReport, commands, terminal,
 };
 
 const DEV_TTY: &str = "/dev/tty";
@@ -347,6 +347,85 @@ impl TokioTerminalSession {
         }
     }
 
+    /// Requests and reads terminal status.
+    ///
+    /// This method emits the Device Status Report request `CSI 5 n`, flushes output, and reads
+    /// decoded input events until it sees a `CSI 0 n` ready report or a `CSI 3 n` malfunction
+    /// report. Events read before the report that are not the report remain queued in their
+    /// original order for later [`TokioTerminalSession::next_event`] calls.
+    ///
+    /// `timeout` bounds the whole request/response operation. If the timeout elapses,
+    /// [`terminal::Error::QueryTimeout`] is returned. Canceling the future while it is waiting for
+    /// terminal input leaves the session usable, and unrelated decoded events already seen by the
+    /// query remain queued for later calls.
+    ///
+    /// This is a single-query convenience method. It does not implement a general query registry,
+    /// concurrent query routing, capability probing, or terminal feature detection.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use qwertty::{TerminalStatus, TokioTerminalSession};
+    ///
+    /// # async fn run() -> qwertty::Result<()> {
+    /// let mut session = TokioTerminalSession::open()?;
+    /// let report = session
+    ///     .request_terminal_status(Duration::from_secs(1))
+    ///     .await?;
+    ///
+    /// assert_eq!(report.status(), TerminalStatus::Ready);
+    ///
+    /// session.leave().await
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the timeout
+    /// elapses before a terminal status report is received.
+    pub async fn request_terminal_status(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<TerminalStatusReport> {
+        self.command(commands::terminal::request_status()).await?;
+        self.flush().await?;
+
+        let deadline = Instant::now() + timeout;
+        if let Some(report) = self.query_routing.match_terminal_status_report() {
+            return Ok(report);
+        }
+
+        loop {
+            let mut buffer = [0; READ_BUFFER_LEN];
+            let input = match timeout_at(deadline, self.read_input(&mut buffer)).await {
+                Ok(Ok(input)) => input,
+                Ok(Err(err)) => return Err(err),
+                Err(_elapsed) => {
+                    return Err(terminal::Error::query_timeout(
+                        "terminal status query",
+                        timeout,
+                    ));
+                }
+            };
+
+            if input.is_empty() {
+                return Err(terminal::Error::read_terminal(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "terminal input closed before a terminal status report was available",
+                )));
+            }
+
+            let matched = TerminalStatusReport::match_events(self.decoder.decode(input));
+            let report = self.query_routing.push_terminal_status_match(matched);
+
+            if let Some(report) = report {
+                return Ok(report);
+            }
+        }
+    }
+
     /// Flushes buffered terminal output through Tokio readiness.
     ///
     /// Call this when the preceding command, byte, and text writes must be visible before later
@@ -425,6 +504,27 @@ impl QueryRouting {
         &mut self,
         matched: crate::CursorPositionReportMatch,
     ) -> Option<CursorPositionReport> {
+        let (report, remaining) = matched.into_parts();
+        self.push_events(remaining);
+        report
+    }
+
+    fn match_terminal_status_report(&mut self) -> Option<TerminalStatusReport> {
+        if self.events.is_empty() {
+            return None;
+        }
+
+        let events = self.events.drain(..);
+        let matched = TerminalStatusReport::match_events(events);
+        let (report, remaining) = matched.into_parts();
+        self.push_front_events(remaining);
+        report
+    }
+
+    fn push_terminal_status_match(
+        &mut self,
+        matched: crate::TerminalStatusReportMatch,
+    ) -> Option<TerminalStatusReport> {
         let (report, remaining) = matched.into_parts();
         self.push_events(remaining);
         report

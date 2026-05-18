@@ -171,8 +171,27 @@ let report = TerminalStatusReport::from_csi(&csi).unwrap();
 assert_eq!(report.status(), TerminalStatus::Ready);
 ```
 
-This slice only adds command encoding and report parsing. qwertty does not yet expose a live Tokio
-terminal status query helper.
+With the optional `tokio` feature on Unix, `TokioTerminalSession::request_terminal_status` writes
+the request, flushes output, waits for the matching report, and applies a caller-provided timeout:
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::{TerminalStatus, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+let report = session.request_terminal_status(Duration::from_secs(1)).await?;
+
+assert_eq!(report.status(), TerminalStatus::Ready);
+
+session.leave().await
+# }
+```
+
+Unrelated decoded events that arrive before the matching report remain available through
+`TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
+support multiple simultaneous live queries, capability probing, or query registration.
 
 ### Erase In Display
 

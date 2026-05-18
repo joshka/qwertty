@@ -6,7 +6,7 @@
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
 //! position and terminal status report parsing. With the optional `tokio` feature on Unix, it also
 //! exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and
-//! explicit cleanup, including a live cursor position query.
+//! explicit cleanup, including live cursor position and terminal status queries.
 //!
 //! The main types are:
 //!
@@ -60,6 +60,7 @@ pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use input::{
     ControlInput, CsiInput, CursorPositionReport, CursorPositionReportMatch, InputBytes,
     InputDecoder, InputEvent, KeyInput, TerminalStatus, TerminalStatusReport,
+    TerminalStatusReportMatch,
 };
 pub use session::TerminalSession;
 pub use terminal::{Error, Result, Terminal, TerminalSize};

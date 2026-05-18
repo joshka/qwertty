@@ -414,10 +414,66 @@ impl TerminalStatusReport {
         Some(Self::new(status))
     }
 
+    /// Matches the first terminal status report from decoded input events.
+    ///
+    /// The returned [`TerminalStatusReportMatch`] preserves every event that is not the first
+    /// matched terminal status report. This is deterministic event-level matching only; it does
+    /// not read from a terminal, prove which request caused the report, or apply timeout policy.
+    #[must_use]
+    pub fn match_events(events: impl IntoIterator<Item = InputEvent>) -> TerminalStatusReportMatch {
+        let mut report = None;
+        let mut remaining = Vec::new();
+
+        for event in events {
+            if report.is_none()
+                && let InputEvent::Csi(csi) = &event
+                && let Some(parsed) = Self::from_csi(csi)
+            {
+                report = Some(parsed);
+                continue;
+            }
+
+            remaining.push(event);
+        }
+
+        TerminalStatusReportMatch { report, remaining }
+    }
+
     /// Returns the reported terminal status.
     #[must_use]
     pub const fn status(self) -> TerminalStatus {
         self.status
+    }
+}
+
+/// Result of matching a terminal status report from decoded input events.
+///
+/// The first matched report is separated from the remaining events. Text, controls, keys,
+/// unrelated CSI input, malformed reports, undecoded bytes, and duplicate terminal status reports
+/// after the first match remain available to the caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalStatusReportMatch {
+    report: Option<TerminalStatusReport>,
+    remaining: Vec<InputEvent>,
+}
+
+impl TerminalStatusReportMatch {
+    /// Returns the matched terminal status report, if one was present.
+    #[must_use]
+    pub const fn report(&self) -> Option<TerminalStatusReport> {
+        self.report
+    }
+
+    /// Returns the events that were not consumed by the match.
+    #[must_use]
+    pub fn remaining_events(&self) -> &[InputEvent] {
+        &self.remaining
+    }
+
+    /// Consumes the match result into the report and remaining events.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<TerminalStatusReport>, Vec<InputEvent>) {
+        (self.report, self.remaining)
     }
 }
 

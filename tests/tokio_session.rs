@@ -8,7 +8,9 @@ use std::os::fd::AsFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use qwertty::{Error, InputEvent, KeyInput, ProtocolPosition, TokioTerminalSession, commands};
+use qwertty::{
+    Error, InputEvent, KeyInput, ProtocolPosition, TerminalStatus, TokioTerminalSession, commands,
+};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 use rustix::termios::{LocalModes, Termios, tcgetattr};
@@ -270,6 +272,157 @@ async fn tokio_session_leave_restores_cooked_mode() {
         termios_without_pending_input(restored),
         "leave should restore captured cooked mode"
     );
+}
+
+#[tokio::test]
+async fn tokio_session_requests_terminal_status() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let report = session
+            .request_terminal_status(Duration::from_secs(1))
+            .await
+            .expect("request terminal status");
+        (session, report)
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        master
+            .write_all(b"\x1b[0n")
+            .expect("write terminal status report");
+    };
+
+    let ((session, report), ()) = tokio::join!(query, peer);
+
+    assert_eq!(report.status(), TerminalStatus::Ready);
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_terminal_status_query_preserves_unrelated_events() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let report = session
+            .request_terminal_status(Duration::from_secs(1))
+            .await
+            .expect("request terminal status");
+        (session, report)
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        master
+            .write_all(b"x\x1b[3n")
+            .expect("write unrelated input and report");
+    };
+
+    let ((mut session, report), ()) = tokio::join!(query, peer);
+
+    assert_eq!(report.status(), TerminalStatus::Malfunction);
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unrelated event"),
+        InputEvent::Text('x')
+    );
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_terminal_status_query_timeout_preserves_unrelated_events() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let result = session
+            .request_terminal_status(Duration::from_millis(100))
+            .await;
+        (session, result)
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        master.write_all(b"x").expect("write unrelated input");
+    };
+
+    let ((mut session, result), ()) = tokio::join!(query, peer);
+
+    assert!(matches!(
+        result,
+        Err(Error::QueryTimeout {
+            operation: "terminal status query",
+            ..
+        })
+    ));
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unrelated event"),
+        InputEvent::Text('x')
+    );
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_terminal_status_query_cancellation_preserves_unrelated_events() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let mut query = Box::pin(session.request_terminal_status(Duration::from_secs(1)));
+    let cancellation = async {
+        let result = timeout(Duration::from_millis(100), &mut query).await;
+        assert!(
+            result.is_err(),
+            "query should stay pending until its response or timeout"
+        );
+    };
+    let peer = async {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        master.write_all(b"x").expect("write unrelated input");
+    };
+
+    let ((), ()) = tokio::join!(cancellation, peer);
+    drop(query);
+
+    assert_eq!(
+        session
+            .next_event()
+            .await
+            .expect("read preserved unrelated event"),
+        InputEvent::Text('x')
+    );
+    session.leave().await.expect("leave Tokio session");
 }
 
 fn open_test_pty() -> Option<(File, PathBuf)> {

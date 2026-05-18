@@ -16,8 +16,8 @@ size, write ordered session output, read input bytes, classify simple UTF-8 text
 across chunks, preserve complete CSI input syntax, parse and match cursor position reports, parse
 terminal status reports, flush explicitly, and leave with reported cleanup errors. With the optional
 `tokio` feature on Unix, it also exposes a Tokio-backed session owner for runtime-backed reads,
-writes, decoded input events, explicit cleanup, and a live cursor position query. It does not
-include a general terminal query router yet.
+writes, decoded input events, explicit cleanup, live cursor position queries, and live terminal
+status queries. It does not include a general terminal query router yet.
 
 ## Small Example
 

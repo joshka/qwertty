@@ -166,7 +166,40 @@ The timeout bounds the whole request/response operation. When the timeout elapse
 returns `Error::QueryTimeout`. Unrelated decoded events that arrive before the report remain queued
 for later `next_event` calls.
 
-This is not a general query router. qwertty does not yet support multiple simultaneous live
+`TokioTerminalSession::request_terminal_status` uses the same session-owned boundary for terminal
+status reports:
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::{TerminalStatus, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+let report = session.request_terminal_status(Duration::from_secs(1)).await?;
+
+assert_eq!(report.status(), TerminalStatus::Ready);
+
+session.leave().await
+# }
+```
+
+It emits:
+
+```text
+\x1b[5n
+```
+
+and waits for either:
+
+```text
+\x1b[0n
+\x1b[3n
+```
+
+The timeout and preserved-input behavior are the same as the cursor-position helper.
+
+These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.
 
 ## Query Routing Boundary

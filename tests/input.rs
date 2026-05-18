@@ -408,6 +408,75 @@ fn terminal_status_report_rejects_unrelated_csi() {
 }
 
 #[test]
+fn terminal_status_report_matches_first_report_and_preserves_other_events() {
+    let report_csi = CsiInput::from_bytes(b"\x1b[0n").expect("complete CSI input");
+    let unrelated_csi = CsiInput::from_bytes(b"\x1b[12;34R").expect("complete CSI input");
+    let events = vec![
+        InputEvent::Text('a'),
+        InputEvent::Csi(report_csi),
+        InputEvent::Key(KeyInput::Up),
+        InputEvent::Csi(unrelated_csi.clone()),
+    ];
+
+    let matched = TerminalStatusReport::match_events(events);
+
+    assert_eq!(
+        matched.report().map(TerminalStatusReport::status),
+        Some(TerminalStatus::Ready)
+    );
+    assert_eq!(
+        matched.remaining_events(),
+        &[
+            InputEvent::Text('a'),
+            InputEvent::Key(KeyInput::Up),
+            InputEvent::Csi(unrelated_csi),
+        ]
+    );
+}
+
+#[test]
+fn terminal_status_report_match_preserves_all_events_without_match() {
+    let unrelated_csi = CsiInput::from_bytes(b"\x1b[12;34R").expect("complete CSI input");
+    let events = vec![
+        InputEvent::Control(ControlInput::Tab),
+        InputEvent::Csi(unrelated_csi),
+        InputEvent::Undecoded(InputBytes::new(b"\x1bZ".to_vec())),
+    ];
+
+    let matched = TerminalStatusReport::match_events(events.clone());
+
+    assert_eq!(matched.report(), None);
+    assert_eq!(matched.remaining_events(), events.as_slice());
+    assert_eq!(matched.into_parts(), (None, events));
+}
+
+#[test]
+fn terminal_status_report_match_preserves_malformed_report_csi() {
+    let malformed = CsiInput::from_bytes(b"\x1b[1n").expect("complete CSI input");
+    let events = vec![InputEvent::Csi(malformed.clone())];
+
+    let matched = TerminalStatusReport::match_events(events);
+
+    assert_eq!(matched.report(), None);
+    assert_eq!(matched.remaining_events(), &[InputEvent::Csi(malformed)]);
+}
+
+#[test]
+fn terminal_status_report_match_preserves_duplicate_reports_after_first() {
+    let first = CsiInput::from_bytes(b"\x1b[0n").expect("complete CSI input");
+    let second = CsiInput::from_bytes(b"\x1b[3n").expect("complete CSI input");
+    let events = vec![InputEvent::Csi(first), InputEvent::Csi(second.clone())];
+
+    let matched = TerminalStatusReport::match_events(events);
+
+    assert_eq!(
+        matched.report().map(TerminalStatusReport::status),
+        Some(TerminalStatus::Ready)
+    );
+    assert_eq!(matched.remaining_events(), &[InputEvent::Csi(second)]);
+}
+
+#[test]
 fn cursor_position_report_rejects_invalid_parameters() {
     for bytes in [
         b"\x1b[R".as_slice(),

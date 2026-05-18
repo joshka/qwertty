@@ -182,6 +182,10 @@ For a small checked-in Tokio example that waits for `request_terminal_status` an
 preserved cursor-position report through `next_event`, see
 `examples/tokio_terminal_status_wrong_report.rs` in the repository.
 
+For a small checked-in Tokio example that waits for `request_terminal_status` and then reads
+preserved unmatched query-shaped CSI through `next_event`, see
+`examples/tokio_terminal_status_unmatched_query_input.rs` in the repository.
+
 For a small checked-in Tokio example that starts a live query, cancels it explicitly, and keeps
 using the session afterward, see `examples/tokio_query_cancellation.rs` in the repository.
 

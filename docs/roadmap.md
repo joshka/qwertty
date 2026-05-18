@@ -42,10 +42,11 @@ The project grows in reviewable slices.
 - Crate and module split policy ADR is on `main`.
 - Versioning and compatibility policy ADR is on `main`.
 - Dependency policy ADR is on `main`.
+- Release-readiness reference page is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add release readiness reference page](https://github.com/joshka/qwertty/issues/162).
+  [Add first release target ADR](https://github.com/joshka/qwertty/issues/166).
 
 ## Slices
 

@@ -79,3 +79,5 @@ See [ADR 0014: Crate and Module Split Policy](adr/0014-crate-and-module-split-po
 rule for keeping work inside `qwertty` and the criteria for widening package boundaries.
 See [ADR 0015: Versioning and Compatibility Policy](adr/0015-versioning-and-compatibility-policy.md)
 for the current pre-release compatibility posture and the rule for claiming stronger stability.
+See [ADR 0016: Dependency Policy](adr/0016-dependency-policy.md) for the rule for dependency
+additions, optional features, and dependency upgrades.

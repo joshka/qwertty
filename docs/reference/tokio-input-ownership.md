@@ -115,6 +115,11 @@ session.leave().await
 The timeout only says the expected response was not seen before the deadline. It does not discard
 already queued unrelated input.
 
+The timeout also does not reserve the matching reply forever. If the expected cursor-position or
+terminal-status reply reaches the session after the timeout has already been returned, the
+timed-out helper does not consume it later. Under the current API, a later `next_event` call
+receives that late reply through the normal decoded event stream, typically as `InputEvent::Csi(...)`.
+
 ## Handoff To Another Program
 
 When a TUI or terminal application needs to hand control to another program, such as an editor or

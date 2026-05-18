@@ -170,6 +170,10 @@ The timeout bounds the whole request/response operation. When the timeout elapse
 returns `Error::QueryTimeout`. Unrelated decoded events that arrive before the report remain queued
 for later `next_event` calls.
 
+If the matching report arrives after that timeout has already been returned, the timed-out helper
+does not claim it later. Under the current API, a later `next_event` call sees that late reply
+through the ordinary decoded input path, typically as `InputEvent::Csi(...)`.
+
 `TokioTerminalSession::request_terminal_status` uses the same session-owned boundary for terminal
 status reports:
 
@@ -202,6 +206,10 @@ and waits for either:
 ```
 
 The timeout and preserved-input behavior are the same as the cursor-position helper.
+
+Late matching replies follow the same rule. After a timeout, a later `CSI 0 n` or `CSI 3 n`
+reply is delivered through the ordinary decoded input path instead of being consumed by the
+timed-out helper.
 
 These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.

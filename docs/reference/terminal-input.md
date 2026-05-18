@@ -324,6 +324,10 @@ Those live concerns belong to `TokioTerminalSession` for the first async query h
 query helper reads unrelated decoded input before its response, that input must remain queued for
 later `TokioTerminalSession::next_event` calls.
 
+If a query helper times out before its matching reply arrives, qwertty does not keep claiming that
+future reply. A later `TokioTerminalSession::next_event` call receives it through the ordinary
+decoded input path, typically as `InputEvent::Csi(...)`.
+
 The first router boundary is internal to the Tokio session owner. qwertty does not yet expose a
 generic query router, multiple simultaneous live queries, capability probing, or a runtime-agnostic
 async query trait.

@@ -38,10 +38,11 @@ The project grows in reviewable slices.
 - Tokio terminal-status cancellation example is on `main`.
 - Checked-in examples reference page is on `main`.
 - Platform support reference page is on `main`.
+- Platform support policy ADR is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add platform support policy ADR](https://github.com/joshka/qwertty/issues/146).
+  [Add crate and module split policy ADR](https://github.com/joshka/qwertty/issues/150).
 
 ## Slices
 

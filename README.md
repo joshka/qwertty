@@ -100,6 +100,9 @@ ordinary unrelated input visible after a live query helper waits.
 See `examples/tokio_terminal_status_preserved_input.rs` for a small checked-in Tokio example that
 keeps ordinary unrelated input visible after a terminal-status query waits.
 
+See `examples/tokio_terminal_status_wrong_report.rs` for a small checked-in Tokio example that
+keeps a cursor-position report visible after a terminal-status query waits.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

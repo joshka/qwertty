@@ -94,6 +94,9 @@ live query helper and then treats another helper's report as ordinary decoded in
 See `examples/tokio_unmatched_query_input.rs` for a small checked-in Tokio example that times out
 one live query helper and then treats unmatched query-shaped CSI as ordinary decoded input.
 
+See `examples/tokio_preserved_unrelated_input.rs` for a small checked-in Tokio example that keeps
+ordinary unrelated input visible after a live query helper waits.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

@@ -67,6 +67,10 @@ session.leave().await
 qwertty still does not expose a generic public query router, concurrent live queries, or capability
 probing. Keep live query use narrow and session-owned.
 
+For a small checked-in example that waits for a live query helper and then reads preserved
+unrelated input through `next_event`, see `examples/tokio_preserved_unrelated_input.rs` in the
+repository.
+
 For a small checked-in example that opens a Tokio session, performs live queries, writes output,
 and leaves explicitly, see `examples/tokio_terminal_queries.rs` in the repository.
 

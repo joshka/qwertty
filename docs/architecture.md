@@ -15,8 +15,8 @@ ownership, stability, dependency isolation, or audience clarity.
 
 ## Boundary Rule
 
-A module becomes a crate only when it has an independent audience, dependency set, stability policy,
-or ownership model. Tiny protocol surfaces should begin as modules or planned work.
+A module becomes a crate only when it has an independent audience, dependency set, stability
+policy, or ownership model. Tiny protocol surfaces should begin as modules or planned work.
 
 ## Layer Boundary
 
@@ -75,3 +75,5 @@ belong in ADRs.
 
 See [ADR 0013: Platform Support Policy](adr/0013-platform-support-policy.md) for the current
 Unix-first support boundary and the rule for widening platform claims.
+See [ADR 0014: Crate and Module Split Policy](adr/0014-crate-and-module-split-policy.md) for the
+rule for keeping work inside `qwertty` and the criteria for widening package boundaries.

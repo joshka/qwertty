@@ -36,10 +36,11 @@ The project grows in reviewable slices.
 - Tokio terminal-status wrong-report example is on `main`.
 - Tokio terminal-status unmatched query-shaped input example is on `main`.
 - Tokio terminal-status cancellation example is on `main`.
+- Checked-in examples reference page is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add checked-in examples reference page](https://github.com/joshka/qwertty/issues/138).
+  [Add platform support reference page](https://github.com/joshka/qwertty/issues/142).
 
 ## Slices
 

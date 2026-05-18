@@ -120,6 +120,10 @@ terminal-status reply reaches the session after the timeout has already been ret
 timed-out helper does not consume it later. Under the current API, a later `next_event` call
 receives that late reply through the normal decoded event stream, typically as `InputEvent::Csi(...)`.
 
+If the terminal path closes before a matching reply arrives, the helper returns a terminal read
+error instead of waiting for the timeout. Under the current implementation, that error is
+`Error::ReadTerminal` with an `UnexpectedEof` source.
+
 qwertty also keeps typed reports local to the helper that asked for that report shape. If a live
 cursor-position query sees a terminal-status report, or a live terminal-status query sees a
 cursor-position report, the waiting helper does not consume the wrong report. A later

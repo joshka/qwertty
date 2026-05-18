@@ -298,6 +298,37 @@ async fn tokio_session_cursor_query_unmatched_csi_becomes_next_event() {
 }
 
 #[tokio::test]
+async fn tokio_session_cursor_query_closed_terminal_returns_unexpected_eof() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let result = session
+            .request_cursor_position(Duration::from_secs(1))
+            .await;
+        (session, result)
+    };
+    let peer = async move {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read cursor position request");
+        assert_eq!(request, b"\x1b[6n");
+        drop(master);
+    };
+
+    let ((_session, result), ()) = tokio::join!(query, peer);
+
+    assert!(matches!(
+        result,
+        Err(Error::ReadTerminal { source }) if source.kind() == ErrorKind::UnexpectedEof
+    ));
+}
+
+#[tokio::test]
 async fn tokio_session_cursor_query_late_reply_becomes_next_csi_event() {
     let Some((mut master, slave_path)) = open_test_pty() else {
         return;
@@ -605,6 +636,37 @@ async fn tokio_session_terminal_status_query_unmatched_csi_becomes_next_event() 
         InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[?25n").expect("parse unmatched csi"))
     );
     session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
+async fn tokio_session_terminal_status_query_closed_terminal_returns_unexpected_eof() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let query = async move {
+        let result = session
+            .request_terminal_status(Duration::from_secs(1))
+            .await;
+        (session, result)
+    };
+    let peer = async move {
+        let request = read_until_available(&mut master)
+            .await
+            .expect("read terminal status request");
+        assert_eq!(request, b"\x1b[5n");
+        drop(master);
+    };
+
+    let ((_session, result), ()) = tokio::join!(query, peer);
+
+    assert!(matches!(
+        result,
+        Err(Error::ReadTerminal { source }) if source.kind() == ErrorKind::UnexpectedEof
+    ));
 }
 
 #[tokio::test]

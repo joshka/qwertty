@@ -170,6 +170,9 @@ The timeout bounds the whole request/response operation. When the timeout elapse
 returns `Error::QueryTimeout`. Unrelated decoded events that arrive before the report remain queued
 for later `next_event` calls.
 
+If the terminal path closes before any matching report arrives, the helper returns
+`Error::ReadTerminal` with an `UnexpectedEof` source instead of waiting until the timeout.
+
 If the matching report arrives after that timeout has already been returned, the timed-out helper
 does not claim it later. Under the current API, a later `next_event` call sees that late reply
 through the ordinary decoded input path, typically as `InputEvent::Csi(...)`.
@@ -214,6 +217,10 @@ and waits for either:
 ```
 
 The timeout and preserved-input behavior are the same as the cursor-position helper.
+
+Closed-terminal behavior is the same as the cursor-position helper as well: if the terminal path
+reaches end-of-file before a status reply arrives, the helper returns `Error::ReadTerminal` with
+an `UnexpectedEof` source instead of a timeout.
 
 Late matching replies follow the same rule. After a timeout, a later `CSI 0 n` or `CSI 3 n`
 reply is delivered through the ordinary decoded input path instead of being consumed by the

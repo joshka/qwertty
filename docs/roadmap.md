@@ -27,10 +27,11 @@ The project grows in reviewable slices.
 - Tokio unmatched query report tests are on `main`.
 - Tokio redirected terminal query tests are on `main`.
 - Tokio query error-handling example is on `main`.
+- Tokio query cancellation example is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add Tokio query cancellation example](https://github.com/joshka/qwertty/issues/102).
+  [Add Tokio late query reply example](https://github.com/joshka/qwertty/issues/106).
 
 ## Slices
 

@@ -22,10 +22,11 @@ The project grows in reviewable slices.
 - Tokio terminal status query routing is on `main`.
 - Tokio terminal ownership example is on `main`.
 - Tokio input event example is on `main`.
+- Tokio late query reply tests are on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add Tokio late query reply tests](https://github.com/joshka/qwertty/issues/82).
+  [Add Tokio wrong-report query tests](https://github.com/joshka/qwertty/issues/86).
 
 ## Slices
 

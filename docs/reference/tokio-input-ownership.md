@@ -120,6 +120,11 @@ terminal-status reply reaches the session after the timeout has already been ret
 timed-out helper does not consume it later. Under the current API, a later `next_event` call
 receives that late reply through the normal decoded event stream, typically as `InputEvent::Csi(...)`.
 
+qwertty also keeps typed reports local to the helper that asked for that report shape. If a live
+cursor-position query sees a terminal-status report, or a live terminal-status query sees a
+cursor-position report, the waiting helper does not consume the wrong report. A later
+`next_event` call receives it through the normal decoded event stream.
+
 ## Handoff To Another Program
 
 When a TUI or terminal application needs to hand control to another program, such as an editor or

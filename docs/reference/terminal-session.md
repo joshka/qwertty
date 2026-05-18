@@ -174,6 +174,10 @@ If the matching report arrives after that timeout has already been returned, the
 does not claim it later. Under the current API, a later `next_event` call sees that late reply
 through the ordinary decoded input path, typically as `InputEvent::Csi(...)`.
 
+The same rule applies to typed reports that belong to some other helper. If a cursor-position
+query sees `CSI 0 n` or `CSI 3 n` while it is still waiting for `CSI row ; column R`, the
+cursor-position helper leaves that terminal-status report in the ordinary decoded input path.
+
 `TokioTerminalSession::request_terminal_status` uses the same session-owned boundary for terminal
 status reports:
 
@@ -210,6 +214,10 @@ The timeout and preserved-input behavior are the same as the cursor-position hel
 Late matching replies follow the same rule. After a timeout, a later `CSI 0 n` or `CSI 3 n`
 reply is delivered through the ordinary decoded input path instead of being consumed by the
 timed-out helper.
+
+Likewise, if a terminal-status query sees a cursor-position report while it is waiting for a
+status reply, that cursor-position report remains available through the ordinary decoded input
+path instead of being consumed as a status result.
 
 These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.

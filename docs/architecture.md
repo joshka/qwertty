@@ -77,3 +77,5 @@ See [ADR 0013: Platform Support Policy](adr/0013-platform-support-policy.md) for
 Unix-first support boundary and the rule for widening platform claims.
 See [ADR 0014: Crate and Module Split Policy](adr/0014-crate-and-module-split-policy.md) for the
 rule for keeping work inside `qwertty` and the criteria for widening package boundaries.
+See [ADR 0015: Versioning and Compatibility Policy](adr/0015-versioning-and-compatibility-policy.md)
+for the current pre-release compatibility posture and the rule for claiming stronger stability.

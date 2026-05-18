@@ -82,6 +82,10 @@ unrelated input, and documents cancellation at the event-delivery boundary.
 Keeping this boundary explicit avoids making every user compile Tokio and avoids adding a
 runtime-agnostic async trait before one real runtime implementation proves the shape.
 
+See [Tokio Input Ownership And Query Handoff](
+crate::docs#tokio-input-ownership-and-query-handoff) for the single-owner model, query/event
+interaction, timeout behavior, and orderly handoff pattern.
+
 Enable the feature in `Cargo.toml`:
 
 ```toml
@@ -215,6 +219,10 @@ unrelated input stays visible through `next_event`.
 An internal session-owned router may share mechanics between those helpers, but qwertty does not
 yet expose a generic query router, concurrent query registry, capability probing API, or
 runtime-agnostic async query trait.
+
+The [Tokio Input Ownership And Query Handoff](
+crate::docs#tokio-input-ownership-and-query-handoff) guide shows how this boundary fits into a
+real event loop and child-process handoff.
 
 ## Platform Support
 

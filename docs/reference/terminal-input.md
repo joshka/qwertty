@@ -20,6 +20,10 @@ Adding an async method that only wraps a blocking file read would make the publi
 without proving the event boundary. Runtime-agnostic async traits are also deferred until the Tokio
 owner proves behavior that another runtime can share.
 
+See [Tokio Input Ownership And Query Handoff](
+crate::docs#tokio-input-ownership-and-query-handoff) for the session-owned event loop and live
+query model above this decoding layer.
+
 ## Reading Bytes
 
 `TerminalSession::read_input` reads one chunk of bytes from the terminal device into a caller-owned
@@ -323,6 +327,10 @@ later `TokioTerminalSession::next_event` calls.
 The first router boundary is internal to the Tokio session owner. qwertty does not yet expose a
 generic query router, multiple simultaneous live queries, capability probing, or a runtime-agnostic
 async query trait.
+
+The [Tokio Input Ownership And Query Handoff](
+crate::docs#tokio-input-ownership-and-query-handoff) guide explains how applications should treat
+that session-owned routing boundary.
 
 When no cursor position report is present, the match result contains no report and all events remain
 available.

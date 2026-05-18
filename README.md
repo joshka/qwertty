@@ -88,6 +88,9 @@ query, cancels it explicitly, and continues using the session.
 See `examples/tokio_late_query_reply.rs` for a small checked-in Tokio example that times out a
 live query and then treats a late reply as ordinary decoded input.
 
+See `examples/tokio_wrong_report_query.rs` for a small checked-in Tokio example that times out one
+live query helper and then treats another helper's report as ordinary decoded input.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

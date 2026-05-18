@@ -236,6 +236,10 @@ Likewise, if a terminal-status query sees a cursor-position report while it is w
 status reply, that cursor-position report remains available through the ordinary decoded input
 path instead of being consumed as a status result.
 
+For a small checked-in Tokio example that times out one live query helper and then handles another
+helper's report through `next_event`, see `examples/tokio_wrong_report_query.rs` in the
+repository.
+
 Unsupported or malformed query-shaped CSI follows the same rule. If the input does not form a
 valid terminal-status report, the helper leaves it in the ordinary decoded input path.
 

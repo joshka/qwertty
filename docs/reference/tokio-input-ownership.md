@@ -138,6 +138,10 @@ cursor-position query sees a terminal-status report, or a live terminal-status q
 cursor-position report, the waiting helper does not consume the wrong report. A later
 `next_event` call receives it through the normal decoded event stream.
 
+For a small checked-in example that times out one live query helper and then handles another
+helper's report through `next_event`, see `examples/tokio_wrong_report_query.rs` in the
+repository.
+
 The same is true for query-shaped CSI that does not match any current helper. Unsupported or
 malformed query-shaped CSI remains in the normal decoded event stream instead of being swallowed by
 the waiting helper.

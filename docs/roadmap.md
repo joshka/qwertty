@@ -32,10 +32,11 @@ The project grows in reviewable slices.
 - Tokio wrong-report query example is on `main`.
 - Tokio unmatched query-shaped input example is on `main`.
 - Tokio preserved unrelated input example is on `main`.
+- Tokio terminal-status preserved input example is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add Tokio terminal-status preserved input example](https://github.com/joshka/qwertty/issues/122).
+  [Add Tokio terminal-status wrong-report example](https://github.com/joshka/qwertty/issues/126).
 
 ## Slices
 

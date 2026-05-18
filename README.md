@@ -82,6 +82,9 @@ See `examples/tokio_input_events.rs` for a small checked-in Tokio example center
 See `examples/tokio_query_error_handling.rs` for a small checked-in Tokio example that matches
 live query success, timeout, and terminal read failure explicitly.
 
+See `examples/tokio_query_cancellation.rs` for a small checked-in Tokio example that starts a live
+query, cancels it explicitly, and continues using the session.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

@@ -90,6 +90,9 @@ The live query helpers follow the same rule. If a task waiting in `request_curso
 - bytes and events qwertty already owns remain available;
 - unrelated decoded events already seen by the query stay queued for later `next_event` calls.
 
+For a small checked-in example that starts a live query, cancels it explicitly, and continues
+using the session, see `examples/tokio_query_cancellation.rs` in the repository.
+
 Timeouts are explicit query errors. qwertty returns `Error::QueryTimeout` with the operation name
 and caller-provided duration:
 

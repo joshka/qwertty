@@ -97,6 +97,9 @@ one live query helper and then treats unmatched query-shaped CSI as ordinary dec
 See `examples/tokio_preserved_unrelated_input.rs` for a small checked-in Tokio example that keeps
 ordinary unrelated input visible after a live query helper waits.
 
+See `examples/tokio_terminal_status_preserved_input.rs` for a small checked-in Tokio example that
+keeps ordinary unrelated input visible after a terminal-status query waits.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

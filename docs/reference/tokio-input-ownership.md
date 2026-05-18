@@ -71,6 +71,10 @@ For a small checked-in example that waits for a live query helper and then reads
 unrelated input through `next_event`, see `examples/tokio_preserved_unrelated_input.rs` in the
 repository.
 
+For a small checked-in example that waits for `request_terminal_status` and then reads preserved
+unrelated input through `next_event`, see `examples/tokio_terminal_status_preserved_input.rs` in
+the repository.
+
 For a small checked-in example that opens a Tokio session, performs live queries, writes output,
 and leaves explicitly, see `examples/tokio_terminal_queries.rs` in the repository.
 

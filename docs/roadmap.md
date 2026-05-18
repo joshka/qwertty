@@ -19,10 +19,11 @@ The project grows in reviewable slices.
 - Async runtime boundary decision is on `main`.
 - Feature-gated Tokio terminal session owner is on `main`.
 - Tokio cursor position query routing is on `main`.
+- Tokio terminal status query routing is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
-- Terminal status query report parsing is the current implementation slice:
-  [Add terminal status query report parsing](https://github.com/joshka/qwertty/issues/66).
+- The next concrete slice is:
+  [Document Tokio input ownership and query handoff](https://github.com/joshka/qwertty/issues/71).
 
 ## Slices
 

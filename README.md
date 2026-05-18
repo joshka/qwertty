@@ -80,6 +80,10 @@ query-routing contract.
 See `qwertty::docs` for the platform support reference page as well. It explains the current
 Unix-first live terminal boundary and what unsupported platforms return today.
 
+See `qwertty::docs` for the release-readiness reference page too. It summarizes the current docs,
+examples, validation gates, and policy boundaries that should be true before publication stops
+being future work.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

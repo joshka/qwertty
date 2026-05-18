@@ -236,6 +236,9 @@ valid terminal-status report, the helper leaves it in the ordinary decoded input
 These are still not general query routers. qwertty does not yet support multiple simultaneous live
 queries, capability probing, or query registration.
 
+For a small checked-in Tokio example that matches live query success, timeout, and terminal read
+failure explicitly, see `examples/tokio_query_error_handling.rs` in the repository.
+
 ## Query Routing Boundary
 
 Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal

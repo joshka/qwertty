@@ -79,6 +79,9 @@ issues live queries, and leaves explicitly.
 See `examples/tokio_input_events.rs` for a small checked-in Tokio example centered on
 `TokioTerminalSession::next_event`.
 
+See `examples/tokio_query_error_handling.rs` for a small checked-in Tokio example that matches
+live query success, timeout, and terminal read failure explicitly.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

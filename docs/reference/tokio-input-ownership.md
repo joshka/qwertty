@@ -73,6 +73,9 @@ and leaves explicitly, see `examples/tokio_terminal_queries.rs` in the repositor
 For a small checked-in example centered on decoded event delivery through `next_event`, see
 `examples/tokio_input_events.rs` in the repository.
 
+For a small checked-in example that matches live query success, `Error::QueryTimeout`, and
+`Error::ReadTerminal` explicitly, see `examples/tokio_query_error_handling.rs` in the repository.
+
 ## Cancellation And Timeouts
 
 Cancellation is defined at the session boundary.

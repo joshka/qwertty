@@ -72,3 +72,6 @@ calls.
 Public APIs are conservative until examples prove the shape. Durable choices about crate
 boundaries, terminal ownership, parser architecture, query routing, policy, and release scope
 belong in ADRs.
+
+See [ADR 0013: Platform Support Policy](adr/0013-platform-support-policy.md) for the current
+Unix-first support boundary and the rule for widening platform claims.

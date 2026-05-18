@@ -7,6 +7,8 @@ platforms, but live terminal operations that are not implemented yet return
 `Error::Unsupported`.
 
 This page is the durable place to understand that boundary without reading implementation files.
+The corresponding maintainer-facing decision is
+[ADR 0013: Platform Support Policy](../adr/0013-platform-support-policy.md).
 
 ## What Works Today
 

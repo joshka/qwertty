@@ -45,10 +45,11 @@ The project grows in reviewable slices.
 - Release-readiness reference page is on `main`.
 - First release target ADR is on `main`.
 - Release checklist reference page is on `main`.
+- First published version ADR is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 - The next concrete slice is:
-  [Add first published version ADR](https://github.com/joshka/qwertty/issues/174).
+  [Add release-blocking examples reference page](https://github.com/joshka/qwertty/issues/178).
 
 ## Slices
 

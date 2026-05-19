@@ -36,6 +36,7 @@ Confirm that those docs agree on:
 - what qwertty does today;
 - which platforms are supported;
 - which examples are the intended starting points;
+- which checked-in examples are treated as release-blocking for `0.1.0`;
 - what live query helpers guarantee about timeouts, cancellation, preserved input, wrong-report
   input, unmatched query-shaped input, and closed-terminal failures.
 
@@ -106,6 +107,7 @@ Those choices need their own explicit planning slice if they become part of the 
 
 ## Related References
 
+- [Release-Blocking Examples](crate::docs#release-blocking-examples)
 - [Release Readiness](crate::docs#release-readiness)
 - [Platform Support](crate::docs#platform-support)
 - [Checked-In Examples](crate::docs#checked-in-examples)

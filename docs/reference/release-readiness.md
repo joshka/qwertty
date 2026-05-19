@@ -19,7 +19,8 @@ Before the first release, qwertty should keep these user-facing artifacts cohere
 - command, device, session, input, platform-support, and release-readiness reference pages should
   exist and match the public API surface.
 - checked-in examples should cover the smallest important workflows for command encoding, session
-  ownership, decoded input, and live Tokio query behavior.
+  ownership, decoded input, and live Tokio query behavior, with the `0.1.0` release-blocking
+  subset identified explicitly.
 - policy ADRs should record the current support, compatibility, package-boundary, and dependency
   rules that shape the release surface.
 
@@ -87,6 +88,7 @@ That later slice should answer:
 
 ## Related References
 
+- [Release-Blocking Examples](crate::docs#release-blocking-examples)
 - [Release Checklist](crate::docs#release-checklist)
 - [Checked-In Examples](crate::docs#checked-in-examples)
 - [Platform Support](crate::docs#platform-support)

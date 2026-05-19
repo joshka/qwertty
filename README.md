@@ -77,6 +77,10 @@ See `qwertty::docs` for the checked-in examples reference page on docs.rs. It gr
 examples by purpose and points at the smallest runnable example for each session, input, and
 query-routing contract.
 
+See `qwertty::docs` for the release-blocking examples reference page as well. It identifies which
+checked-in examples are part of the `0.1.0` release evidence instead of treating every example as
+equally release-critical.
+
 See `qwertty::docs` for the platform support reference page as well. It explains the current
 Unix-first live terminal boundary and what unsupported platforms return today.
 

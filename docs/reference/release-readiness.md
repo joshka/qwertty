@@ -64,6 +64,7 @@ The current release posture depends on these durable decisions:
 - [ADR 0014: Crate and Module Split Policy](../adr/0014-crate-and-module-split-policy.md)
 - [ADR 0015: Versioning and Compatibility Policy](../adr/0015-versioning-and-compatibility-policy.md)
 - [ADR 0016: Dependency Policy](../adr/0016-dependency-policy.md)
+- [ADR 0017: First Release Target](../adr/0017-first-release-target.md)
 
 Release work should not widen platform claims, dependency commitments, or compatibility promises
 without updating the relevant ADR and the user-facing references together.

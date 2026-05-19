@@ -5,6 +5,7 @@
 
 #![doc = include_str!("../docs/reference/examples.md")]
 #![doc = include_str!("../docs/reference/platform-support.md")]
+#![doc = include_str!("../docs/reference/release-checklist.md")]
 #![doc = include_str!("../docs/reference/release-readiness.md")]
 #![doc = include_str!("../docs/reference/terminal-control.md")]
 #![doc = include_str!("../docs/reference/terminal-device.md")]

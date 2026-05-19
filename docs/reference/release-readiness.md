@@ -7,6 +7,9 @@ agree on what qwertty is promising downstream users.
 This page is the durable place to understand the current release-readiness bar without reading
 issue history.
 
+For the concrete execution checklist maintainers should use when publication work actually starts,
+see [Release Checklist](crate::docs#release-checklist).
+
 ## What Must Already Exist
 
 Before the first release, qwertty should keep these user-facing artifacts coherent:
@@ -83,6 +86,7 @@ That later slice should answer:
 
 ## Related References
 
+- [Release Checklist](crate::docs#release-checklist)
 - [Checked-In Examples](crate::docs#checked-in-examples)
 - [Platform Support](crate::docs#platform-support)
 - [Terminal Session Reference](crate::docs#terminal-session-reference)

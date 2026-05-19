@@ -84,6 +84,9 @@ See `qwertty::docs` for the release-readiness reference page too. It summarizes 
 examples, validation gates, and policy boundaries that should be true before publication stops
 being future work.
 
+See `qwertty::docs` for the release checklist reference page as well. It turns that release
+readiness posture into the concrete maintainer checklist to use before changing `publish = false`.
+
 ## Project Shape
 
 - User-facing APIs should be practical before they are broad.

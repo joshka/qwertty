@@ -81,3 +81,5 @@ See [ADR 0015: Versioning and Compatibility Policy](adr/0015-versioning-and-comp
 for the current pre-release compatibility posture and the rule for claiming stronger stability.
 See [ADR 0016: Dependency Policy](adr/0016-dependency-policy.md) for the rule for dependency
 additions, optional features, and dependency upgrades.
+See [ADR 0018: First Published Version](adr/0018-first-published-version.md) for the intended
+first external version and the rule for keeping later pre-1.0 milestones explicit.

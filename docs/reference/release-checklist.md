@@ -51,6 +51,7 @@ Reconfirm the current release boundary against the policy ADRs:
 - [ADR 0015: Versioning And Compatibility Policy](../adr/0015-versioning-and-compatibility-policy.md)
 - [ADR 0016: Dependency Policy](../adr/0016-dependency-policy.md)
 - [ADR 0017: First Release Target](../adr/0017-first-release-target.md)
+- [ADR 0018: First Published Version](../adr/0018-first-published-version.md)
 
 Do not widen support claims, dependency commitments, compatibility promises, or package boundaries
 in the publishing PR unless the relevant ADR and user-facing docs are updated in the same slice.

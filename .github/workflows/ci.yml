@@ -51,6 +51,9 @@ jobs:
       - name: Database validate
         run: cargo run -p qdb -- validate
 
+      - name: Database caniuse matrix up to date
+        run: cargo run -p qdb -- generate --check matrix
+
       - name: Loom models
         run: cargo test --lib loom_
         env:

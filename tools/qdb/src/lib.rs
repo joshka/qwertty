@@ -5,6 +5,7 @@
 pub mod capture;
 pub mod escape;
 pub mod generate;
+pub mod matrix;
 pub mod model;
 #[cfg(unix)]
 pub mod orchestrate;

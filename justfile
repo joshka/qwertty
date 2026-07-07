@@ -39,6 +39,12 @@ markdown:
 qdb-validate:
     cargo run -p qdb -- validate
 
+# Verify the checked-in caniuse support matrix (db/caniuse.md) is a byte-for-byte rendering of
+# db/results/*.toml + the database entries — no live terminal needed, so it joins the `check`
+# chain. Regenerate with `cargo run -p qdb -- generate matrix` when it legitimately drifts.
+qdb-generate-check:
+    cargo run -p qdb -- generate --check matrix
+
 # Verify the live query path against real terminal implementations, headless. Uses tmux and
 # betamax (headless ghostty) when installed, skipping cleanly otherwise; both type into the
 # session while interleaved queries run, exercising the typeahead-survival contract for real.
@@ -78,4 +84,4 @@ fuzz:
     cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
     cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
-check: metadata fmt-check test loom clippy doc markdown qdb-validate
+check: metadata fmt-check test loom clippy doc markdown qdb-validate qdb-generate-check

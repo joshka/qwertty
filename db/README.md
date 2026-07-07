@@ -9,11 +9,13 @@ This README is the ten-minute read. A new entry is writable from it alone.
 
 ## Layout
 
-| Path                    | What it is                                                     |
-| ----------------------- | -------------------------------------------------------------- |
-| `db/<family>.toml`      | The `[[sequence]]` entries for one protocol family             |
-| `db/sources.toml`       | Doc keys mapped to full citations (title, url, retrieved)      |
-| `../fixtures/<family>/` | The `.seq` fixture files an entry's `fixtures` array points at |
+| Path                       | What it is                                                        |
+|----------------------------|-------------------------------------------------------------------|
+| `db/<family>.toml`         | The `[[sequence]]` entries for one protocol family                |
+| `db/sources.toml`          | Doc keys mapped to full citations (title, url, retrieved)         |
+| `db/results/<target>.toml` | Live-capture conformance seed: answered/silent/timeout per id     |
+| `db/caniuse.md`            | Generated support matrix rendering the results above (see below)  |
+| `../fixtures/<family>/`    | The `.seq` fixture files an entry's `fixtures` array points at    |
 
 Families partition the way sources and reviewers do: `dec`, `ecma48-csi`, `ecma48-syntax`,
 `iterm2`, `kitty-color`, `kitty-graphics`, `kitty-keyboard`, `kitty-misc`, `kitty-multicursor`,
@@ -76,9 +78,12 @@ nothing that changes state, so it is `safe`; the DECSLPP class (which resizes a 
 `qdb` is the unpublished workspace tool (`tools/qdb`) that operates on this directory.
 
 ```sh
-just qdb-validate            # or: cargo run -p qdb -- validate
-cargo run -p qdb -- generate docs          # write markdown reference to target/qdb-docs/
-cargo run -p qdb -- generate --check docs  # fail if the generated docs would drift
+just qdb-validate                            # or: cargo run -p qdb -- validate
+cargo run -p qdb -- generate docs            # write markdown reference to target/qdb-docs/
+cargo run -p qdb -- generate --check docs    # fail if the generated docs would drift
+cargo run -p qdb -- generate matrix          # write the caniuse support matrix to db/caniuse.md
+cargo run -p qdb -- generate --check matrix  # fail if db/caniuse.md would drift
+cargo run -p qdb -- generate                 # both docs and matrix (also generate --check)
 ```
 
 `qdb validate` enforces, per entry: id format (`family.mnemonic`, lowercase), globally unique ids,
@@ -129,3 +134,42 @@ Live capture needs the target tools installed and is deliberately **not** in the
 (`just capture` skips cleanly when a tool is missing, like `just verify-emulators`). The pure
 minting logic — JSON parsing, sidecar/fixture/results rendering, the TOML fixture-array edit — is
 unit-tested with canned probe output, so it is covered by `just check` without a live terminal.
+
+## Support matrix (`qdb generate matrix`)
+
+`db/caniuse.md` is the "caniuse for terminals" view: a checked-in Markdown table rendering
+`db/results/<target>.toml` against the database entries. It is generated, not hand-maintained —
+**machines write support claims; humans write entries and citations** (design 05). Regenerate it
+whenever the results files change:
+
+```sh
+cargo run -p qdb -- generate matrix          # write db/caniuse.md
+cargo run -p qdb -- generate --check matrix  # fail if db/caniuse.md would drift
+cargo run -p qdb -- generate                 # both docs and the matrix
+```
+
+`just qdb-generate-check` (part of `just check` and CI) runs the `--check` form: it regenerates the
+matrix in memory and diffs it against the committed file, the same drift-detection pattern
+`generate --check docs` uses for the reference pages.
+
+**Shape**: rows are the queryable sequences — entries with a `responds` link that a capture can
+actually probe (`replay = "safe"`, minus the harness's honestly-unprobeable set) — grouped by
+family in file order. Columns are capture targets, sorted by name, each headed with its captured
+version and timestamp. A cell reports what that target did when probed:
+
+| Cell           | Meaning                                                             |
+|----------------|---------------------------------------------------------------------|
+| `answered (N)` | The target replied; `N` is the raw reply byte length.               |
+| `silent`       | The target ran the probe and produced no reply before the deadline. |
+| `timeout`      | Same wire event as `silent` (no bytes before the deadline).         |
+| `unprobeable`  | The entry is a query but the harness will not send it blind.        |
+| `—`            | No result: this target has not captured this entry.                 |
+
+**Honesty about what this is not**: every capture behind this matrix today is headless — tmux
+driven by `send-keys`, betamax (libghostty) driven by an on-the-fly tape — not an attended,
+interactive terminal session. The matrix does not claim otherwise: an unlisted or dash-marked
+target/entry pair means *no evidence*, never an assumed pass or fail. This is evidence from real
+captures, not a hand-curated support claim; when the hand-curated prototype conflated "what the
+world defines" with "what a terminal actually does," gap-report machinery had to police the
+conflation after the fact. Rendering the matrix straight from `db/results/` avoids reintroducing
+that gap.

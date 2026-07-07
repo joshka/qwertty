@@ -94,6 +94,35 @@ pub struct Family {
     pub entries: Vec<Sequence>,
 }
 
+/// One row of a `db/results/<target>.toml` conformance seed: one probed entry's outcome.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResultRow {
+    /// The probed (query) entry id.
+    pub id: String,
+    /// The reply entry id (`responds` target) the row's outcome belongs to.
+    #[serde(default)]
+    pub reply_id: String,
+    /// `answered`, `silent`, `timeout`, or `unprobeable`.
+    pub status: String,
+    /// Number of raw reply bytes captured; `0` when nothing arrived.
+    #[serde(default)]
+    pub reply_len: usize,
+}
+
+/// One `db/results/<target>.toml` file: a target's identity plus its per-entry outcomes.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResultsFile {
+    /// The target's short name, e.g. `tmux` or `betamax`.
+    pub target: String,
+    /// The target's version string, as captured (e.g. `tmux 3.7b`, `libghostty`).
+    pub version: String,
+    /// UTC timestamp the capture ran, RFC-3339-ish (`qdb capture`'s stamp).
+    pub captured: String,
+    /// One row per probed entry.
+    #[serde(default, rename = "result")]
+    pub results: Vec<ResultRow>,
+}
+
 /// The whole database: every family plus the shared source table.
 pub struct Database {
     /// Families sorted by name.
@@ -148,5 +177,37 @@ impl Database {
     /// Iterates over every entry across all families.
     pub fn entries(&self) -> impl Iterator<Item = &Sequence> {
         self.families.iter().flat_map(|f| f.entries.iter())
+    }
+
+    /// Loads every `db/results/<target>.toml` conformance seed, sorted by target name.
+    ///
+    /// Returns an empty vec if `db/results/` does not exist (no captures run yet is not an
+    /// error — mirrors `qdb validate`'s `check_results`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a results file exists but cannot be read or parsed.
+    pub fn load_results(repo_root: &Path) -> Result<Vec<ResultsFile>, String> {
+        let dir = repo_root.join("db").join("results");
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Ok(Vec::new());
+        };
+        let mut paths: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .collect();
+        paths.sort();
+
+        let mut files = Vec::new();
+        for path in paths {
+            let text = fs::read_to_string(&path)
+                .map_err(|e| format!("reading {}: {e}", path.display()))?;
+            let parsed: ResultsFile =
+                toml::from_str(&text).map_err(|e| format!("parsing {}: {e}", path.display()))?;
+            files.push(parsed);
+        }
+        files.sort_by(|a, b| a.target.cmp(&b.target));
+        Ok(files)
     }
 }

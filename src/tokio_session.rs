@@ -5,9 +5,11 @@
 //! functions.
 
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsFd;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -56,6 +58,7 @@ const READ_BUFFER_LEN: usize = 1024;
 pub struct TokioTerminalSession {
     device: AsyncFd<File>,
     original_mode: Termios,
+    original_flags: OFlags,
     path: PathBuf,
     decoder: InputDecoder,
     query_routing: QueryRouting,
@@ -81,7 +84,10 @@ impl TokioTerminalSession {
     ///
     /// Returns an error when the terminal cannot be opened, configured, or registered with Tokio.
     pub fn open() -> terminal::Result<Self> {
-        Self::open_path(DEV_TTY)
+        match controlling_terminal_via_stdin() {
+            Some((path, device)) => Self::from_device(path, device),
+            None => Self::open_path(DEV_TTY),
+        }
     }
 
     /// Opens a specific terminal device path and starts a Tokio-backed session.
@@ -100,10 +106,17 @@ impl TokioTerminalSession {
     pub fn open_path(path: impl Into<PathBuf>) -> terminal::Result<Self> {
         let path = path.into();
         let device = open_read_write(&path).map_err(terminal::Error::open_terminal)?;
+        Self::from_device(path, device)
+    }
+
+    fn from_device(path: PathBuf, device: File) -> terminal::Result<Self> {
         let original_mode = tcgetattr(&device)
             .map_err(io::Error::from)
             .map_err(terminal::Error::get_terminal_mode)?;
 
+        let original_flags = fcntl_getfl(&device)
+            .map_err(io::Error::from)
+            .map_err(terminal::Error::open_terminal)?;
         set_nonblocking(&device).map_err(terminal::Error::open_terminal)?;
         set_raw_mode(&device, &original_mode)?;
 
@@ -119,6 +132,7 @@ impl TokioTerminalSession {
         Ok(Self {
             device,
             original_mode,
+            original_flags,
             path,
             decoder: InputDecoder::new(),
             query_routing: QueryRouting::default(),
@@ -475,6 +489,9 @@ impl TokioTerminalSession {
     }
 
     fn set_cooked_mode(&self) -> terminal::Result<()> {
+        // Restore the original status flags first: with a duplicated stdin description, the
+        // session's non-blocking flag would otherwise leak into the parent shell (FM-L class).
+        _ = fcntl_setfl(self.file(), self.original_flags);
         set_cooked_mode(self.file(), &self.original_mode)
     }
 }
@@ -545,6 +562,42 @@ impl Drop for TokioTerminalSession {
 
 fn open_read_write(path: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).write(true).open(path)
+}
+
+/// Reaches the controlling terminal through the inherited standard-input descriptor.
+///
+/// On macOS, kqueue rejects a *freshly opened* descriptor for the process's own controlling
+/// terminal with `EINVAL` — both through the `/dev/tty` alias and through the underlying device
+/// path — while the descriptor inherited as standard input registers fine (verified empirically;
+/// this is the incumbent failure class the Phase 1 catalog records for crossterm's dev-tty path
+/// on macOS). Duplicating standard input shares its open file description, so the duplicate stays
+/// pollable. Because the description is shared with the parent shell's standard input, the
+/// session's non-blocking flag would leak into the shell on exit; the session therefore captures
+/// the original status flags and restores them on leave and on drop.
+///
+/// The duplicate is only usable when standard input is a terminal opened read-write, which is how
+/// interactive shells set up their children. Otherwise (redirected stdin, read-only fd 0) the
+/// caller falls back to opening `/dev/tty`, which remains correct on platforms whose pollers
+/// accept it.
+fn controlling_terminal_via_stdin() -> Option<(PathBuf, File)> {
+    let stdin = rustix::stdio::stdin();
+    if !rustix::termios::isatty(stdin) {
+        return None;
+    }
+
+    let flags = fcntl_getfl(stdin).ok()?;
+    if flags & OFlags::ACCMODE != OFlags::RDWR {
+        return None;
+    }
+
+    let path = rustix::termios::ttyname(stdin, Vec::new())
+        .ok()
+        .map_or_else(
+            || PathBuf::from(DEV_TTY),
+            |name| PathBuf::from(OsString::from_vec(name.into_bytes())),
+        );
+    let device = File::from(rustix::io::dup(stdin).ok()?);
+    Some((path, device))
 }
 
 fn set_nonblocking(file: &File) -> io::Result<()> {

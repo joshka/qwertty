@@ -84,4 +84,12 @@ fuzz:
     cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
     cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
+# Cross-compile the library to Windows and wasm with warnings denied, proving the
+# platform-neutral surface builds off Unix. Requires the targets (rustup target add
+# x86_64-pc-windows-msvc wasm32-unknown-unknown); kept out of the `check` chain because they are
+# not guaranteed locally. CI runs this plus the real windows-latest test job.
+check-cross:
+    cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+    cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
+
 check: metadata fmt-check test loom clippy doc markdown qdb-validate qdb-generate-check

@@ -24,8 +24,10 @@ path = "src/lib.rs"
 default = []
 tokio = ["dep:tokio"]
 
+# `missing_docs` is enforced on the library via `#![warn(missing_docs)]` in `src/lib.rs`, not
+# here: a package-level lint applies to every target, which fails an integration test that is
+# entirely `#![cfg(unix)]` (and thus an empty crate) on non-Unix targets like the Windows CI job.
 [lints.rust]
-missing_docs = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
 unsafe_code = "forbid"
 

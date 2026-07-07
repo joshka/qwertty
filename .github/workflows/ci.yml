@@ -122,6 +122,47 @@ jobs:
       - name: Fuzz correlator properties
         run: cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
+  # Runs the platform-neutral test suite (encode, decode, syntax, events, reports, database
+  # consumers) on real Windows. The live-terminal session is Unix-only, so its tests are
+  # cfg-gated out here; what remains is the whole cross-platform core, executed — not just
+  # cross-compiled — so decode/vocabulary logic is proven on Windows on every push.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Test (platform-neutral core)
+        run: cargo test -p qwertty
+
+      - name: Clippy
+        run: cargo clippy -p qwertty --all-targets -- -D warnings
+
+  # Cross-compiles the library to Windows and wasm from Linux with warnings denied. Fast, and
+  # catches any Unix type leaking into the platform-neutral surface before it reaches a real
+  # Windows build (design 07: the encode/decode/database-consuming layers build everywhere).
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc, wasm32-unknown-unknown
+
+      - name: Check Windows target
+        run: cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+
+      - name: Check wasm target
+        run: cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
+
   required:
     runs-on: ubuntu-latest
     needs:
@@ -132,6 +173,8 @@ jobs:
       - doc
       - markdown
       - fuzz
+      - windows
+      - cross
     if: ${{ always() }}
     steps:
       - name: Check required jobs

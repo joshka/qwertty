@@ -155,6 +155,7 @@ pub enum Error {
 }
 
 impl Error {
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn open_terminal(source: io::Error) -> Self {
         Self::OpenTerminal { source }
     }
@@ -179,6 +180,7 @@ impl Error {
         Self::WriteTerminal { source }
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn read_terminal(source: io::Error) -> Self {
         Self::ReadTerminal { source }
     }

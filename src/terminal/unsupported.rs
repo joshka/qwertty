@@ -1,6 +1,5 @@
 //! Unsupported terminal device implementation.
 
-use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::terminal::{DeviceMode, Error, Result, TerminalDevice, TerminalSize};
@@ -70,7 +69,7 @@ impl Terminal {
     ///
     /// # Errors
     ///
-    /// Always returns [`io::ErrorKind::Unsupported`] on this platform.
+    /// Always returns [`std::io::ErrorKind::Unsupported`] on this platform.
     pub fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
         let _ = bytes;
         Err(Error::unsupported("write terminal output", PLATFORM))
@@ -90,7 +89,7 @@ impl Terminal {
     ///
     /// # Errors
     ///
-    /// Always returns [`io::ErrorKind::Unsupported`] on this platform.
+    /// Always returns [`std::io::ErrorKind::Unsupported`] on this platform.
     pub fn flush(&mut self) -> Result<()> {
         Err(Error::unsupported("flush terminal output", PLATFORM))
     }

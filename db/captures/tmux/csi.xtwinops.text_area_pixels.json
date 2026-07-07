@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?1;2;4c",
+    "target": "tmux",
+    "version": "tmux 3.7b",
+    "xtversion_escaped": "\\eP>|tmux 3.7b\\e\\\\"
+  },
+  "query_id": "csi.xtwinops.text_area_pixels",
+  "reply_escaped": "\\e[4;1280;1920t",
+  "reply_id": "csi.xtwinops.text_area_pixels_report",
+  "reply_len": 14,
+  "status": "answered",
+  "target": "tmux",
+  "timestamp": "2026-07-07T10:59:13Z"
+}

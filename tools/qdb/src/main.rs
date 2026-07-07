@@ -20,8 +20,126 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("validate") => cmd_validate(&db_dir, &repo_root),
         Some("generate") => cmd_generate(&db_dir, &repo_root, &args[1..]),
+        #[cfg(unix)]
+        Some("capture") => cmd_capture(&db_dir, &repo_root, &args[1..]),
+        #[cfg(unix)]
+        Some("capture-probe") => cmd_capture_probe(&db_dir, &repo_root, &args[1..]),
         _ => {
-            eprintln!("usage: qdb <validate | generate [--check] docs>");
+            eprintln!(
+                "usage: qdb <validate | generate [--check] docs | \
+                 capture --target tmux|betamax [--entry <id>...]>"
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `qdb capture --target tmux|betamax [--entry <id>...]`: drive a real terminal and mint artifacts.
+#[cfg(unix)]
+fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
+    use qdb::orchestrate::{self, Target};
+
+    let mut target = None;
+    let mut only = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--target" if i + 1 < rest.len() => {
+                target = Target::parse(&rest[i + 1]);
+                if target.is_none() {
+                    eprintln!("qdb capture: unknown target {:?}", rest[i + 1]);
+                    return ExitCode::FAILURE;
+                }
+                i += 2;
+            }
+            "--entry" if i + 1 < rest.len() => {
+                only.push(rest[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                eprintln!("qdb capture: unexpected argument {other:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(target) = target else {
+        eprintln!("qdb capture: --target tmux|betamax is required");
+        return ExitCode::FAILURE;
+    };
+    let db = match Database::load(db_dir) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("qdb capture: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match orchestrate::run(&db, repo_root, target, &only) {
+        Ok(s) => {
+            println!(
+                "qdb capture {}: {} answered, {} silent, {} unprobeable (version {:?})",
+                s.target, s.answered, s.silent, s.unprobeable, s.version
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("qdb capture: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `qdb capture-probe`: the in-terminal helper. Runs inside the target and writes a JSON report.
+#[cfg(unix)]
+fn cmd_capture_probe(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
+    let mut target = String::new();
+    let mut version = String::new();
+    let mut timestamp = String::new();
+    let mut out = None;
+    let mut only = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--target" if i + 1 < rest.len() => {
+                target.clone_from(&rest[i + 1]);
+                i += 2;
+            }
+            "--version" if i + 1 < rest.len() => {
+                version.clone_from(&rest[i + 1]);
+                i += 2;
+            }
+            "--timestamp" if i + 1 < rest.len() => {
+                timestamp.clone_from(&rest[i + 1]);
+                i += 2;
+            }
+            "--out" if i + 1 < rest.len() => {
+                out = Some(PathBuf::from(&rest[i + 1]));
+                i += 2;
+            }
+            "--entry" if i + 1 < rest.len() => {
+                only.push(rest[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                eprintln!("qdb capture-probe: unexpected argument {other:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(out) = out else {
+        eprintln!("qdb capture-probe: --out <path> is required");
+        return ExitCode::FAILURE;
+    };
+    let db = match Database::load(db_dir) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("qdb capture-probe: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match qdb::probe::run(&db, repo_root, &only, &target, &version, &timestamp, &out) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("qdb capture-probe: {e}");
             ExitCode::FAILURE
         }
     }

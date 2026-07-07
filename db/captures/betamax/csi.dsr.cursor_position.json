@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;22c",
+    "target": "betamax",
+    "version": "libghostty",
+    "xtversion_escaped": "\\eP>|libghostty\\e\\\\"
+  },
+  "query_id": "csi.dsr.cursor_position",
+  "reply_escaped": "\\e[3;1R",
+  "reply_id": "csi.cpr",
+  "reply_len": 6,
+  "status": "answered",
+  "target": "betamax",
+  "timestamp": "2026-07-07T10:56:32Z"
+}

@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;22c",
+    "target": "betamax",
+    "version": "libghostty",
+    "xtversion_escaped": "\\eP>|libghostty\\e\\\\"
+  },
+  "query_id": "csi.da.tertiary",
+  "reply_escaped": "\\eP!|00000000\\e\\\\",
+  "reply_id": "csi.da.tertiary_report",
+  "reply_len": 14,
+  "status": "answered",
+  "target": "betamax",
+  "timestamp": "2026-07-07T10:56:32Z"
+}

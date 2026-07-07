@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?1;2;4c",
+    "target": "tmux",
+    "version": "tmux 3.7b",
+    "xtversion_escaped": "\\eP>|tmux 3.7b\\e\\\\"
+  },
+  "query_id": "csi.dsr.status",
+  "reply_escaped": "\\e[0n",
+  "reply_id": "csi.dsr.status_ok",
+  "reply_len": 4,
+  "status": "answered",
+  "target": "tmux",
+  "timestamp": "2026-07-07T10:59:13Z"
+}

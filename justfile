@@ -41,6 +41,30 @@ qdb-validate:
 verify-emulators:
     bash scripts/verify_emulators.sh
 
+# Drive the live-capture harness against every installed target, recording reply bytes and identity
+# into db/captures/, minting origin=capture: fixtures, and seeding db/results/. Skips a target whose
+# tool is missing (like verify-emulators). Kept out of the `check` chain: it needs real terminals
+# and mutates checked-in artifacts, so it is a deliberate, reviewed step, not part of the gate.
+capture:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ran_any=0
+    if command -v tmux >/dev/null; then
+        cargo run -q -p qdb -- capture --target tmux
+        ran_any=1
+    else
+        echo 'tmux not installed; skipping'
+    fi
+    if command -v betamax >/dev/null; then
+        cargo run -q -p qdb -- capture --target betamax
+        ran_any=1
+    else
+        echo 'betamax not installed; skipping'
+    fi
+    if [ "$ran_any" -eq 0 ]; then
+        echo 'no capture target available; nothing captured'
+    fi
+
 # Run each fuzz target briefly. Requires nightly + cargo-fuzz, which are not guaranteed locally, so
 # this is deliberately kept out of the `check` chain; CI runs it in a dedicated job.
 fuzz:

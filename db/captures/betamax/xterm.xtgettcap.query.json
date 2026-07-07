@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;22c",
+    "target": "betamax",
+    "version": "libghostty",
+    "xtversion_escaped": "\\eP>|libghostty\\e\\\\"
+  },
+  "query_id": "xterm.xtgettcap.query",
+  "reply_escaped": "",
+  "reply_id": "xterm.xtgettcap.report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "betamax",
+  "timestamp": "2026-07-07T10:56:32Z"
+}

@@ -357,7 +357,7 @@ name        = "CPR: Cursor Position Report"
 description = "Rows and columns use protocol coordinate space."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_cpr_report_capture_tmux.seq", "fixtures/ecma48/csi_cpr_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -389,7 +389,7 @@ name        = "DA1: Primary Device Attributes Report"
 description = "The numeric payload is preserved for terminal identification layers."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_da_primary_report_report_capture_tmux.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -410,7 +410,7 @@ name        = "DA2: Secondary Device Attributes Report"
 description = "The numeric payload is preserved for terminal identification layers."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_da_secondary_report_report_capture_tmux.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -431,7 +431,7 @@ name        = "DA3: Tertiary Device Attributes Report"
 description = "The identity payload is intentionally not interpreted by the session decoder."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_da_tertiary_report_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -452,7 +452,7 @@ name        = "DSR: Terminal Status OK"
 description = "Reports that the terminal is operating with no malfunction."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_dsr_status_ok_report_capture_tmux.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -474,7 +474,7 @@ name        = "DECRPM: ANSI Mode Report"
 description = "Fixture reports IRM as reset with `CSI 4 ; 2 $ y`."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_ansi_mode_report_report_capture_tmux.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture; The shared mode report event preserves the numeric mode and state."
 
@@ -495,7 +495,7 @@ name        = "XTWINOPS: Text Area Size In Cells"
 description = "Decoded as a resize event with `TextAreaCells` source."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_tmux.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -516,7 +516,7 @@ name        = "XTWINOPS: Text Area Size In Pixels"
 description = "Decoded as a resize event with `TextAreaPixels` source."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = []
+fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_tmux.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 

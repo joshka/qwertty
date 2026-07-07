@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?1;2;4c",
+    "target": "tmux",
+    "version": "tmux 3.7b",
+    "xtversion_escaped": "\\eP>|tmux 3.7b\\e\\\\"
+  },
+  "query_id": "kitty.multicursor.query_support",
+  "reply_escaped": "",
+  "reply_id": "kitty.multicursor.support_report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "tmux",
+  "timestamp": "2026-07-07T10:59:13Z"
+}

@@ -2,6 +2,12 @@
 //!
 //! The `qdb` binary is a thin CLI over these modules; tests exercise them directly.
 
+pub mod capture;
+pub mod escape;
 pub mod generate;
 pub mod model;
+#[cfg(unix)]
+pub mod orchestrate;
+#[cfg(unix)]
+pub mod probe;
 pub mod validate;

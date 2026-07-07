@@ -78,7 +78,7 @@ name        = "Kitty Keyboard Flags Report"
 description = "Fixture reports recommended flags value 23."
 direction   = "terminal-to-host"
 refs        = [{ doc = "kitty-keyboard" }]
-fixtures    = []
+fixtures    = ["fixtures/kitty/kitty_keyboard_flags_report_report_capture_betamax.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 

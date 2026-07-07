@@ -84,4 +84,48 @@ cargo run -p qdb -- generate --check docs  # fail if the generated docs would dr
 `qdb validate` enforces, per entry: id format (`family.mnemonic`, lowercase), globally unique ids,
 every `refs` key resolves in `sources.toml`, every `fixtures` file exists and its header
 `direction=` agrees with the entry, `replay` is present and a valid class, any `responds` or
-`superseded_by` target is an existing id, and `description` is non-empty.
+`superseded_by` target is an existing id, and `description` is non-empty. It also checks the
+capture artifacts below: an `origin=capture:` fixture is terminal-to-host and has a matching
+`db/captures/<target>/` log, and every `db/results/<target>.toml` row names an existing entry with
+a valid status.
+
+## Live capture (`qdb capture`)
+
+Reply-direction (`terminal-to-host`) entries ship with quarantined syntax — the audited prototype
+fabricated replies, so a reply's bytes re-enter only through a live capture. `qdb capture` is that
+path: it drives one real terminal with the query entries and records what the terminal actually
+sends back.
+
+```sh
+just capture                              # both installed targets, skip-if-missing
+cargo run -p qdb -- capture --target tmux            # one target
+cargo run -p qdb -- capture --target betamax --entry osc.11.background_query   # one entry
+```
+
+For each query entry that has a `responds` link and `replay = "safe"` (queries only — never
+`modal`/`destructive`), the harness runs a helper (`qdb capture-probe`) *inside* the target
+terminal. The probe opens the controlling terminal through the qwertty library, writes the query's
+exact bytes (unescaped from the entry's own query fixture — the single source of truth), and drains
+the reply with a per-query deadline. It also records an identity probe (DA1 + XTVERSION; for tmux,
+also `tmux -V`). Two targets are wired: `tmux` (a detached pane driven with `send-keys`) and
+`betamax` (a headless ghostty-vt driven by an on-the-fly tape).
+
+It writes three kinds of artifact, all reviewable:
+
+| Path                                                   | What it is                                                        |
+| ------------------------------------------------------ | ----------------------------------------------------------------- |
+| `db/captures/<target>/<id>.json`                       | Per-entry sidecar: escaped raw reply, status, identity, timestamp |
+| `fixtures/<family>/<name>_report_capture_<target>.seq` | The minted reply fixture, `origin=capture:` header                |
+| `db/results/<target>.toml`                             | The conformance/caniuse seed: answered/silent/timeout per id      |
+
+A minted fixture's path is added to the reply entry's `fixtures` array (a scripted edit that
+preserves formatting). The entry's quarantined `syntax` is **not** touched — deriving syntax from
+captured bytes is review work a later slice does, citing the capture. **Silence is data**: a query
+the target does not answer is recorded as a `timeout` result, not dropped. Entries whose probe
+would be side-effecting or ill-defined to send blind (iTerm2 `RequestUpload`, `Button`) are skipped
+honestly as `unprobeable` with a reason in the capture code.
+
+Live capture needs the target tools installed and is deliberately **not** in the `check` chain
+(`just capture` skips cleanly when a tool is missing, like `just verify-emulators`). The pure
+minting logic — JSON parsing, sidecar/fixture/results rendering, the TOML fixture-array edit — is
+unit-tested with canned probe output, so it is covered by `just check` without a live terminal.

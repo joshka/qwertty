@@ -41,6 +41,28 @@ impl Fixture {
         let db = Database::load(&self.root.join("db")).unwrap();
         validate::run(&db, &self.root)
     }
+
+    /// Writes a `db/results/<target>.toml` results seed into this temp repo.
+    fn with_results(self, target: &str, body: &str) -> Self {
+        let dir = self.root.join("db").join("results");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{target}.toml")), body).unwrap();
+        self
+    }
+
+    /// Writes an extra fixture at `fixtures/test/<name>.seq` (for capture-origin tests).
+    fn with_fixture(self, name: &str, body: &str) -> Self {
+        let dir = self.root.join("fixtures").join("test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{name}.seq")), body).unwrap();
+        self
+    }
+
+    /// Creates an (empty) `db/captures/<target>/` log directory.
+    fn with_capture_dir(self, target: &str) -> Self {
+        fs::create_dir_all(self.root.join("db").join("captures").join(target)).unwrap();
+        self
+    }
 }
 
 impl Drop for Fixture {
@@ -175,6 +197,96 @@ fn rejects_dangling_responds_target() {
         fx.errors()
             .iter()
             .any(|e| e.contains("responds target") && e.contains("missing")),
+        "{:?}",
+        fx.errors()
+    );
+}
+
+/// A reply entry whose only fixture is a capture-origin one, for the capture-log rules. The reply
+/// id must exist for the query's `responds` link; both live in the same family file.
+fn reply_with_capture_fixture() -> String {
+    r#"[[sequence]]
+id = "test.query"
+name = "Test Query"
+description = "Asks a thing."
+direction = "host-to-terminal"
+syntax = "ESC O k"
+refs = [{ doc = "ecma48" }]
+fixtures = ["fixtures/test/one.seq"]
+replay = "safe"
+responds = "test.reply"
+
+[[sequence]]
+id = "test.reply"
+name = "Test Reply"
+description = "Answers the thing."
+direction = "terminal-to-host"
+refs = [{ doc = "ecma48" }]
+fixtures = ["fixtures/test/reply_capture_tmux.seq"]
+replay = "safe"
+"#
+    .to_string()
+}
+
+const CAPTURE_FIXTURE: &str =
+    "#! direction=terminal-to-host origin=capture:tmux-3.7b date=2026-07-07\n\\e[24;1R\n";
+
+#[test]
+fn capture_fixture_accepted_with_log_dir() {
+    let fx = Fixture::new(&reply_with_capture_fixture(), Some(GOOD_FIXTURE))
+        .with_fixture("reply_capture_tmux", CAPTURE_FIXTURE)
+        .with_capture_dir("tmux");
+    assert!(fx.errors().is_empty(), "{:?}", fx.errors());
+}
+
+#[test]
+fn capture_fixture_rejected_without_log_dir() {
+    // Same capture fixture, but no db/captures/tmux/ directory: the quarantine rule must fire.
+    let fx = Fixture::new(&reply_with_capture_fixture(), Some(GOOD_FIXTURE))
+        .with_fixture("reply_capture_tmux", CAPTURE_FIXTURE);
+    assert!(
+        fx.errors().iter().any(|e| e.contains("no capture log dir")),
+        "{:?}",
+        fx.errors()
+    );
+}
+
+#[test]
+fn fixture_without_origin_header_rejected() {
+    let no_origin = "#! direction=host-to-terminal\n\\eOk\n";
+    let fx = Fixture::new(&good_entry(), Some(no_origin));
+    assert!(
+        fx.errors().iter().any(|e| e.contains("no origin= header")),
+        "{:?}",
+        fx.errors()
+    );
+}
+
+#[test]
+fn results_seed_accepted_when_valid() {
+    let body = "target = \"tmux\"\nversion = \"3.7b\"\ncaptured = \"2026-07-07T00:00:00Z\"\n\
+                \n[[result]]\nid = \"test.one\"\nreply_id = \"test.one\"\nstatus = \"answered\"\nreply_len = 6\n";
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    assert!(fx.errors().is_empty(), "{:?}", fx.errors());
+}
+
+#[test]
+fn results_seed_rejects_unknown_entry_id() {
+    let body = "\n[[result]]\nid = \"test.ghost\"\nstatus = \"answered\"\nreply_len = 0\n";
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    assert!(
+        fx.errors().iter().any(|e| e.contains("unknown entry id")),
+        "{:?}",
+        fx.errors()
+    );
+}
+
+#[test]
+fn results_seed_rejects_invalid_status() {
+    let body = "\n[[result]]\nid = \"test.one\"\nstatus = \"maybe\"\nreply_len = 0\n";
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    assert!(
+        fx.errors().iter().any(|e| e.contains("invalid status")),
         "{:?}",
         fx.errors()
     );

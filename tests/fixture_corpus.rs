@@ -1,4 +1,5 @@
-//! Corpus-driven acceptance test over the imported host->terminal fixture corpus.
+//! Corpus-driven acceptance test over the fixture corpus: host->terminal commands and queries, plus
+//! the terminal->host reply fixtures the live-capture harness mints.
 //!
 //! This walks `fixtures/**/*.seq` at test time (no build script), parses each fixture's header,
 //! unescapes its payload with the same rules the normative `fixtures/FORMAT.md` documents, and
@@ -10,7 +11,7 @@
 //! 2. **Split-equivalence.** Feeding the input one byte at a time yields the same tokens as feeding
 //!    it whole.
 //! 3. **Well-formedness.** No emitted token is [`SyntaxToken::Malformed`]; every fixture is a
-//!    well-formed, host-originated sequence.
+//!    well-formed sequence, whichever direction it travels.
 //!
 //! The `.seq` file format is: a `#!` header line, then the escaped payload, then a single trailing
 //! LF that is a file-format artifact (not sequence payload). See `fixtures/FORMAT.md`.
@@ -81,8 +82,13 @@ fn parse_fixture(path: &Path, raw: &[u8]) -> Fixture {
         .position(|&b| b == b'\n')
         .unwrap_or_else(|| panic!("{name}: fixture has no header line"));
     let header = &raw[..newline];
+    // Both directions live in the corpus now: host-to-terminal commands/queries, and the
+    // terminal-to-host reply fixtures the live-capture harness mints (`origin=capture:`). Reply
+    // bytes are equally valid, well-formed sequences the syntax layer must round-trip, so the
+    // corpus assertions below apply to both; only the header's direction may differ.
     assert!(
-        header.starts_with(b"#! direction=host-to-terminal origin="),
+        header.starts_with(b"#! direction=host-to-terminal origin=")
+            || header.starts_with(b"#! direction=terminal-to-host origin="),
         "{name}: unexpected header {:?}",
         String::from_utf8_lossy(header),
     );

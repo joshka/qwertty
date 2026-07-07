@@ -118,7 +118,12 @@
     doc = "for `SIGWINCH` and job-control signals, plus [`TerminalAcquisition`] reporting how the"
 )]
 #![cfg_attr(feature = "tokio", doc = "controlling terminal was reached.")]
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: the Unix and pure layers carry zero `unsafe`, but the `#[cfg(windows)]`
+// console device (src/terminal/windows.rs) must scope a single `#[allow(unsafe_code)]` over its
+// `windows-sys` FFI, which a `forbid` cannot permit. Every Win32 console entry point is an unsafe
+// `extern "system"` call with no safe wrapper in the tree. This is the only `unsafe` opt-in in the
+// crate; see work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 // docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables
 // the nightly-only `doc_cfg` feature there so gated items (for example `TokioTerminalSession` under

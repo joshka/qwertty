@@ -48,7 +48,14 @@ tokio = ["dep:tokio"]
 # entirely `#![cfg(unix)]` (and thus an empty crate) on non-Unix targets like the Windows CI job.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
-unsafe_code = "forbid"
+# `deny`, not `forbid`, so the Windows console device (src/terminal/windows.rs) can scope a single
+# `#[allow(unsafe_code)]` over its `windows-sys` FFI. `forbid` cannot be locally overridden, and
+# every Windows console entry point (SetConsoleMode, GetConsoleScreenBufferInfo, ReadConsoleW,
+# WriteConsoleW, GetStdHandle) is an `unsafe extern "system"` call with no safe wrapper in the
+# dependency tree. The Unix/pure crate carries no `unsafe` and stays effectively forbidden: the
+# only `#[allow(unsafe_code)]` in the tree is the `#[cfg(windows)]` FFI module. See
+# work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
+unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"
@@ -81,4 +88,16 @@ tokio = { version = "1.37", optional = true, default-features = false, features 
     "rt",
     "signal",
     "time",
+] }
+
+# Windows console FFI for the `#[cfg(windows)]` terminal device (src/terminal/windows.rs). Only the
+# raw console-mode, size, and read/write entry points are pulled in — no higher-level wrappers — so
+# the stub proves the `TerminalDevice` seam accommodates a real ConPTY/console impl. The async
+# readiness model (no `AsyncFd` equivalent) is deliberately NOT built here; see
+# work/phase4/windows-readiness-analysis.md.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_Storage_FileSystem",
 ] }

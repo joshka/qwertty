@@ -18,16 +18,23 @@ mod device;
 mod fake;
 #[cfg(unix)]
 mod unix;
-#[cfg(not(unix))]
+// Non-unix platforms split three ways: Windows gets the real console device stub, every other
+// non-unix target (wasm, exotic) keeps the typed `Unsupported` boundary. `windows` is compiled only
+// for the windows target; it must never affect the Unix build (design 07 §seams-now).
+#[cfg(all(not(unix), not(windows)))]
 mod unsupported;
+#[cfg(windows)]
+mod windows;
 
 pub use device::{DeviceMode, TerminalDevice};
 #[cfg(unix)]
 pub use fake::{FakeDevice, FakeTerminal};
 #[cfg(unix)]
 pub use unix::Terminal;
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 pub use unsupported::Terminal;
+#[cfg(windows)]
+pub use windows::Terminal;
 
 /// Result alias for terminal device operations.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -181,32 +188,32 @@ pub enum Error {
 }
 
 impl Error {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn open_terminal(source: io::Error) -> Self {
         Self::OpenTerminal { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn get_terminal_mode(source: io::Error) -> Self {
         Self::GetTerminalMode { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn set_terminal_mode(source: io::Error) -> Self {
         Self::SetTerminalMode { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn get_terminal_size(source: io::Error) -> Self {
         Self::GetTerminalSize { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn write_terminal(source: io::Error) -> Self {
         Self::WriteTerminal { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn read_terminal(source: io::Error) -> Self {
         Self::ReadTerminal { source }
     }

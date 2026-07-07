@@ -1,0 +1,102 @@
+# ecma48-syntax sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "ecma48.c0.bel"
+name        = "C0 BEL"
+description = "Preserved as a control token; semantic handling is application-specific."
+direction   = "bidirectional"
+syntax      = "BEL"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/c0_bel.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.c0.lf"
+name        = "C0 LF"
+description = "The event decoder maps LF/CR to an Enter key for application input."
+direction   = "bidirectional"
+syntax      = "LF"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/c0_lf.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.c1.csi_8bit"
+name        = "C1 CSI"
+description = "8-bit CSI is parsed into the same syntax token as ESC [ CSI."
+direction   = "bidirectional"
+syntax      = "0x9B params final"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/c1_csi.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.esc.dec_save_cursor"
+name        = "DEC Save Cursor"
+description = "Legacy DEC save-cursor command; SCOSC may be preferable in some terminals."
+direction   = "host-to-terminal"
+syntax      = "ESC 7"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/esc_dec_save_cursor.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "ecma48.esc.dec_restore_cursor"
+name        = "DEC Restore Cursor"
+description = "Legacy DEC restore-cursor command; SCORC may be preferable in some terminals."
+direction   = "host-to-terminal"
+syntax      = "ESC 8"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/esc_dec_restore_cursor.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "ecma48.esc.charset_g0_us_ascii"
+name        = "Select G0 US ASCII"
+description = "Charset selection is syntax-preserved but not modeled semantically."
+direction   = "host-to-terminal"
+syntax      = "ESC ( B"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/esc_charset_g0_us_ascii.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "ecma48.dcs.decrqss"
+name        = "DCS DECRQSS"
+description = "DCS payloads are preserved losslessly for extension decoders."
+direction   = "bidirectional"
+syntax      = "DCS payload ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/negative/dcs_unterminated.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.apc.payload"
+name        = "APC Payload"
+description = "APC is preserved as a control string; no application meaning is assigned."
+direction   = "bidirectional"
+syntax      = "APC payload ST"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/apc_payload.seq", "fixtures/ecma48/negative/apc_unterminated.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.pm.payload"
+name        = "PM Payload"
+description = "PM is preserved as a control string; no application meaning is assigned."
+direction   = "bidirectional"
+syntax      = "PM payload ST"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/pm_payload.seq", "fixtures/ecma48/negative/pm_unterminated.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "ecma48.sos.payload"
+name        = "SOS Payload"
+description = "SOS is preserved as a control string; no application meaning is assigned."
+direction   = "bidirectional"
+syntax      = "SOS payload ST"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/sos_payload.seq", "fixtures/ecma48/negative/sos_unterminated.seq"]
+replay      = "safe"

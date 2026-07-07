@@ -1,0 +1,731 @@
+# ecma48-csi sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "csi.cup"
+name        = "CUP: Cursor Position"
+description = "Rows and columns use protocol coordinate space."
+direction   = "host-to-terminal"
+syntax      = "CSI row ; column H"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cup.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.reset"
+name        = "SGR: Reset Attributes"
+description = "Resets graphic rendition state to terminal defaults."
+direction   = "host-to-terminal"
+syntax      = "CSI 0 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "csi.sgr.bold"
+name        = "SGR: Bold"
+description = "Sets bold or increased intensity for following text."
+direction   = "host-to-terminal"
+syntax      = "CSI 1 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_bold.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.foreground_rgb"
+name        = "SGR: RGB Foreground"
+description = "Fixture uses the semicolon truecolor form."
+direction   = "host-to-terminal"
+syntax      = "CSI 38 ; 2 ; r ; g ; b m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_fg_rgb.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.style_combo"
+name        = "SGR: Attribute And Color Combination"
+description = "Fixture combines bold, named foreground, and RGB background."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps ; ... m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_style_combo.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_color"
+name        = "SGR: Underline Color"
+description = "Fixture uses the semicolon truecolor underline color form."
+direction   = "host-to-terminal"
+syntax      = "CSI 58 ; ... m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_color.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.double_underline"
+name        = "SGR: Double Underline"
+description = "Some terminals historically treated SGR 21 as bold-off; use SGR 24 to clear."
+direction   = "host-to-terminal"
+syntax      = "CSI 21 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_double_underline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_underlined"
+name        = "SGR: Clear Underline"
+description = "Clears single, double, and styled underline state."
+direction   = "host-to-terminal"
+syntax      = "CSI 24 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_underlined.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_curly"
+name        = "SGR: Curly Underline"
+description = "xterm, Kitty, iTerm2, and WezTerm commonly support underline substyles."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : 3 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_curly.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_dotted"
+name        = "SGR: Dotted Underline"
+description = "Vendor support varies; unsupported terminals usually render a plain underline."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : 4 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_dotted.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_dashed"
+name        = "SGR: Dashed Underline"
+description = "Vendor support varies; unsupported terminals usually render a plain underline."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : 5 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_dashed.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_vendor"
+name        = "SGR: Vendor Underline Style"
+description = "Preserves unknown underline substyle values for vendor-specific extensions."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : n m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_vendor.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.overline"
+name        = "SGR: Overline"
+description = "Support is less universal than bold, italic, and underline."
+direction   = "host-to-terminal"
+syntax      = "CSI 53 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_overline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_overlined"
+name        = "SGR: Clear Overline"
+description = "Clears SGR overline state without changing underline or ideogram state."
+direction   = "host-to-terminal"
+syntax      = "CSI 55 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_overlined.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.ideogram_underline"
+name        = "SGR: Ideogram Underline"
+description = "Often ignored by modern terminal emulators; preserved for ECMA-48 completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI 60 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_ideogram_underline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.ideogram_double_underline"
+name        = "SGR: Ideogram Double Underline"
+description = "Often ignored by modern terminal emulators; preserved for ECMA-48 completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI 61 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_ideogram_double_underline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.ideogram_overline"
+name        = "SGR: Ideogram Overline"
+description = "Often ignored by modern terminal emulators; preserved for ECMA-48 completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI 62 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_ideogram_overline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.ideogram_double_overline"
+name        = "SGR: Ideogram Double Overline"
+description = "Often ignored by modern terminal emulators; preserved for ECMA-48 completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI 63 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_ideogram_double_overline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.ideogram_stress"
+name        = "SGR: Ideogram Stress"
+description = "Often ignored by modern terminal emulators; preserved for ECMA-48 completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI 64 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_ideogram_stress.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_ideogram"
+name        = "SGR: Clear Ideogram Attributes"
+description = "Clears SGR 60-64 ideogram attributes."
+direction   = "host-to-terminal"
+syntax      = "CSI 65 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_ideogram.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cuu"
+name        = "CUU: Cursor Up"
+description = "Fixture moves up three cells."
+direction   = "host-to-terminal"
+syntax      = "CSI count A"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cuu.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cud"
+name        = "CUD: Cursor Down"
+description = "Fixture moves down three cells."
+direction   = "host-to-terminal"
+syntax      = "CSI count B"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cud.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cuf"
+name        = "CUF: Cursor Forward"
+description = "Fixture moves right three cells."
+direction   = "host-to-terminal"
+syntax      = "CSI count C"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cuf.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cub"
+name        = "CUB: Cursor Backward"
+description = "Fixture moves left three cells."
+direction   = "host-to-terminal"
+syntax      = "CSI count D"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cub.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cnl"
+name        = "CNL: Cursor Next Line"
+description = "Fixture moves to the first column of the second following line."
+direction   = "host-to-terminal"
+syntax      = "CSI count E"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cnl.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cpl"
+name        = "CPL: Cursor Previous Line"
+description = "Fixture moves to the first column of the second preceding line."
+direction   = "host-to-terminal"
+syntax      = "CSI count F"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cpl.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cha"
+name        = "CHA: Cursor Horizontal Absolute"
+description = "Fixture moves to protocol column 12."
+direction   = "host-to-terminal"
+syntax      = "CSI column G"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cha.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cht"
+name        = "CHT: Cursor Forward Tabulation"
+description = "Fixture moves forward by two tab stops."
+direction   = "host-to-terminal"
+syntax      = "CSI count I"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_cht.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.hpa"
+name        = "HPA: Horizontal Position Absolute"
+description = "Fixture moves to protocol column 12."
+direction   = "host-to-terminal"
+syntax      = "CSI column `"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_hpa.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.vpa"
+name        = "VPA: Vertical Position Absolute"
+description = "Fixture moves to protocol row 12."
+direction   = "host-to-terminal"
+syntax      = "CSI row d"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_vpa.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.hvp"
+name        = "HVP: Horizontal And Vertical Position"
+description = "Fixture moves to protocol row 12 and column 34."
+direction   = "host-to-terminal"
+syntax      = "CSI row ; column f"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_hvp.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.hpr"
+name        = "HPR: Horizontal Position Relative"
+description = "Fixture moves three cells right."
+direction   = "host-to-terminal"
+syntax      = "CSI count a"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_hpr.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.vpr"
+name        = "VPR: Vertical Position Relative"
+description = "Fixture moves three cells down."
+direction   = "host-to-terminal"
+syntax      = "CSI count e"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_vpr.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.scosc"
+name        = "SCOSC: Save Cursor"
+description = "Use with care; save/restore state is terminal-global."
+direction   = "host-to-terminal"
+syntax      = "CSI s"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_scosc.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.scorc"
+name        = "SCORC: Restore Cursor"
+description = "Restores the cursor position previously saved with SCOSC."
+direction   = "host-to-terminal"
+syntax      = "CSI u"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_scorc.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cpr"
+name        = "CPR: Cursor Position Report"
+description = "Rows and columns use protocol coordinate space."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.dsr.cursor_position"
+name        = "DSR: Query Cursor Position"
+description = "Duplicate untagged requests coalesce while pending."
+direction   = "host-to-terminal"
+syntax      = "CSI 6 n"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_dsr_cursor_position.seq"]
+replay      = "safe"
+responds    = "csi.cpr"
+
+[[sequence]]
+id          = "csi.da.primary"
+name        = "DA1: Query Primary Device Attributes"
+description = "Primary device attributes identify broad terminal class and feature flags."
+direction   = "host-to-terminal"
+syntax      = "CSI c"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_da_primary_query.seq"]
+replay      = "safe"
+responds    = "csi.da.primary_report"
+
+[[sequence]]
+id          = "csi.da.primary_report"
+name        = "DA1: Primary Device Attributes Report"
+description = "The numeric payload is preserved for terminal identification layers."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.da.secondary"
+name        = "DA2: Query Secondary Device Attributes"
+description = "Secondary device attributes usually include firmware or patch-level numbers."
+direction   = "host-to-terminal"
+syntax      = "CSI > c"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_da_secondary_query.seq"]
+replay      = "safe"
+responds    = "csi.da.secondary_report"
+
+[[sequence]]
+id          = "csi.da.secondary_report"
+name        = "DA2: Secondary Device Attributes Report"
+description = "The numeric payload is preserved for terminal identification layers."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.da.tertiary"
+name        = "DA3: Query Tertiary Device Attributes"
+description = "Tertiary attributes are preserved as an opaque identity string."
+direction   = "host-to-terminal"
+syntax      = "CSI = c"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_da_tertiary_query.seq"]
+replay      = "safe"
+responds    = "csi.da.tertiary_report"
+
+[[sequence]]
+id          = "csi.da.tertiary_report"
+name        = "DA3: Tertiary Device Attributes Report"
+description = "The identity payload is intentionally not interpreted by the session decoder."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.dsr.status"
+name        = "DSR: Query Terminal Status"
+description = "A normal terminal response is DSR 0, meaning no malfunction."
+direction   = "host-to-terminal"
+syntax      = "CSI 5 n"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_dsr_status_query.seq"]
+replay      = "safe"
+responds    = "csi.dsr.status_ok"
+
+[[sequence]]
+id          = "csi.dsr.status_ok"
+name        = "DSR: Terminal Status OK"
+description = "Reports that the terminal is operating with no malfunction."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.ansi_mode.query"
+name        = "DECRQM: Query ANSI Mode"
+description = "Fixture queries IRM, the insert/replace mode with numeric mode 4."
+direction   = "host-to-terminal"
+syntax      = "CSI mode $ p"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_ansi_mode_query.seq"]
+replay      = "safe"
+responds    = "csi.ansi_mode.report"
+notes       = "This is the non-private form of request mode and does not use a `?` marker."
+
+[[sequence]]
+id          = "csi.ansi_mode.report"
+name        = "DECRPM: ANSI Mode Report"
+description = "Fixture reports IRM as reset with `CSI 4 ; 2 $ y`."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture; The shared mode report event preserves the numeric mode and state."
+
+[[sequence]]
+id          = "csi.xtwinops.text_area_cells"
+name        = "XTWINOPS: Query Text Area Size In Cells"
+description = "Reports text area height and width in cells."
+direction   = "host-to-terminal"
+syntax      = "CSI 18 t"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_cells_query.seq"]
+replay      = "safe"
+responds    = "csi.xtwinops.text_area_cells_report"
+
+[[sequence]]
+id          = "csi.xtwinops.text_area_cells_report"
+name        = "XTWINOPS: Text Area Size In Cells"
+description = "Decoded as a resize event with `TextAreaCells` source."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.xtwinops.text_area_pixels"
+name        = "XTWINOPS: Query Text Area Size In Pixels"
+description = "Reports text area height and width in pixels."
+direction   = "host-to-terminal"
+syntax      = "CSI 14 t"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_pixels_query.seq"]
+replay      = "safe"
+responds    = "csi.xtwinops.text_area_pixels_report"
+
+[[sequence]]
+id          = "csi.xtwinops.text_area_pixels_report"
+name        = "XTWINOPS: Text Area Size In Pixels"
+description = "Decoded as a resize event with `TextAreaPixels` source."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "csi.ed.clear_screen"
+name        = "ED: Clear Entire Screen"
+description = "Erases the entire screen and leaves the cursor where it is."
+direction   = "host-to-terminal"
+syntax      = "CSI 2 J"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_ed_clear_screen.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.ed.erase_below"
+name        = "ED: Erase Below"
+description = "Erases from cursor through the end of the display."
+direction   = "host-to-terminal"
+syntax      = "CSI 0 J"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_ed_0.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.ed.erase_above"
+name        = "ED: Erase Above"
+description = "Erases from the start of the display through the cursor."
+direction   = "host-to-terminal"
+syntax      = "CSI 1 J"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_ed_1.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.ed.erase_scrollback"
+name        = "ED: Erase Scrollback"
+description = "xterm extension that erases saved lines where supported."
+direction   = "host-to-terminal"
+syntax      = "CSI 3 J"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_ed_3.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.el.erase_right"
+name        = "EL: Erase Right"
+description = "Erases from cursor through the end of the line."
+direction   = "host-to-terminal"
+syntax      = "CSI 0 K"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_el_0.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.el.erase_left"
+name        = "EL: Erase Left"
+description = "Erases from the start of the line through the cursor."
+direction   = "host-to-terminal"
+syntax      = "CSI 1 K"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_el_1.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.el.erase_all"
+name        = "EL: Erase Line"
+description = "Erases the entire active line."
+direction   = "host-to-terminal"
+syntax      = "CSI 2 K"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_el_2.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.ich"
+name        = "ICH: Insert Blank Characters"
+description = "Inserts blank character positions at the cursor and shifts existing cells right."
+direction   = "host-to-terminal"
+syntax      = "CSI n @"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_ich.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.il"
+name        = "IL: Insert Lines"
+description = "Inserts blank lines at the cursor within the active scrolling area."
+direction   = "host-to-terminal"
+syntax      = "CSI n L"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_il.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.dl"
+name        = "DL: Delete Lines"
+description = "Deletes lines at the cursor within the active scrolling area."
+direction   = "host-to-terminal"
+syntax      = "CSI n M"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_dl.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.dch"
+name        = "DCH: Delete Characters"
+description = "Deletes character positions at the cursor and shifts following cells left."
+direction   = "host-to-terminal"
+syntax      = "CSI n P"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_dch.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.su"
+name        = "SU: Scroll Up"
+description = "Scrolls content up by the requested number of lines."
+direction   = "host-to-terminal"
+syntax      = "CSI n S"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_su.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sd"
+name        = "SD: Scroll Down"
+description = "Scrolls content down by the requested number of lines."
+direction   = "host-to-terminal"
+syntax      = "CSI n T"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_sd.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sl"
+name        = "SL: Scroll Left"
+description = "Scrolls content left; emulator support is less common than SU/SD."
+direction   = "host-to-terminal"
+syntax      = "CSI n SP @"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_sl.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sr"
+name        = "SR: Scroll Right"
+description = "Scrolls content right; emulator support is less common than SU/SD."
+direction   = "host-to-terminal"
+syntax      = "CSI n SP A"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_sr.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.ech"
+name        = "ECH: Erase Characters"
+description = "Erases character positions at the cursor without shifting following cells."
+direction   = "host-to-terminal"
+syntax      = "CSI n X"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_ech.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.cbt"
+name        = "CBT: Cursor Backward Tabulation"
+description = "Moves backward by tab stops."
+direction   = "host-to-terminal"
+syntax      = "CSI n Z"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_cbt.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.rep"
+name        = "REP: Repeat Preceding Character"
+description = "Repeats the preceding graphic character when the terminal implements REP."
+direction   = "host-to-terminal"
+syntax      = "CSI n b"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_rep.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.tbc"
+name        = "TBC: Tab Clear"
+description = "Mode 3 clears all horizontal tab stops."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps g"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_tbc.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sm.insert_replace"
+name        = "SM: Insert/Replace Mode"
+description = "Sets IRM, the public insert/replace mode."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 h"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_sm_insert_replace.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.rm.insert_replace"
+name        = "RM: Insert/Replace Mode"
+description = "Resets IRM, returning to replacement behavior."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 l"
+refs        = [{ doc = "ecma48" }]
+fixtures    = ["fixtures/ecma48/csi_rm_insert_replace.seq"]
+replay      = "safe"

@@ -1,0 +1,186 @@
+# xterm-modes sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "dec.mode.application_cursor_keys.set"
+name        = "DECSET Application Cursor Keys"
+description = "Changes cursor-key encoding between normal and application mode."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_1_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.application_cursor_keys.reset"
+name        = "DECRST Application Cursor Keys"
+description = "Returns the cursor keys to normal (ANSI) mode so they send standard sequences."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_1_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.application_cursor_keys.query"
+name        = "DECRQM Application Cursor Keys"
+description = "Fixture exercises generic DECRQM; response routing is keyed by mode number."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1 $ p"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_1_query.seq"]
+replay      = "modal"
+responds    = "dec.mode.application_cursor_keys.report"
+
+[[sequence]]
+id          = "dec.mode.application_cursor_keys.report"
+name        = "DECRPM Application Cursor Keys"
+description = "Fixture reports reset state."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "dec.application_keypad.set"
+name        = "DECPAM Application Keypad"
+description = "Switches the numeric keypad to VT application-keypad escape reports."
+direction   = "host-to-terminal"
+syntax      = "ESC ="
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/application_keypad_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.application_keypad.reset"
+name        = "DECPNM Numeric Keypad"
+description = "Restores the numeric keypad to normal digit/operator reporting."
+direction   = "host-to-terminal"
+syntax      = "ESC >"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/application_keypad_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.origin.set"
+name        = "DECSET Origin Mode"
+description = "Makes cursor positions relative to scrolling margins."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 6 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_6_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.origin.reset"
+name        = "DECRST Origin Mode"
+description = "Disables origin mode so cursor coordinates are relative to the whole screen."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 6 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_6_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.origin.query"
+name        = "DECRQM Origin Mode"
+description = "Queries whether cursor coordinates are absolute or relative to scroll margins."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 6 $ p"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_6_query.seq"]
+replay      = "modal"
+responds    = "dec.mode.origin.report"
+
+[[sequence]]
+id          = "dec.mode.origin.report"
+name        = "DECRPM Origin Mode"
+description = "Fixture reports reset state."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "dec.mode.autowrap.set"
+name        = "DECSET Autowrap Mode"
+description = "Controls whether printing past the right margin wraps to the next line."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 7 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_7_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.autowrap.reset"
+name        = "DECRST Autowrap Mode"
+description = "Disables autowrap so text at the right margin overwrites the last column."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 7 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_7_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.autowrap.query"
+name        = "DECRQM Autowrap Mode"
+description = "Queries DECAWM without changing wrap behavior."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 7 $ p"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_7_query.seq"]
+replay      = "modal"
+responds    = "dec.mode.autowrap.report"
+
+[[sequence]]
+id          = "dec.mode.autowrap.report"
+name        = "DECRPM Autowrap Mode"
+description = "Fixture reports reset state."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "dec.mode.cursor_visible.set"
+name        = "DECSET Cursor Visible"
+description = "Equivalent to the xterm cursor-show helper."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 25 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_25_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.cursor_visible.query"
+name        = "DECRQM Cursor Visible"
+description = "Queries DECTCEM cursor visibility."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 25 $ p"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_25_query.seq"]
+replay      = "modal"
+responds    = "dec.mode.cursor_visible.report"
+
+[[sequence]]
+id          = "dec.mode.cursor_visible.report"
+name        = "DECRPM Cursor Visible"
+description = "Fixture reports set state, matching a visible cursor."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "dec.mode.cursor_visible.reset"
+name        = "DECRST Cursor Visible"
+description = "Equivalent to the xterm cursor-hide helper."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 25 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/dec_mode_25_reset.seq"]
+replay      = "modal"

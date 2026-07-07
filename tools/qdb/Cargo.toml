@@ -1,0 +1,32 @@
+[package]
+name = "qdb"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Developer tooling for the qwertty sequence database: validate and generate."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "qdb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qdb"
+path = "src/main.rs"
+
+[dependencies]
+# serde: derive the entry/source structs straight from TOML tables; the schema is a
+# hand-curated record format, so declarative deserialization is the whole job.
+serde = { version = "1", features = ["derive"] }
+# toml: the database is TOML (design 05); this is the reference parser and the smallest one
+# that round-trips the table-array shape we use.
+toml = "0.8"
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

@@ -1,0 +1,35 @@
+# kitty-misc sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.misc.unscroll"
+name        = "Move Screen Contents To Scrollback"
+description = "Kitty documents this as an extension for moving screen contents into scrollback."
+direction   = "host-to-terminal"
+syntax      = "CSI 3 ; 1 J"
+refs        = [{ doc = "kitty-protocol-extensions" }]
+fixtures    = []
+replay      = "modal"
+notes       = "fixture withheld: on the audit discard list pending re-verification"
+
+[[sequence]]
+id          = "kitty.misc.save_modes"
+name        = "Save Terminal Modes"
+description = "Simple private save/restore for terminal modes."
+direction   = "host-to-terminal"
+syntax      = "CSI ? s"
+refs        = [{ doc = "kitty-protocol-extensions" }]
+fixtures    = []
+replay      = "modal"
+notes       = "fixture withheld: on the audit discard list pending re-verification"
+
+[[sequence]]
+id          = "kitty.misc.restore_modes"
+name        = "Restore Terminal Modes"
+description = "Restores terminal modes saved by the matching Kitty private save command."
+direction   = "host-to-terminal"
+syntax      = "CSI ? r"
+refs        = [{ doc = "kitty-protocol-extensions" }]
+fixtures    = []
+replay      = "modal"
+notes       = "fixture withheld: on the audit discard list pending re-verification"

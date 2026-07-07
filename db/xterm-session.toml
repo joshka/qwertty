@@ -1,0 +1,122 @@
+# xterm-session sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "xterm.alternate_screen.enter_47"
+name        = "Enter Legacy Alternate Screen"
+description = "Legacy xterm alternate-screen form; does not save cursor like 1049."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 47 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/enter_alternate_screen_47.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.alternate_screen.leave_47"
+name        = "Leave Legacy Alternate Screen"
+description = "Cleanup pair for the legacy mode 47 alternate screen."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 47 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/leave_alternate_screen_47.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.alternate_screen.enter_1047"
+name        = "Enter Alternate Screen Buffer"
+description = "Compatibility alternate-screen buffer switch without cursor save/restore."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1047 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/enter_alternate_screen_1047.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.alternate_screen.leave_1047"
+name        = "Leave Alternate Screen Buffer"
+description = "Cleanup pair for mode 1047 alternate-screen buffer."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1047 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/leave_alternate_screen_1047.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.alternate_screen.enter_1049"
+name        = "Enter Alternate Screen"
+description = "Common full-screen TUI lifecycle command."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1049 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/enter_alternate_screen_1049.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.alternate_screen.leave_1049"
+name        = "Leave Alternate Screen"
+description = "Cleanup pair for entering the alternate screen."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1049 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/leave_alternate_screen_1049.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.cursor.style.default"
+name        = "DECSCUSR Default Cursor Style"
+description = "Resets the cursor style to the terminal profile default."
+direction   = "host-to-terminal"
+syntax      = "CSI 0 SP q"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/cursor_style_default.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.cursor.style.steady_bar"
+name        = "DECSCUSR Steady Bar Cursor"
+description = "Common editor cursor shape; blink policy remains terminal-profile dependent."
+direction   = "host-to-terminal"
+syntax      = "CSI 6 SP q"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/cursor_style_steady_bar.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.cursor.hide"
+name        = "Hide Cursor"
+description = "Hides the text cursor."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 25 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/hide_cursor.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.cursor.show"
+name        = "Show Cursor"
+description = "Cleanup pair for hiding the cursor."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 25 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/show_cursor.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.sync_output.enable"
+name        = "Begin Synchronized Output"
+description = "Capability-gated because some terminals mishandle queries."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2026 h"
+refs        = [{ doc = "contour-synchronized-output" }]
+fixtures    = ["fixtures/xterm/sync_output_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.sync_output.disable"
+name        = "End Synchronized Output"
+description = "Cleanup pair for synchronized output."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2026 l"
+refs        = [{ doc = "contour-synchronized-output" }]
+fixtures    = ["fixtures/xterm/sync_output_disable.seq"]
+replay      = "modal"

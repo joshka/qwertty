@@ -1,0 +1,192 @@
+# dec sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "dec.cursor.save"
+name        = "DEC Save Cursor"
+description = "DECSC preserves cursor and DEC presentation state on compatible terminals."
+direction   = "host-to-terminal"
+syntax      = "ESC 7"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/cursor_save.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.cursor.restore"
+name        = "DEC Restore Cursor"
+description = "DECRC restores state saved by DECSC."
+direction   = "host-to-terminal"
+syntax      = "ESC 8"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/cursor_restore.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.scroll_region.set"
+name        = "DECSTBM Set Scroll Region"
+description = "Coordinates are 1-indexed protocol rows."
+direction   = "host-to-terminal"
+syntax      = "CSI top ; bottom r"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/scroll_region_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.scroll_region.reset"
+name        = "DECSTBM Reset Scroll Region"
+description = "Resets top/bottom margins to the terminal viewport."
+direction   = "host-to-terminal"
+syntax      = "CSI r"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/scroll_region_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.left_right_margin.set"
+name        = "DECSLRM Set Left/Right Margins"
+description = "Some terminals require DEC private mode 69 before DECSLRM affects margins."
+direction   = "host-to-terminal"
+syntax      = "CSI left ; right s"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/left_right_margin_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.left_right_margin.reset"
+name        = "DECSLRM Reset Left/Right Margins"
+description = "This is DEC margin reset syntax, distinct from SCO-style save cursor in some profiles."
+direction   = "host-to-terminal"
+syntax      = "CSI s"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/left_right_margin_reset.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.index"
+name        = "DEC Index"
+description = "IND moves down one line and scrolls inside the active region when needed."
+direction   = "host-to-terminal"
+syntax      = "ESC D"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/index.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "dec.screen.reverse_index"
+name        = "DEC Reverse Index"
+description = "RI moves up one line and reverse-scrolls inside the active region when needed."
+direction   = "host-to-terminal"
+syntax      = "ESC M"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/reverse_index.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "dec.screen.next_line"
+name        = "DEC Next Line"
+description = "NEL moves to the next line using the terminal's newline semantics."
+direction   = "host-to-terminal"
+syntax      = "ESC E"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/next_line.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "dec.screen.soft_reset"
+name        = "DECSTR Soft Reset"
+description = "Soft reset is terminal-wide state mutation; use deliberately."
+direction   = "host-to-terminal"
+syntax      = "CSI ! p"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/soft_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "dec.screen.alignment"
+name        = "DECALN Screen Alignment Test"
+description = "Diagnostic command that fills the viewport with E characters."
+direction   = "host-to-terminal"
+syntax      = "ESC # 8"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/screen_alignment.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.screen.full_reset"
+name        = "RIS Full Reset"
+description = "Full reset may clear broad terminal state depending on the emulator profile."
+direction   = "host-to-terminal"
+syntax      = "ESC c"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/full_reset.seq"]
+replay      = "destructive"
+
+[[sequence]]
+id          = "dec.charset.g0_us_ascii"
+name        = "Designate G0 US ASCII"
+description = "SCS designates US ASCII into G0."
+direction   = "host-to-terminal"
+syntax      = "ESC ( B"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/charset_g0_us_ascii.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.g1_special_graphics"
+name        = "Designate G1 DEC Special Graphics"
+description = "DEC special graphics is the classic line-drawing set."
+direction   = "host-to-terminal"
+syntax      = "ESC ) 0"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/charset_g1_special_graphics.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.g3_supplemental"
+name        = "Designate G3 DEC Supplemental"
+description = "DEC Supplemental uses the percent intermediate and final byte 5 in VT manuals."
+direction   = "host-to-terminal"
+syntax      = "ESC + % 5"
+refs        = [{ doc = "vt320" }]
+fixtures    = ["fixtures/dec/charset_g3_supplemental.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.ls0"
+name        = "Locking Shift G0"
+description = "Maps G0 into GL."
+direction   = "host-to-terminal"
+syntax      = "SI"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/locking_shift_g0.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.ls1"
+name        = "Locking Shift G1"
+description = "Maps G1 into GL."
+direction   = "host-to-terminal"
+syntax      = "SO"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/locking_shift_g1.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.ss2"
+name        = "Single Shift G2"
+description = "Uses G2 for the next printable character only."
+direction   = "host-to-terminal"
+syntax      = "ESC N"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/single_shift_g2.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "dec.charset.ss3"
+name        = "Single Shift G3"
+description = "Uses G3 for the next printable character only; fixture includes the affected byte because ESC O also prefixes SS3 key reports."
+direction   = "bidirectional"
+syntax      = "ESC O C"
+refs        = [{ doc = "xfree86-ctlseqs" }]
+fixtures    = ["fixtures/dec/single_shift_g3.seq"]
+replay      = "modal"

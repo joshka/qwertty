@@ -1,0 +1,62 @@
+# kitty-graphics sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.graphics.response"
+name        = "Kitty Graphics Response"
+description = "Fixture reports image id 7, placement id 3, and response code `OK`."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.graphics.response_error"
+name        = "Kitty Graphics Error Response"
+description = "Fixture preserves a non-OK response code and message text."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.graphics.transmit_display"
+name        = "Kitty Graphics Transmit And Display"
+description = "Fixture uses an already-encoded payload and a minimal format hint."
+direction   = "host-to-terminal"
+syntax      = "APC G a=T,... ; payload ST"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = ["fixtures/kitty/graphics_transmit_display.seq", "fixtures/kitty/negative/policy_denied/graphics_transmit_display.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.graphics.place"
+name        = "Kitty Graphics Place Image"
+description = "Fixture places image id 7 at the current cursor position."
+direction   = "host-to-terminal"
+syntax      = "APC G a=p,i=id ; ST"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = ["fixtures/kitty/graphics_place.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.text_size.scaled"
+name        = "Kitty Text Sizing Scaled Text"
+description = "Fixture renders double-sized text."
+direction   = "host-to-terminal"
+syntax      = "OSC 66 ; s=scale ; text ST"
+refs        = [{ doc = "kitty-text-sizing" }]
+fixtures    = ["fixtures/kitty/text_size_scaled.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.text_size.fractional"
+name        = "Kitty Text Sizing Fractional Text"
+description = "Fixture renders half-sized text in one cell."
+direction   = "host-to-terminal"
+syntax      = "OSC 66 ; n=num:d=den[:w=width] ; text ST"
+refs        = [{ doc = "kitty-text-sizing" }]
+fixtures    = ["fixtures/kitty/text_size_fractional.seq"]
+replay      = "safe"

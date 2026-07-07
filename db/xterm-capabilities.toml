@@ -1,0 +1,55 @@
+# xterm-capabilities sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "xterm.xtgettcap.query"
+name        = "XTGETTCAP Query"
+description = "Fixture queries `TN`, encoded as hex `544E`."
+direction   = "host-to-terminal"
+syntax      = "DCS + q hex-name ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/xtgettcap_query.seq"]
+replay      = "safe"
+responds    = "xterm.xtgettcap.report"
+
+[[sequence]]
+id          = "xterm.xtgetxres.query"
+name        = "XTGETXRES Query"
+description = "Fixture queries `font`, encoded as hex `666F6E74`."
+direction   = "host-to-terminal"
+syntax      = "DCS + Q hex-resource-name ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/xtgetxres_query.seq"]
+replay      = "safe"
+responds    = "xterm.xtgetxres.report"
+
+[[sequence]]
+id          = "xterm.xtgetxres.report"
+name        = "XTGETXRES Report"
+description = "Fixture reports hex payload `font=mono` and preserves the encoded string."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.xtsettcap.set"
+name        = "XTSETTCAP Set"
+description = "Fixture sets `TN=xterm`, encoded as one hex byte string."
+direction   = "host-to-terminal"
+syntax      = "DCS + p hex-name-equals-value ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "modal"
+notes       = "prototype fixture payload was audit-flagged wrong (TN=xterm is not a terminfo name); fixture withheld pending re-capture"
+
+[[sequence]]
+id          = "xterm.xtgettcap.report"
+name        = "XTGETTCAP Report"
+description = "Payload stays hex encoded until a termcap-specific helper decodes it."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"

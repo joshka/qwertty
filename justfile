@@ -28,6 +28,12 @@ loom:
 markdown:
     markdownlint-cli2 "**/*.md"
 
+# Validate the sequence database: id format, unique ids, ref resolution, fixture existence and
+# header/direction agreement, replay class, reply linkage, non-empty descriptions. Pure and fast,
+# so it joins the `check` chain.
+qdb-validate:
+    cargo run -p qdb -- validate
+
 # Verify the live query path against real terminal implementations, headless. Uses tmux and
 # betamax (headless ghostty) when installed, skipping cleanly otherwise; both type into the
 # session while interleaved queries run, exercising the typeahead-survival contract for real.
@@ -43,4 +49,4 @@ fuzz:
     cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
     cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
-check: metadata fmt-check test loom clippy doc markdown
+check: metadata fmt-check test loom clippy doc markdown qdb-validate

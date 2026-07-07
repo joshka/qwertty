@@ -1,0 +1,412 @@
+# xterm-input sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "xterm.bracketed_paste.enable"
+name        = "Enable Bracketed Paste"
+description = "Paste payload is aggregated between start and end markers."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2004 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/bracketed_paste_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.bracketed_paste.disable"
+name        = "Disable Bracketed Paste"
+description = "Turns off bracketed paste so pasted text is no longer wrapped in markers."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2004 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/bracketed_paste_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.bracketed_paste.start"
+name        = "Bracketed Paste Start"
+description = "Internal delimiter; public event is the aggregated paste payload."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.bracketed_paste.end"
+name        = "Bracketed Paste End"
+description = "Internal delimiter; public event is the aggregated paste payload."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.focus.enable"
+name        = "Enable Focus Events"
+description = "Enables focus reporting so the terminal sends events when it gains or loses focus."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1004 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/focus_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.focus.disable"
+name        = "Disable Focus Events"
+description = "Disables focus reporting so focus changes are no longer reported."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1004 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/focus_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.focus.gained"
+name        = "Focus Gained"
+description = "Reports that the terminal window has gained keyboard focus."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.focus.lost"
+name        = "Focus Lost"
+description = "Reports that the terminal window has lost keyboard focus."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.enable"
+name        = "Enable SGR Mouse Encoding"
+description = "Requires an event-mode mouse enable entry for full reporting."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1006 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/sgr_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.x10.enable"
+name        = "Enable X10 Mouse Reporting"
+description = "Legacy coordinate encoding is preserved but not preferred for new applications."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 9 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/x10_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.x10.disable"
+name        = "Disable X10 Mouse Reporting"
+description = "Turns off X10 mouse reporting."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 9 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/x10_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.normal.enable"
+name        = "Enable Normal Mouse Reporting"
+description = "Reports button press and release events."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1000 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/normal_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.normal.disable"
+name        = "Disable Normal Mouse Reporting"
+description = "Turns off normal (button-press and release) mouse reporting."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1000 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/normal_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.button_event.enable"
+name        = "Enable Button-Event Mouse Reporting"
+description = "Reports press, release, and button drag events."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1002 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/button_event_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.button_event.disable"
+name        = "Disable Button-Event Mouse Reporting"
+description = "Turns off button-event mouse reporting (motion while a button is held)."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1002 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/button_event_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.any_event.enable"
+name        = "Enable Any-Event Mouse Reporting"
+description = "Reports press, release, drag, and pointer motion events."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1003 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/any_event_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.any_event.disable"
+name        = "Disable Any-Event Mouse Reporting"
+description = "Turns off any-event mouse reporting (all pointer motion)."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1003 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/any_event_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.utf8.enable"
+name        = "Enable UTF-8 Mouse Coordinates"
+description = "Legacy UTF-8 coordinate encoding is retained for completeness."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1005 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/utf8_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.utf8.disable"
+name        = "Disable UTF-8 Mouse Coordinates"
+description = "Turns off UTF-8 mouse coordinate encoding."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1005 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/utf8_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.disable"
+name        = "Disable SGR Mouse Encoding"
+description = "Turns off SGR mouse coordinate encoding."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1006 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/sgr_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.urxvt.enable"
+name        = "Enable urxvt Mouse Coordinates"
+description = "Uses CSI button ; column ; row M without the SGR private marker."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1015 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/urxvt_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.urxvt.disable"
+name        = "Disable urxvt Mouse Coordinates"
+description = "Turns off urxvt mouse coordinate encoding."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1015 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/urxvt_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.sgr_pixels.enable"
+name        = "Enable SGR Pixel Mouse Coordinates"
+description = "Reports mouse coordinates in pixels using the SGR mouse syntax family."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1016 h"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/sgr_pixel_mouse_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.sgr_pixels.disable"
+name        = "Disable SGR Pixel Mouse Coordinates"
+description = "Turns off SGR pixel-precise mouse coordinate encoding."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 1016 l"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/xterm/sgr_pixel_mouse_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.press"
+name        = "SGR Mouse Press"
+description = "Columns and rows are reported in protocol coordinate space."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.shift_middle"
+name        = "SGR Mouse Shift Middle Press"
+description = "Covers middle-button press plus the SGR shift modifier bit."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.pixel_press"
+name        = "SGR Pixel Mouse Press"
+description = "Adds pixel coordinates to the normal SGR mouse report fields."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.x10.press"
+name        = "X10 Mouse Press"
+description = "Legacy three-byte reports are decoded when coordinates fit printable bytes."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.release"
+name        = "SGR Mouse Release"
+description = "Release uses lowercase final byte `m` in SGR mode."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.drag"
+name        = "SGR Mouse Drag"
+description = "Button-event and any-event modes report drag by adding 32 to the button code."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.move"
+name        = "SGR Mouse Move"
+description = "Any-event mode reports motion with the motion bit and no active button."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.wheel"
+name        = "SGR Mouse Wheel"
+description = "Wheel reports use press form; xterm does not report wheel releases."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.urxvt.press"
+name        = "urxvt Mouse Press"
+description = "Decoded through the shared mouse event model."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.keyboard.delete"
+name        = "Delete Key"
+description = "Legacy tilde-form edit key without modifiers."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.keyboard.alt_delete"
+name        = "Alt Delete Key"
+description = "Tilde-form edit key with xterm modifier parameter."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.keyboard.alt_f1"
+name        = "Alt F1 Key"
+description = "Function-key report with xterm modifier parameter."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.x10.origin_press"
+name        = "X10 Mouse Origin Press"
+description = "Edge fixture for 1-indexed protocol coordinate origin."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.normal.origin_release"
+name        = "Normal Mouse Origin Release"
+description = "Edge fixture for the normal-tracking legacy release code at the origin."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.utf8.wide_column_press"
+name        = "UTF-8 Mouse Wide Column Press"
+description = "Edge fixture for UTF-8 encoded legacy coordinates above the ASCII range."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.urxvt.origin_press"
+name        = "urxvt Mouse Origin Press"
+description = "Edge fixture for urxvt decimal coordinate origin."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "xterm.mouse.sgr.wheel_modifier_edge"
+name        = "SGR Mouse Wheel With Modifiers At Edge"
+description = "Covers wheel reporting with shift, alt, control, and high column value."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"

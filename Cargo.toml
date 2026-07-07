@@ -1,3 +1,9 @@
+# The root package `qwertty` is the sole publishable crate. `tools/qdb` is an unpublished
+# workspace member (developer tooling for the sequence database); it shares no semver with the
+# library, so it lives beside it rather than inside it (ADR-0014).
+[workspace]
+members = ["tools/qdb"]
+
 [package]
 name = "qwertty"
 version = "0.0.0"

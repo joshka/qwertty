@@ -1,0 +1,684 @@
+# osc sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "osc.0.title_icon"
+name        = "Set Icon And Window Title"
+description = "OSC may be BEL-terminated or ST-terminated."
+direction   = "host-to-terminal"
+syntax      = "OSC 0 ; text ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/title_icon.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.1.icon_title"
+name        = "Set Icon Title"
+description = "Sets only the icon title where supported."
+direction   = "host-to-terminal"
+syntax      = "OSC 1 ; text ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/title_icon_only.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.2.window_title"
+name        = "Set Window Title"
+description = "Sets only the window title where supported."
+direction   = "host-to-terminal"
+syntax      = "OSC 2 ; text ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/title_window.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.8.hyperlink"
+name        = "OSC 8 Hyperlink"
+description = "Close with an empty OSC 8 URI."
+direction   = "host-to-terminal"
+syntax      = "OSC 8 ; params ; uri ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/hyperlink.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.8.hyperlink.close"
+name        = "OSC 8 Hyperlink Close"
+description = "Closes the currently open hyperlink so following text is not linked."
+direction   = "host-to-terminal"
+syntax      = "OSC 8 ; ; ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/hyperlink_close.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.10.foreground_query"
+name        = "Query Foreground Color"
+description = "Asks the terminal to report its current default foreground color."
+direction   = "host-to-terminal"
+syntax      = "OSC 10 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/foreground_query.seq"]
+replay      = "safe"
+responds    = "osc.10.foreground_report"
+
+[[sequence]]
+id          = "osc.10.foreground_report"
+name        = "Foreground Color Report"
+description = "Reports the terminal's current default foreground color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.10.foreground_set"
+name        = "Set Foreground Color"
+description = "Fixture uses typed xterm `rgb:rrrr/gggg/bbbb` syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 10 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/foreground_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.10.foreground_set_hex"
+name        = "Set Foreground Color With Hex RGB"
+description = "Fixture exercises typed `#rrggbb` validation before OSC encoding."
+direction   = "host-to-terminal"
+syntax      = "OSC 10 ; #rrggbb ST"
+refs        = [{ doc = "xterm-ctlseqs" }, { doc = "wezterm-escape-sequences" }]
+fixtures    = ["fixtures/osc/foreground_set_hex.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.11.background_query"
+name        = "Query Background Color"
+description = "Asks the terminal to report its current default background color."
+direction   = "host-to-terminal"
+syntax      = "OSC 11 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/background_query.seq"]
+replay      = "safe"
+responds    = "osc.11.background_report"
+
+[[sequence]]
+id          = "osc.11.background_report"
+name        = "Background Color Report"
+description = "Reports the terminal's current default background color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.11.background_set"
+name        = "Set Background Color"
+description = "Color payloads should use typed color syntax when the form is known."
+direction   = "host-to-terminal"
+syntax      = "OSC 11 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/background_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.12.cursor_query"
+name        = "Query Cursor Color"
+description = "Asks the terminal to report its current text-cursor color."
+direction   = "host-to-terminal"
+syntax      = "OSC 12 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/cursor_query.seq"]
+replay      = "safe"
+responds    = "osc.12.cursor_report"
+
+[[sequence]]
+id          = "osc.12.cursor_report"
+name        = "Cursor Color Report"
+description = "Reports the terminal's current text-cursor color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.12.cursor_set"
+name        = "Set Cursor Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 12 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/cursor_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.4.palette_query"
+name        = "Query Palette Color"
+description = "Fixture uses palette index 2."
+direction   = "host-to-terminal"
+syntax      = "OSC 4 ; index ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/palette_query.seq"]
+replay      = "safe"
+responds    = "osc.4.palette_report"
+
+[[sequence]]
+id          = "osc.4.palette_report"
+name        = "Palette Color Report"
+description = "Reports the RGB value of an indexed palette color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.4.palette_set"
+name        = "Set Palette Color"
+description = "Fixture uses palette index 2."
+direction   = "host-to-terminal"
+syntax      = "OSC 4 ; index ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/palette_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.104.palette_reset"
+name        = "Reset Palette Color"
+description = "Fixture uses palette index 2."
+direction   = "host-to-terminal"
+syntax      = "OSC 104 ; index ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/palette_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.5.special_query"
+name        = "Query Special Color"
+description = "Fixture queries special color index 1."
+direction   = "host-to-terminal"
+syntax      = "OSC 5 ; index ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/special_query.seq"]
+replay      = "safe"
+responds    = "osc.5.special_report"
+
+[[sequence]]
+id          = "osc.5.special_report"
+name        = "Special Color Report"
+description = "Fixture reports special color index 1."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.5.special_set"
+name        = "Set Special Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 5 ; index ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/special_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.105.special_reset"
+name        = "Reset Special Color"
+description = "Fixture resets special color index 1."
+direction   = "host-to-terminal"
+syntax      = "OSC 105 ; index ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/special_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.13.pointer_foreground_query"
+name        = "Query Pointer Foreground Color"
+description = "Fixture queries the pointer foreground color."
+direction   = "host-to-terminal"
+syntax      = "OSC 13 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_foreground_query.seq"]
+replay      = "safe"
+responds    = "osc.13.pointer_foreground_report"
+
+[[sequence]]
+id          = "osc.13.pointer_foreground_report"
+name        = "Pointer Foreground Color Report"
+description = "Reports the terminal's current mouse-pointer foreground color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.13.pointer_foreground_set"
+name        = "Set Pointer Foreground Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 13 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_foreground_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.113.pointer_foreground_reset"
+name        = "Reset Pointer Foreground Color"
+description = "Resets the mouse-pointer foreground color to its default."
+direction   = "host-to-terminal"
+syntax      = "OSC 113 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_foreground_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.14.pointer_background_query"
+name        = "Query Pointer Background Color"
+description = "Fixture queries the pointer background color."
+direction   = "host-to-terminal"
+syntax      = "OSC 14 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_background_query.seq"]
+replay      = "safe"
+responds    = "osc.14.pointer_background_report"
+
+[[sequence]]
+id          = "osc.14.pointer_background_report"
+name        = "Pointer Background Color Report"
+description = "Reports the terminal's current mouse-pointer background color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.14.pointer_background_set"
+name        = "Set Pointer Background Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 14 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_background_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.114.pointer_background_reset"
+name        = "Reset Pointer Background Color"
+description = "Resets the mouse-pointer background color to its default."
+direction   = "host-to-terminal"
+syntax      = "OSC 114 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/pointer_background_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.17.highlight_background_query"
+name        = "Query Highlight Background Color"
+description = "Fixture queries the highlight background color."
+direction   = "host-to-terminal"
+syntax      = "OSC 17 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_background_query.seq"]
+replay      = "safe"
+responds    = "osc.17.highlight_background_report"
+
+[[sequence]]
+id          = "osc.17.highlight_background_report"
+name        = "Highlight Background Color Report"
+description = "Reports the terminal's current selection-highlight background color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.17.highlight_background_set"
+name        = "Set Highlight Background Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 17 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_background_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.117.highlight_background_reset"
+name        = "Reset Highlight Background Color"
+description = "Resets the selection-highlight background color to its default."
+direction   = "host-to-terminal"
+syntax      = "OSC 117 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_background_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.19.highlight_foreground_query"
+name        = "Query Highlight Foreground Color"
+description = "Fixture queries the highlight foreground color."
+direction   = "host-to-terminal"
+syntax      = "OSC 19 ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_foreground_query.seq"]
+replay      = "safe"
+responds    = "osc.19.highlight_foreground_report"
+
+[[sequence]]
+id          = "osc.19.highlight_foreground_report"
+name        = "Highlight Foreground Color Report"
+description = "Reports the terminal's current selection-highlight foreground color."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.19.highlight_foreground_set"
+name        = "Set Highlight Foreground Color"
+description = "Color payload is preserved as terminal color syntax."
+direction   = "host-to-terminal"
+syntax      = "OSC 19 ; color ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_foreground_set.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.119.highlight_foreground_reset"
+name        = "Reset Highlight Foreground Color"
+description = "Resets the selection-highlight foreground color to its default."
+direction   = "host-to-terminal"
+syntax      = "OSC 119 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/highlight_foreground_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.110.foreground_reset"
+name        = "Reset Foreground Color"
+description = "Resets the default foreground color to its configured value."
+direction   = "host-to-terminal"
+syntax      = "OSC 110 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/foreground_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.111.background_reset"
+name        = "Reset Background Color"
+description = "Resets the default background color to its configured value."
+direction   = "host-to-terminal"
+syntax      = "OSC 111 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/background_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.112.cursor_reset"
+name        = "Reset Cursor Color"
+description = "Resets the text-cursor color to its configured value."
+direction   = "host-to-terminal"
+syntax      = "OSC 112 ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/cursor_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.52.clipboard"
+name        = "OSC 52 Clipboard Write"
+description = "Clipboard reads and writes require explicit policy."
+direction   = "host-to-terminal"
+syntax      = "OSC 52 ; target ; payload ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/clipboard.seq", "fixtures/osc/negative/policy_denied/clipboard.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.52.clipboard_query"
+name        = "OSC 52 Clipboard Query"
+description = "Fixture queries target `c`; terminals may deny or ignore clipboard reads."
+direction   = "host-to-terminal"
+syntax      = "OSC 52 ; target ; ? ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/osc/clipboard_query.seq"]
+replay      = "safe"
+responds    = "osc.52.clipboard_report"
+
+[[sequence]]
+id          = "osc.52.clipboard_report"
+name        = "OSC 52 Clipboard Report"
+description = "Payload is base64 text; decoding belongs in a higher helper."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "osc.9.notification"
+name        = "Legacy Notification"
+description = "Legacy notification convention implemented by some terminals."
+direction   = "host-to-terminal"
+syntax      = "OSC 9 ; message ST"
+refs        = [{ doc = "kitty-desktop-notifications-src" }]
+fixtures    = ["fixtures/osc/notification_legacy.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.777.notification"
+name        = "Notify Notification"
+description = "Common notify convention with typed title/body metadata."
+direction   = "host-to-terminal"
+syntax      = "OSC 777 ; notify ; title ; body ST"
+refs        = [{ doc = "kitty-desktop-notifications-src" }]
+fixtures    = ["fixtures/osc/notification_notify.seq", "fixtures/osc/negative/policy_denied/notification_notify.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.notification.osc99"
+name        = "Kitty Desktop Notification"
+description = "Fixture uses a single metadata/payload chunk; OSC 99 supports richer chunking."
+direction   = "host-to-terminal"
+syntax      = "OSC 99 ; metadata ; payload ST"
+refs        = [{ doc = "kitty-desktop-notifications" }]
+fixtures    = ["fixtures/osc/notification_kitty.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "osc.7.cwd"
+name        = "Current Working Directory"
+description = "Typed helpers validate the host and absolute path before encoding a file URI."
+direction   = "host-to-terminal"
+syntax      = "OSC 7 ; uri ST"
+refs        = [{ doc = "terminal-wg-20" }]
+fixtures    = ["fixtures/osc/shell_cwd.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "finalterm.shell.prompt_start"
+name        = "Prompt Start"
+description = "Marks the start of a shell prompt."
+direction   = "host-to-terminal"
+syntax      = "OSC 133 ; A ST"
+refs        = [{ doc = "terminal-wg-14" }]
+fixtures    = ["fixtures/osc/shell_prompt_start.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "finalterm.shell.prompt_end"
+name        = "Prompt End"
+description = "Marks the end of a shell prompt."
+direction   = "host-to-terminal"
+syntax      = "OSC 133 ; B ST"
+refs        = [{ doc = "terminal-wg-14" }]
+fixtures    = ["fixtures/osc/shell_prompt_end.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "finalterm.shell.command_start"
+name        = "Command Start"
+description = "Marks the beginning of command output."
+direction   = "host-to-terminal"
+syntax      = "OSC 133 ; C ST"
+refs        = [{ doc = "terminal-wg-14" }]
+fixtures    = ["fixtures/osc/shell_command_start.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "finalterm.shell.command_finished"
+name        = "Command Finished"
+description = "Fixture includes exit code 1."
+direction   = "host-to-terminal"
+syntax      = "OSC 133 ; D [ ; exit-code ] ST"
+refs        = [{ doc = "terminal-wg-14" }]
+fixtures    = ["fixtures/osc/shell_command_finished.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.prompt_start"
+name        = "VS Code Prompt Start"
+description = "VS Code recommends writing OSC 633 sequences only when `TERM_PROGRAM=vscode`."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; A ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_prompt_start.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.prompt_end"
+name        = "VS Code Prompt End"
+description = "Rich command detection expects prompt start before prompt end."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; B ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_prompt_end.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.command_executed"
+name        = "VS Code Command Executed"
+description = "VS Code describes this as the pre-execution marker."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; C ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_command_executed.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.command_finished"
+name        = "VS Code Command Finished"
+description = "Fixture includes exit code 0; the exit code is optional."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; D [ ; exitcode ] ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_command_finished.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.command_line"
+name        = "VS Code Command Line"
+description = "Command payload escapes semicolon and characters `0x20` and below with `\\\\xAB`."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; E ; commandline ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_command_line.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.command_line_nonce"
+name        = "VS Code Command Line With Nonce"
+description = "Nonce allows VS Code to verify that the sequence came from shell integration."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; E ; commandline ; nonce ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_command_line_nonce.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.property"
+name        = "VS Code Shell Property"
+description = "Only properties known to VS Code are handled."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; P ; name=value ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/shell_vscode_property.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.cwd"
+name        = "VS Code Current Working Directory"
+description = "Reports the shell current working directory for link resolution and tab state."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; P ; Cwd=path ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_cwd.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.is_windows"
+name        = "VS Code Windows Backend Property"
+description = "Valid values are `True` and `False`; VS Code uses this for Windows backend heuristics."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; P ; IsWindows=True|False ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_is_windows.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "vscode.shell.rich_command_detection"
+name        = "VS Code Rich Command Detection Property"
+description = "Set to `True` when markers are emitted in VS Code's expected `A, B, E, C, D` order."
+direction   = "host-to-terminal"
+syntax      = "OSC 633 ; P ; HasRichCommandDetection=True|False ST"
+refs        = [{ doc = "vscode-shell-integration" }]
+fixtures    = ["fixtures/osc/vscode_rich_command_detection.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.current_dir"
+name        = "iTerm2 Current Directory"
+description = "iTerm2 convention, preserved here as a typed shell-integration helper."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; CurrentDir=path ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/osc/shell_iterm_cwd.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_mark"
+name        = "iTerm2 Set Mark"
+description = "Marks the current prompt/output location in iTerm2-compatible terminals."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetMark ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/osc/shell_iterm_mark.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.file"
+name        = "iTerm2 File Transfer"
+description = "The `name` argument is base64-encoded per the iTerm2 inline images protocol."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; File=args:base64-payload ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
+fixtures    = ["fixtures/osc/iterm2_file.seq"]
+replay      = "safe"
+notes       = "MultipartFile/FilePart/FileEnd remains preserve-only."
+
+[[sequence]]
+id          = "iterm2.osc1337.inline_image"
+name        = "iTerm2 Inline Image"
+description = "Inline images share the OSC 1337 File command with `inline=1` metadata."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; File=inline=1;args:base64-payload ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
+fixtures    = ["fixtures/osc/iterm2_inline_image.seq"]
+replay      = "safe"
+notes       = "MultipartFile/FilePart/FileEnd remains preserve-only."

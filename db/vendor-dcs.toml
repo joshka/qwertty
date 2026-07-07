@@ -1,0 +1,46 @@
+# vendor-dcs sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "vendor.dcs.sixel.preserve"
+name        = "Sixel Graphics Preserve"
+description = "Sixel is preserved as DCS syntax with fixture evidence; no renderer, image model, or transfer policy is exposed yet."
+direction   = "bidirectional"
+syntax      = "DCS params q sixel-data ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/vendor/advanced/sixel.seq", "fixtures/vendor/advanced/negative/recovery/sixel_unterminated.seq"]
+replay      = "safe"
+notes       = "Promote only with a source-backed graphics payload model and size limits."
+
+[[sequence]]
+id          = "vendor.dcs.regis.preserve"
+name        = "ReGIS Graphics Preserve"
+description = "ReGIS is preserved as a historical vector-graphics DCS payload."
+direction   = "bidirectional"
+syntax      = "DCS p ReGIS-commands ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/vendor/advanced/regis.seq", "fixtures/vendor/advanced/negative/recovery/regis_unterminated.seq"]
+replay      = "safe"
+notes       = "No typed model is planned until a real application or terminal-profile need appears."
+
+[[sequence]]
+id          = "vendor.dcs.decudk.preserve"
+name        = "DECUDK User-Defined Keys Preserve"
+description = "DECUDK mutates terminal key definitions on compatible DEC/xterm profiles."
+direction   = "host-to-terminal"
+syntax      = "DCS Ps ; Ps | key-definitions ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/vendor/advanced/decudk.seq", "fixtures/vendor/advanced/negative/recovery/decudk_unterminated.seq"]
+replay      = "safe"
+notes       = "Kept preserve-only because modern applications should prefer explicit input protocols over redefining keys."
+
+[[sequence]]
+id          = "vendor.dcs.decrsps.preserve"
+name        = "DECRSPS Restore Presentation State Preserve"
+description = "DECRSPS restores terminal presentation state from a DCS payload."
+direction   = "host-to-terminal"
+syntax      = "DCS Ps $ p presentation-state ST"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/vendor/advanced/decrsps.seq", "fixtures/vendor/advanced/negative/recovery/decrsps_unterminated.seq"]
+replay      = "safe"
+notes       = "Kept preserve-only because a typed API would need a complete presentation-state model and careful cleanup semantics."

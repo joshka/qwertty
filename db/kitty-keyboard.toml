@@ -1,0 +1,103 @@
+# kitty-keyboard sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.keyboard.enable"
+name        = "Enable Kitty Keyboard Protocol"
+description = "Progressive enhancement flags are negotiated per session."
+direction   = "host-to-terminal"
+syntax      = "CSI > flags u"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = ["fixtures/kitty/keyboard_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.keyboard.disable"
+name        = "Disable Kitty Keyboard Protocol"
+description = "Cleanup pair for Kitty keyboard protocol."
+direction   = "host-to-terminal"
+syntax      = "CSI < u"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = ["fixtures/kitty/keyboard_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.keyboard.pop"
+name        = "Pop Kitty Keyboard Protocol Flags"
+description = "Restores a previous keyboard protocol stack entry."
+direction   = "host-to-terminal"
+syntax      = "CSI < count u"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = ["fixtures/kitty/keyboard_pop.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.keyboard.event"
+name        = "Kitty Keyboard Event"
+description = "Represents modifiers, event type, alternate keys, and associated text when enabled."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.keyboard.event_release"
+name        = "Kitty Keyboard Release Event"
+description = "Covers the event-type subparameter for release reports."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.keyboard.event_full"
+name        = "Kitty Keyboard Event With Enhanced Fields"
+description = "Covers alternate key identifiers, key event type, and associated text payload."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.keyboard.flags_query"
+name        = "Kitty Keyboard Flags Query"
+description = "Queries the current progressive enhancement flag set."
+direction   = "host-to-terminal"
+syntax      = "CSI ? u"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = ["fixtures/kitty/keyboard_flags_query.seq"]
+replay      = "safe"
+responds    = "kitty.keyboard.flags_report"
+
+[[sequence]]
+id          = "kitty.keyboard.flags_report"
+name        = "Kitty Keyboard Flags Report"
+description = "Fixture reports recommended flags value 23."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.keyboard.keypad_add"
+name        = "Kitty Keyboard Keypad Add"
+description = "Covers keypad-location fidelity and associated text for keypad add."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.keyboard.right_alt_release"
+name        = "Kitty Keyboard Right Alt Release"
+description = "Covers side-specific modifier key identity and release event type."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-keyboard" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"

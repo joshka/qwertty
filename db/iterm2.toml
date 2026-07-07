@@ -1,0 +1,551 @@
+# iterm2 sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "iterm2.osc4.default_background_query"
+name        = "iTerm2 OSC 4 Default Background Query"
+description = "iTerm2 extends OSC 4 reports with -2 for default background."
+direction   = "host-to-terminal"
+syntax      = "OSC 4 ; -2 ; ? ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/default_background_query.seq"]
+replay      = "safe"
+responds    = "iterm2.osc4.default_background_report"
+
+[[sequence]]
+id          = "iterm2.osc4.default_foreground_query"
+name        = "iTerm2 OSC 4 Default Foreground Query"
+description = "iTerm2 extends OSC 4 reports with -1 for default foreground."
+direction   = "host-to-terminal"
+syntax      = "OSC 4 ; -1 ; ? ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/default_foreground_query.seq"]
+replay      = "safe"
+responds    = "iterm2.osc4.default_foreground_report"
+
+[[sequence]]
+id          = "iterm2.osc4.default_background_report"
+name        = "iTerm2 OSC 4 Default Background Report"
+description = "Report form is source-inventoried but not decoded as a distinct event yet."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc4.default_foreground_report"
+name        = "iTerm2 OSC 4 Default Foreground Report"
+description = "Report form is source-inventoried but not decoded as a distinct event yet."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc8.anchor"
+name        = "iTerm2 OSC 8 Anchor"
+description = "Generic OSC 8 is typed as osc.8.hyperlink."
+direction   = "host-to-terminal"
+syntax      = "OSC 8 ; params ; url ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/anchor.seq"]
+replay      = "safe"
+notes       = "iTerm2 adds semantic-history handling for file URLs with line and column fragments."
+
+[[sequence]]
+id          = "iterm2.osc1337.cursor_shape"
+name        = "iTerm2 Cursor Shape"
+description = "Values are block, vertical bar, and underline."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; CursorShape=N ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/cursor_shape.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.steal_focus"
+name        = "iTerm2 Steal Focus"
+description = "Requests that iTerm2 come to the foreground."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; StealFocus ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/steal_focus.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.clear_scrollback"
+name        = "iTerm2 Clear Scrollback"
+description = "Erases scrollback history in supporting iTerm2 sessions."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; ClearScrollback ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/clear_scrollback.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_profile"
+name        = "iTerm2 Set Profile"
+description = "Changes the current session profile."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetProfile=profile ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/set_profile.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc9.notification"
+name        = "iTerm2 Notification"
+description = "Also covered by the generic OSC 9 notification helper."
+direction   = "host-to-terminal"
+syntax      = "OSC 9 ; message ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/notification.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc9.progress"
+name        = "iTerm2 Progress Bar"
+description = "States include clear, progress, error, indeterminate, and warning."
+direction   = "host-to-terminal"
+syntax      = "OSC 9 ; 4 ; state ; percent ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/progress.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.copy_to_clipboard"
+name        = "iTerm2 Copy To Clipboard Mode"
+description = "Starts a mode where following received text is copied until EndCopy."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; CopyToClipboard=name ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/copy_to_clipboard.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.end_copy"
+name        = "iTerm2 End Copy Mode"
+description = "Ends CopyToClipboard mode."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; EndCopy ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/end_copy.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc6.tab_background"
+name        = "iTerm2 Tab Background Color"
+description = "Sets red, green, or blue tab chrome brightness."
+direction   = "host-to-terminal"
+syntax      = "OSC 6 ; 1 ; bg ; channel ; brightness ; N ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/tab_background.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc6.tab_background_reset"
+name        = "iTerm2 Tab Background Color Reset"
+description = "Resets iTerm2 tab chrome background color."
+direction   = "host-to-terminal"
+syntax      = "OSC 6 ; 1 ; bg ; * ; default ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/tab_background_reset.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_colors"
+name        = "iTerm2 Set Colors"
+description = "Supports named color keys, presets, tab default, and color-space prefixes."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetColors=key=value ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/set_colors.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc_p.palette"
+name        = "iTerm2 Deprecated OSC P Palette"
+description = "Documented by iTerm2 as supported but not recommended."
+direction   = "host-to-terminal"
+syntax      = "OSC P n rr gg bb ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/deprecated_palette.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.add_annotation"
+name        = "iTerm2 Add Annotation"
+description = "Supports message-only, length-delimited, and coordinate forms."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; AddAnnotation=... ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/add_annotation.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.add_hidden_annotation"
+name        = "iTerm2 Add Hidden Annotation"
+description = "Same payload forms as AddAnnotation but does not immediately reveal the annotation."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; AddHiddenAnnotation=... ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/add_hidden_annotation.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.highlight_cursor_line"
+name        = "iTerm2 Highlight Cursor Line"
+description = "Shows or hides the cursor guide."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; HighlightCursorLine=yes|no ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/highlight_cursor_line.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.request_attention"
+name        = "iTerm2 Request Attention"
+description = "Values include yes, once, no, and fireworks."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; RequestAttention=value ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/request_attention.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.background_image"
+name        = "iTerm2 Background Image"
+description = "The value is a base64-encoded filename; iTerm2 requires user confirmation."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetBackgroundImageFile=base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/background_image.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.report_cell_size_query"
+name        = "iTerm2 Report Cell Size Query"
+description = "Requests cell height, width, and optional scale."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; ReportCellSize ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/report_cell_size_query.seq"]
+replay      = "safe"
+responds    = "iterm2.osc1337.report_cell_size_report"
+
+[[sequence]]
+id          = "iterm2.osc1337.report_cell_size_report"
+name        = "iTerm2 Report Cell Size Response"
+description = "Scale is present in newer iTerm2 versions."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc1337.copy_pasteboard"
+name        = "iTerm2 Copy To Pasteboard"
+description = "Writes a base64-encoded string to the system pasteboard."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Copy=:base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/copy_pasteboard.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.report_variable_query"
+name        = "iTerm2 Report Variable Query"
+description = "Requests an iTerm2 scripting variable by base64-encoded name."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; ReportVariable=base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/report_variable_query.seq"]
+replay      = "safe"
+responds    = "iterm2.osc1337.report_variable_report"
+
+[[sequence]]
+id          = "iterm2.osc1337.report_variable_report"
+name        = "iTerm2 Report Variable Response"
+description = "Returns the base64-encoded variable value."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_badge_format"
+name        = "iTerm2 Set Badge Format"
+description = "The badge format is an iTerm2 interpolated string encoded as base64."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetBadgeFormat=base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-badges" }]
+fixtures    = ["fixtures/iterm2/set_badge_format.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.request_upload"
+name        = "iTerm2 Request Upload"
+description = "Requests a user-selected tar.gz upload from iTerm2."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; RequestUpload=format=tgz ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/request_upload.seq"]
+replay      = "safe"
+responds    = "iterm2.osc1337.request_upload_response"
+
+[[sequence]]
+id          = "iterm2.osc1337.request_upload_response"
+name        = "iTerm2 Request Upload Response"
+description = "Response is not an OSC control string; it begins with ok or abort."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_key_label"
+name        = "iTerm2 Set Touch Bar Key Label"
+description = "Keys include F1 through F24 and status."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetKeyLabel=key=value ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/set_key_label.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.push_key_labels"
+name        = "iTerm2 Push Touch Bar Key Labels"
+description = "Pushes current key labels onto a stack, optionally with a label."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; PushKeyLabels[=label] ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/push_key_labels.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.pop_key_labels"
+name        = "iTerm2 Pop Touch Bar Key Labels"
+description = "Pops key labels, optionally through the matching label."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; PopKeyLabels[=label] ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/pop_key_labels.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.unicode_version"
+name        = "iTerm2 Unicode Width Version"
+description = "Controls iTerm2's Unicode width-table version and stack."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; UnicodeVersion=n|push[ label]|pop[ label] ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/unicode_version.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.multipart_file_start"
+name        = "iTerm2 Multipart File Start"
+description = "Introduced for tmux integration mode and large file transfers."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; MultipartFile=args ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
+fixtures    = ["fixtures/iterm2/multipart_file_start.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.multipart_file_part"
+name        = "iTerm2 Multipart File Part"
+description = "Carries one base64 payload chunk for a MultipartFile transfer."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; FilePart=base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
+fixtures    = ["fixtures/iterm2/multipart_file_part.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.multipart_file_end"
+name        = "iTerm2 Multipart File End"
+description = "Terminates a MultipartFile transfer."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; FileEnd ST"
+refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
+fixtures    = ["fixtures/iterm2/multipart_file_end.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.custom"
+name        = "iTerm2 Custom Control Sequence"
+description = "Used by iTerm2 scripts; includes a shared secret and script-defined pattern."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Custom=id=secret:pattern ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/custom.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.set_user_var"
+name        = "iTerm2 Set User Variable"
+description = "Sets a user-defined variable used by iTerm2 substitutions."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; SetUserVar=name=base64 ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/set_user_var.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "iterm2.osc1337.shell_integration_version"
+name        = "iTerm2 Shell Integration Version"
+description = "Reports the current version of the shell integration script."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; ShellIntegrationVersion=version[;shell] ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/shell_integration_version.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.remote_host"
+name        = "iTerm2 Remote Host"
+description = "Reports user and fully qualified host name; OSC 7 is a related synonym."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; RemoteHost=user@host ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/remote_host.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.clear_captured_output"
+name        = "iTerm2 Clear Captured Output"
+description = "Erases iTerm2's current captured output."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; ClearCapturedOutput ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/clear_captured_output.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.csi.decscusr_zero"
+name        = "iTerm2 DECSCUSR 0"
+description = "iTerm2 intentionally treats DECSCUSR 0 as reset to default cursor appearance."
+direction   = "host-to-terminal"
+syntax      = "CSI 0 SP q"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/decscusr_zero.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.csi.curly_underline"
+name        = "iTerm2 Curly Underline"
+description = "Also covered by generic colon-form SGR style handling."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : 3 m"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/curly_underline.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.dcs.extended_device_attributes"
+name        = "iTerm2 Extended Device Attributes"
+description = "Requests iTerm2 terminal name and version."
+direction   = "host-to-terminal"
+syntax      = "CSI > q"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/extended_device_attributes_query.seq"]
+replay      = "safe"
+responds    = "iterm2.dcs.extended_device_attributes_response"
+
+[[sequence]]
+id          = "iterm2.dcs.extended_device_attributes_response"
+name        = "iTerm2 Extended Device Attributes Response"
+description = "Reports terminal name and version, such as iTerm2 3.4.0."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.osc1337.open_url"
+name        = "iTerm2 Open URL"
+description = "Requests opening a URL; iTerm2 requires permission and can disable it."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; OpenURL=:base64-url ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/open_url.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.disinter"
+name        = "iTerm2 Disinter"
+description = "Requests disinterring a buried session."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Disinter ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/disinter.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.block"
+name        = "iTerm2 Block"
+description = "Defines the start or end of a code block."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Block=id=identifier;attr=start|end ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/block.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.update_block"
+name        = "iTerm2 Update Block"
+description = "Available in iTerm2 3.6.9 and later."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; UpdateBlock=id=identifier;action=fold|unfold ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/update_block.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.button_copy"
+name        = "iTerm2 Copy Button"
+description = "Creates a copy button for a previously defined block."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Button=type=copy;block=identifier ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/button_copy.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "iterm2.osc1337.button_custom"
+name        = "iTerm2 Custom Button"
+description = "Omitting code and icon invalidates existing custom buttons."
+direction   = "host-to-terminal"
+syntax      = "OSC 1337 ; Button=type=custom[;code=N;icon=symbol] ST"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = ["fixtures/iterm2/button_custom.seq"]
+replay      = "safe"
+responds    = "iterm2.csi.button_custom_event"
+
+[[sequence]]
+id          = "iterm2.csi.button_custom_event"
+name        = "iTerm2 Custom Button Event"
+description = "Sent by iTerm2 when a custom button is clicked."
+direction   = "terminal-to-host"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "iterm2.feature_reporting"
+name        = "iTerm2 Feature Reporting"
+description = "Source-inventoried only: the escape-code page points feature detection to iTerm2's feature reporting protocol but does not define a stable OSC/CSI/DCS byte fixture here."
+direction   = "bidirectional"
+syntax      = "iTerm2 feature reporting protocol"
+refs        = [{ doc = "iterm2-escape-codes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "Keep this Known entry as an ownership reminder rather than a support claim until a source-backed query grammar and response model are added."

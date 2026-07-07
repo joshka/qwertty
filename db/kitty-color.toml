@@ -1,0 +1,53 @@
+# kitty-color sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.color.push"
+name        = "Push Kitty Color Stack"
+description = "Saves the terminal color table and dynamic colors for later restoration."
+direction   = "host-to-terminal"
+syntax      = "OSC 30001 ST"
+refs        = [{ doc = "kitty-color-stack" }]
+fixtures    = ["fixtures/kitty/color_push.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.color.pop"
+name        = "Pop Kitty Color Stack"
+description = "Restores colors saved by OSC 30001."
+direction   = "host-to-terminal"
+syntax      = "OSC 30101 ST"
+refs        = [{ doc = "kitty-color-stack" }]
+fixtures    = ["fixtures/kitty/color_pop.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.color.query"
+name        = "Query Kitty Color Key"
+description = "Uses Kitty's string-key color protocol instead of xterm OSC color selectors."
+direction   = "host-to-terminal"
+syntax      = "OSC 21 ; key=? ST"
+refs        = [{ doc = "kitty-color-stack" }]
+fixtures    = ["fixtures/kitty/color_query.seq"]
+replay      = "safe"
+responds    = "kitty.color.report"
+
+[[sequence]]
+id          = "kitty.color.set"
+name        = "Set Kitty Color Key"
+description = "Fixture sets the foreground color with a CSS-style hex color."
+direction   = "host-to-terminal"
+syntax      = "OSC 21 ; key=value ST"
+refs        = [{ doc = "kitty-color-stack" }]
+fixtures    = ["fixtures/kitty/color_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.color.report"
+name        = "Kitty Color Key Report"
+description = "Reports are preserved syntax today; typed event promotion can be added later."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-color-stack" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"

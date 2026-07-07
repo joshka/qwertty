@@ -48,6 +48,9 @@ jobs:
       - name: Test examples
         run: cargo test --examples --workspace --all-features
 
+      - name: Database validate
+        run: cargo run -p qdb -- validate
+
       - name: Loom models
         run: cargo test --lib loom_
         env:

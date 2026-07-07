@@ -1,0 +1,73 @@
+# kitty-multicursor sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.multicursor.set_points"
+name        = "Set Kitty Multiple Cursor Points"
+description = "Fixture follows the main cursor shape at row 4, column 5."
+direction   = "host-to-terminal"
+syntax      = "CSI > shape ; 2 : row : column SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_points.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.multicursor.set_rectangles"
+name        = "Set Kitty Multiple Cursor Rectangles"
+description = "Fixture sets a block cursor across one rectangle."
+direction   = "host-to-terminal"
+syntax      = "CSI > shape ; 4 : top : left : bottom : right SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_rectangles.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.multicursor.clear_all"
+name        = "Clear Kitty Multiple Cursors"
+description = "Clears all extra cursors using the full-screen rectangle form."
+direction   = "host-to-terminal"
+syntax      = "CSI > 0 ; 4 SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_clear.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.multicursor.query_support"
+name        = "Query Kitty Multiple Cursor Support"
+description = "The spec recommends following this query with primary DA to avoid timeout waits."
+direction   = "host-to-terminal"
+syntax      = "CSI > SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_query_support.seq"]
+replay      = "safe"
+responds    = "kitty.multicursor.support_report"
+
+[[sequence]]
+id          = "kitty.multicursor.support_report"
+name        = "Kitty Multiple Cursor Support Report"
+description = "Reports are preserved syntax today; typed event promotion can be added later."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"
+
+[[sequence]]
+id          = "kitty.multicursor.query_cursors"
+name        = "Query Kitty Multiple Cursors"
+description = "Asks the terminal for currently active extra cursors."
+direction   = "host-to-terminal"
+syntax      = "CSI > 100 SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_query_cursors.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.multicursor.query_colors"
+name        = "Query Kitty Multiple Cursor Colors"
+description = "Asks the terminal for the extra cursor color pair."
+direction   = "host-to-terminal"
+syntax      = "CSI > 101 SP q"
+refs        = [{ doc = "kitty-multiple-cursors" }]
+fixtures    = ["fixtures/kitty/multicursor_query_colors.seq"]
+replay      = "safe"

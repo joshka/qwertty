@@ -1,0 +1,53 @@
+# kitty-pointer sequence family. Harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+
+[[sequence]]
+id          = "kitty.pointer.set"
+name        = "Set Kitty Pointer Shape"
+description = "Shape names follow Kitty's CSS-style pointer shape catalog."
+direction   = "host-to-terminal"
+syntax      = "OSC 22 ; shape ST"
+refs        = [{ doc = "kitty-pointer-shapes" }]
+fixtures    = ["fixtures/kitty/pointer_set.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.pointer.push"
+name        = "Push Kitty Pointer Shape"
+description = "Pushes one shape onto the terminal-maintained pointer stack."
+direction   = "host-to-terminal"
+syntax      = "OSC 22 ; > shape ST"
+refs        = [{ doc = "kitty-pointer-shapes" }]
+fixtures    = ["fixtures/kitty/pointer_push.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.pointer.pop"
+name        = "Pop Kitty Pointer Shape"
+description = "Restores the previous pointer shape from the terminal-maintained stack."
+direction   = "host-to-terminal"
+syntax      = "OSC 22 ; < ST"
+refs        = [{ doc = "kitty-pointer-shapes" }]
+fixtures    = ["fixtures/kitty/pointer_pop.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "kitty.pointer.query"
+name        = "Query Kitty Pointer Shape"
+description = "Fixture queries the `__current__` pseudo-shape."
+direction   = "host-to-terminal"
+syntax      = "OSC 22 ; ? shape ST"
+refs        = [{ doc = "kitty-pointer-shapes" }]
+fixtures    = ["fixtures/kitty/pointer_query.seq"]
+replay      = "safe"
+responds    = "kitty.pointer.report"
+
+[[sequence]]
+id          = "kitty.pointer.report"
+name        = "Kitty Pointer Shape Report"
+description = "Reports are preserved syntax today; typed event promotion can be added later."
+direction   = "terminal-to-host"
+refs        = [{ doc = "kitty-pointer-shapes" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture"

@@ -1,0 +1,111 @@
+# Citation sources for the sequence database.
+#
+# Every `refs` entry in a family file cites one of these doc keys. Each key maps to a full
+# citation: a human title, the canonical URL, and the date the reference was retrieved and
+# verified during the prototype evidence audit (work/audit/README.md). `qdb validate` checks
+# that every ref key used by an entry resolves here.
+
+[ecma48]
+title = "ECMA-48: Control Functions for Coded Character Sets, 5th edition"
+url = "https://www.ecma-international.org/publications-and-standards/standards/ecma-48/"
+retrieved = "2026-07-06"
+
+[xterm-ctlseqs]
+title = "XTerm Control Sequences (invisible-island)"
+url = "https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html"
+retrieved = "2026-07-06"
+
+[xfree86-ctlseqs]
+title = "XFree86 Control Sequences"
+url = "https://www.xfree86.org/current/ctlseqs.html"
+retrieved = "2026-07-06"
+
+[vt320]
+title = "VT320 Programmer Reference Manual, Appendix E: Control Functions"
+url = "https://vt100.net/docs/vt320-uu/appendixe.html"
+retrieved = "2026-07-06"
+
+[iterm2-escape-codes]
+title = "iTerm2 Proprietary Escape Codes"
+url = "https://iterm2.com/documentation-escape-codes.html"
+retrieved = "2026-07-06"
+
+[iterm2-images]
+title = "iTerm2 Inline Images Protocol"
+url = "https://iterm2.com/documentation-images.html"
+retrieved = "2026-07-06"
+
+[iterm2-badges]
+title = "iTerm2 Badges"
+url = "https://iterm2.com/documentation-badges.html"
+retrieved = "2026-07-06"
+
+[kitty-color-stack]
+title = "kitty: Saving and restoring colors"
+url = "https://sw.kovidgoyal.net/kitty/color-stack/"
+retrieved = "2026-07-06"
+
+[kitty-graphics]
+title = "kitty Graphics Protocol"
+url = "https://sw.kovidgoyal.net/kitty/graphics-protocol/"
+retrieved = "2026-07-06"
+
+[kitty-text-sizing]
+title = "kitty Text Sizing Protocol"
+url = "https://sw.kovidgoyal.net/kitty/text-sizing-protocol/"
+retrieved = "2026-07-06"
+
+[kitty-keyboard]
+title = "kitty Keyboard Protocol"
+url = "https://sw.kovidgoyal.net/kitty/keyboard-protocol/"
+retrieved = "2026-07-06"
+
+[kitty-protocol-extensions]
+title = "kitty Miscellaneous Protocol Extensions"
+url = "https://sw.kovidgoyal.net/kitty/protocol-extensions/"
+retrieved = "2026-07-06"
+
+[kitty-multiple-cursors]
+title = "kitty Multiple Cursors Protocol"
+url = "https://sw.kovidgoyal.net/kitty/multiple-cursors-protocol/"
+retrieved = "2026-07-06"
+
+[kitty-pointer-shapes]
+title = "kitty Pointer Shapes Protocol"
+url = "https://sw.kovidgoyal.net/kitty/pointer-shapes/"
+retrieved = "2026-07-06"
+
+[kitty-desktop-notifications]
+title = "kitty Desktop Notifications Protocol"
+url = "https://sw.kovidgoyal.net/kitty/desktop-notifications/"
+retrieved = "2026-07-06"
+
+[kitty-desktop-notifications-src]
+title = "kitty Desktop Notifications (source documentation)"
+url = "https://github.com/kovidgoyal/kitty/blob/master/docs/desktop-notifications.rst"
+retrieved = "2026-07-06"
+
+[vscode-shell-integration]
+title = "Visual Studio Code: Terminal Shell Integration escape sequences"
+url = "https://code.visualstudio.com/docs/terminal/shell-integration#_supported-escape-sequences"
+retrieved = "2026-07-06"
+
+[terminal-wg-14]
+title = "terminal-wg specifications, issue 14"
+url = "https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/14"
+retrieved = "2026-07-06"
+
+[terminal-wg-20]
+title = "terminal-wg specifications, issue 20"
+url = "https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/20"
+retrieved = "2026-07-06"
+
+[wezterm-escape-sequences]
+title = "WezTerm Escape Sequences"
+url = "https://wezterm.org/escape-sequences.html"
+retrieved = "2026-07-06"
+
+[contour-synchronized-output]
+title = "Contour: Synchronized Output VT extension"
+url = "https://contour-terminal.org/vt-extensions/synchronized-output/"
+retrieved = "2026-07-06"

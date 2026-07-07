@@ -14,3 +14,5 @@ ignores:
   - "target"
   - "spikes"
   - "work"
+  # Generated qdb reference pages (long citation URLs); their shape is pinned by a golden test.
+  - "tools/qdb/tests/golden"

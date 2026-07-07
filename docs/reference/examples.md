@@ -9,6 +9,9 @@ point without scanning the repository tree.
 
 - `build_status_line.rs`: build ordered output bytes with `CommandBuffer`, cursor movement, and
   text writes without opening a terminal.
+- `styled_text.rs`: build ordered SGR styling bytes with `CommandBuffer` — bold, named and
+  truecolor colors, an underline substyle, and underline color — then reset with
+  `commands::style::reset_all`, all without opening a terminal.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore

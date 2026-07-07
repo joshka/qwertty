@@ -202,6 +202,246 @@ fixtures    = ["fixtures/ecma48/csi_sgr_not_ideogram.seq"]
 replay      = "safe"
 
 [[sequence]]
+id          = "csi.sgr.dim"
+name        = "SGR: Dim"
+description = "Sets dim or decreased intensity for following text."
+direction   = "host-to-terminal"
+syntax      = "CSI 2 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_dim.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.italic"
+name        = "SGR: Italic"
+description = "Sets italicized text where the terminal font supports it."
+direction   = "host-to-terminal"
+syntax      = "CSI 3 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_italic.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline"
+name        = "SGR: Underline"
+description = "Sets a single, straight underline. Equivalent in appearance to the SGR 4:1 substyle."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_plain.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.underline_straight"
+name        = "SGR: Straight Underline"
+description = "Explicit substyle form of a plain underline, equivalent in appearance to SGR 4."
+direction   = "host-to-terminal"
+syntax      = "CSI 4 : 1 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_underline_straight.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.blink"
+name        = "SGR: Blink"
+description = "Sets blinking text where the terminal implements blink."
+direction   = "host-to-terminal"
+syntax      = "CSI 5 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_blink.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.reverse"
+name        = "SGR: Reverse Video"
+description = "Swaps the foreground and background colors."
+direction   = "host-to-terminal"
+syntax      = "CSI 7 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_reverse.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.hidden"
+name        = "SGR: Hidden"
+description = "Conceals following text; some terminals ignore this attribute."
+direction   = "host-to-terminal"
+syntax      = "CSI 8 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_hidden.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.strikethrough"
+name        = "SGR: Strikethrough"
+description = "Sets crossed-out (strikethrough) text."
+direction   = "host-to-terminal"
+syntax      = "CSI 9 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_strikethrough.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_bold_dim"
+name        = "SGR: Clear Bold And Dim"
+description = "Clears both bold and dim; SGR has no separate reset for either alone."
+direction   = "host-to-terminal"
+syntax      = "CSI 22 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_bold_dim.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_italic"
+name        = "SGR: Clear Italic"
+description = "Clears italic text."
+direction   = "host-to-terminal"
+syntax      = "CSI 23 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_italic.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_blink"
+name        = "SGR: Clear Blink"
+description = "Clears blinking text."
+direction   = "host-to-terminal"
+syntax      = "CSI 25 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_blink.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_reverse"
+name        = "SGR: Clear Reverse Video"
+description = "Restores normal (non-reversed) foreground and background."
+direction   = "host-to-terminal"
+syntax      = "CSI 27 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_reverse.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_hidden"
+name        = "SGR: Clear Hidden"
+description = "Reveals text previously concealed with SGR 8."
+direction   = "host-to-terminal"
+syntax      = "CSI 28 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_hidden.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_strikethrough"
+name        = "SGR: Clear Strikethrough"
+description = "Clears crossed-out (strikethrough) text."
+direction   = "host-to-terminal"
+syntax      = "CSI 29 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_strikethrough.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.foreground_named"
+name        = "SGR: Named Foreground"
+description = "Sets one of the 8 standard ANSI foreground colors. Fixture uses red (SGR 31)."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_fg_named.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.foreground_named_bright"
+name        = "SGR: Named Bright Foreground"
+description = "Sets one of the 8 xterm-derived bright foreground colors. Fixture uses bright red (SGR 91)."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_fg_named_bright.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.foreground_indexed"
+name        = "SGR: 256-Color Foreground"
+description = "Fixture uses the semicolon 256-color form."
+direction   = "host-to-terminal"
+syntax      = "CSI 38 ; 5 ; n m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_fg_indexed.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.background_named"
+name        = "SGR: Named Background"
+description = "Sets one of the 8 standard ANSI background colors. Fixture uses red (SGR 41)."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_bg_named.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.background_named_bright"
+name        = "SGR: Named Bright Background"
+description = "Sets one of the 8 xterm-derived bright background colors. Fixture uses bright red (SGR 101)."
+direction   = "host-to-terminal"
+syntax      = "CSI Ps m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_bg_named_bright.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.background_indexed"
+name        = "SGR: 256-Color Background"
+description = "Fixture uses the semicolon 256-color form."
+direction   = "host-to-terminal"
+syntax      = "CSI 48 ; 5 ; n m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_bg_indexed.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.background_rgb"
+name        = "SGR: RGB Background"
+description = "Fixture uses the semicolon truecolor form."
+direction   = "host-to-terminal"
+syntax      = "CSI 48 ; 2 ; r ; g ; b m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_bg_rgb.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_foreground"
+name        = "SGR: Default Foreground"
+description = "Resets the foreground color to the terminal default."
+direction   = "host-to-terminal"
+syntax      = "CSI 39 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_foreground.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_background"
+name        = "SGR: Default Background"
+description = "Resets the background color to the terminal default."
+direction   = "host-to-terminal"
+syntax      = "CSI 49 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_background.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "csi.sgr.not_underline_color"
+name        = "SGR: Default Underline Color"
+description = "Resets the underline color to the text foreground color."
+direction   = "host-to-terminal"
+syntax      = "CSI 59 m"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_sgr_not_underline_color.seq"]
+replay      = "safe"
+
+[[sequence]]
 id          = "csi.cuu"
 name        = "CUU: Cursor Up"
 description = "Fixture moves up three cells."

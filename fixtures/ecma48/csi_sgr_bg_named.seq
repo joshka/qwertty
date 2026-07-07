@@ -1,0 +1,2 @@
+#! direction=host-to-terminal origin=spec:ecma48-sgr
+\e[41m

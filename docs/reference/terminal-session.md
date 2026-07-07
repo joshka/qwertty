@@ -62,14 +62,21 @@ query responses, paste, mouse input, or vendor protocols. See the
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible
 before later application work continues.
 
-`TerminalSession::leave` consumes the session and replays its mode ledger: every reversible state
-change the session made is undone in reverse enablement order, every step is attempted even after
-a failure, and the first error is reported. The replay ends with a flush so restoration bytes
-never sit in a buffer. Today the ledger holds raw-mode restoration; alternate screen, cursor
-visibility, mouse mode, and paste mode join it in later slices.
+`TerminalSession::leave` replays the session's mode ledger: every reversible state change the
+session made is undone in reverse enablement order, every step is attempted even after a failure,
+and the first error is reported. The replay ends with a flush so restoration bytes never sit in a
+buffer. Today the ledger holds raw-mode restoration; alternate screen, cursor visibility, mouse
+mode, and paste mode join it in later slices.
 
-Restoration runs at most once across all exit paths. Whichever of `leave`, drop, or the panic-safe
-restore handle runs first performs it; the others skip. Dropping a session without `leave` still
+The lifecycle is re-entrant: `leave` does not consume the session, and
+`TerminalSession::enter` re-applies the recorded state afterwards. A line-editor-shaped caller
+cycles the pair once per prompt over one long-lived session; each transition replays mode actions
+only and never reopens the device, so cycling stays as cheap as the mode changes themselves.
+Sessions also run headless over any `TerminalDevice` through `TerminalSession::from_device` — the
+`session_cycles.rs` example drives the full lifecycle against a `FakeDevice`.
+
+Restoration runs at most once per entered period. Whichever of `leave`, drop, or the panic-safe
+restore handle runs first performs it; the others skip. Dropping an entered session still
 restores the terminal, but drop-time failures cannot be reported.
 
 Flush explicitly before `leave` when the visibility ordering of your own output matters.
@@ -83,7 +90,7 @@ that restores the terminal without borrowing the session, built for panic hooks.
 use qwertty::TerminalSession;
 
 fn main() -> qwertty::Result<()> {
-    let session = TerminalSession::open()?;
+    let mut session = TerminalSession::open()?;
 
     let restore = session.restore_handle();
     let previous = std::panic::take_hook();

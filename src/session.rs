@@ -5,8 +5,9 @@
 //! callers an explicit leave path for terminal-mode cleanup errors.
 //!
 //! Every reversible state change a session makes is recorded in an internal mode ledger with the
-//! action that undoes it. All exit paths replay that one ledger: orderly leave, drop, and (on
-//! Unix) the panic-safe [`RestoreHandle`] returned by [`TerminalSession::restore_handle`].
+//! actions that apply and undo it. All lifecycle paths replay that one ledger:
+//! [`TerminalSession::enter`] applies it, and orderly [`TerminalSession::leave`], drop, and (on
+//! Unix) the panic-safe [`RestoreHandle`] undo it in reverse enablement order.
 
 mod ledger;
 #[cfg(unix)]
@@ -15,20 +16,25 @@ mod restore;
 #[cfg(unix)]
 pub use restore::RestoreHandle;
 
-use crate::session::ledger::{ModeKind, ModeLedger, UndoAction};
-use crate::{Command, DeviceMode, InputBytes, Terminal, TerminalSize, terminal};
+use crate::session::ledger::{ModeKind, ModeLedger, StateAction};
+use crate::{Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, terminal};
 
-/// An active terminal session.
+/// An active terminal session over a [`TerminalDevice`].
 ///
-/// `TerminalSession` owns a [`Terminal`] for application output. Creating a session enters raw mode
-/// so later input and query layers can receive terminal bytes directly. Call
-/// [`TerminalSession::leave`] during orderly shutdown so terminal-mode restoration errors can be
-/// handled.
+/// `TerminalSession` owns its device for application output. The default device is a live
+/// [`Terminal`]; tests and embedding environments can run the same session headless over any
+/// other [`TerminalDevice`], such as `FakeDevice`, through
+/// [`TerminalSession::from_device`].
 ///
-/// The session records every reversible state change in a mode ledger and replays it in reverse
-/// enablement order exactly once, on whichever exit path runs first: [`TerminalSession::leave`],
-/// drop, or the panic-safe [`RestoreHandle`] on Unix. Dropping a session without calling `leave`
-/// therefore still restores the terminal, but drop-time failures cannot be reported.
+/// Creating a session enters raw mode so later input and query layers can receive terminal bytes
+/// directly. The lifecycle is re-entrant: [`TerminalSession::leave`] restores the terminal
+/// without consuming the session, and [`TerminalSession::enter`] re-applies session state, so a
+/// line-editor-shaped caller can cycle the pair once per prompt over one long-lived session. The
+/// cycle replays recorded mode actions only — it never reopens or re-registers the device.
+///
+/// Restoration runs at most once per entered period, on whichever path claims it first:
+/// `leave`, drop, or the panic-safe [`RestoreHandle`] on Unix. Dropping an entered session still
+/// restores the terminal, but drop-time failures cannot be reported.
 ///
 /// The first session API is runtime-neutral and writes through the synchronous terminal-device
 /// boundary. Input is exposed as raw bytes; async input, query routing, and runtime-owned I/O
@@ -52,16 +58,15 @@ use crate::{Command, DeviceMode, InputBytes, Terminal, TerminalSize, terminal};
 /// }
 /// ```
 #[derive(Debug)]
-pub struct TerminalSession {
-    terminal: Terminal,
+pub struct TerminalSession<D: TerminalDevice = Terminal> {
+    device: D,
     ledger: ModeLedger,
+    entered: bool,
     #[cfg(unix)]
-    restore: RestoreHandle,
-    #[cfg(not(unix))]
-    left: bool,
+    restore: Option<RestoreHandle>,
 }
 
-impl TerminalSession {
+impl TerminalSession<Terminal> {
     /// Opens the current controlling terminal and starts a session.
     ///
     /// This opens the current terminal through [`Terminal::open`] and enters raw mode before
@@ -86,45 +91,160 @@ impl TerminalSession {
     /// entered.
     pub fn from_terminal(terminal: Terminal) -> terminal::Result<Self> {
         #[cfg(unix)]
-        let restore = RestoreHandle::new(emergency_device(&terminal)?, terminal.cooked_mode());
+        let restore = Some(RestoreHandle::new(
+            emergency_device(&terminal)?,
+            terminal.cooked_mode(),
+        ));
 
-        terminal.set_raw_mode()?;
-
-        let mut ledger = ModeLedger::new();
-        ledger.record(ModeKind::Raw, UndoAction::SetMode(DeviceMode::Cooked));
-
-        #[cfg(unix)]
-        restore.publish_blob(&ledger.protocol_undo_bytes());
-
-        Ok(Self {
-            terminal,
-            ledger,
+        let mut session = Self {
+            device: terminal,
+            ledger: ModeLedger::new(),
+            entered: false,
             #[cfg(unix)]
             restore,
-            #[cfg(not(unix))]
-            left: false,
-        })
+        };
+        session.record_initial_state();
+        session.enter()?;
+        Ok(session)
     }
 
     /// Returns a panic-safe restore handle for this session.
     ///
-    /// The handle stays valid without borrowing the session, so it can live inside a panic hook.
-    /// See [`RestoreHandle`] for the hook pattern and what the emergency path covers.
+    /// The handle stays valid without borrowing the session, so it can live inside a panic hook
+    /// installed once for the whole program. See [`RestoreHandle`] for the hook pattern and what
+    /// the emergency path covers.
     #[cfg(unix)]
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "from_terminal always constructs the handle, so the expect cannot fire"
+    )]
     pub fn restore_handle(&self) -> RestoreHandle {
-        self.restore.clone()
+        self.restore
+            .clone()
+            .expect("sessions over a live terminal always carry a restore handle")
+    }
+}
+
+impl<D: TerminalDevice> TerminalSession<D> {
+    /// Starts a session over any terminal device.
+    ///
+    /// The session behaves exactly as over a live terminal, minus the pieces that need a real
+    /// one: the panic-safe restore handle is only available through
+    /// [`TerminalSession::restore_handle`] on live-terminal sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when raw mode cannot be entered.
+    pub fn from_device(device: D) -> terminal::Result<Self> {
+        let mut session = Self {
+            device,
+            ledger: ModeLedger::new(),
+            entered: false,
+            #[cfg(unix)]
+            restore: None,
+        };
+        session.record_initial_state();
+        session.enter()?;
+        Ok(session)
+    }
+
+    /// Re-applies session terminal state after a [`TerminalSession::leave`].
+    ///
+    /// Entering replays the recorded mode actions in enablement order and re-arms the emergency
+    /// restore path. It never reopens the device, so cycling enter and leave once per prompt
+    /// stays as cheap as the mode changes themselves. Entering an already-entered session does
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered while applying terminal state.
+    pub fn enter(&mut self) -> terminal::Result<()> {
+        if self.entered {
+            return Ok(());
+        }
+
+        let mut first_error = None;
+        for action in self.ledger.apply_actions() {
+            let result = match action {
+                StateAction::WriteBytes(bytes) => self.device.write_all(bytes),
+                StateAction::SetMode(mode) => self.device.set_mode(*mode),
+            };
+            if let Err(error) = result
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+        }
+        self.entered = true;
+
+        #[cfg(unix)]
+        if let Some(restore) = &self.restore {
+            restore.publish_blob(&self.ledger.protocol_undo_bytes());
+            restore.arm();
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Restores the terminal without consuming the session.
+    ///
+    /// This is the orderly cleanup path. It replays the session's mode ledger in reverse
+    /// enablement order, attempts every step even after a failure, flushes, and reports the
+    /// first error. Today the ledger holds raw-mode restoration; alternate screen, cursor
+    /// visibility, mouse mode, paste mode, and vendor protocol cleanup join it in later slices.
+    ///
+    /// Leaving is idempotent: if the session already left, or the panic-safe restore handle
+    /// already restored the terminal, `leave` does nothing and returns success. Call
+    /// [`TerminalSession::enter`] to re-apply session state afterwards.
+    ///
+    /// Call [`TerminalSession::flush`] before `leave` when the visibility ordering of your own
+    /// output matters.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered while restoring terminal state.
+    pub fn leave(&mut self) -> terminal::Result<()> {
+        if !self.entered {
+            return Ok(());
+        }
+        self.entered = false;
+
+        #[cfg(unix)]
+        if let Some(restore) = &self.restore
+            && !restore.disarm()
+        {
+            return Ok(());
+        }
+
+        self.restore_state()
     }
 
     /// Returns the current terminal size.
     ///
     /// The result is a snapshot. This method does not subscribe to future resize events.
     ///
+    /// Degenerate sizes are never returned: when the device reports zero or `u16::MAX`
+    /// dimensions (piped stdio, some CI environments, and IDE terminals do), the session falls
+    /// back to the `COLUMNS` and `LINES` environment variables. Environment values are the
+    /// caller's own configuration, not a measurement. When neither source yields a usable size,
+    /// an error is returned so the caller can apply its own default.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the operating system cannot read the terminal size.
+    /// Returns an error when neither the device nor the environment yields a usable size.
     pub fn size(&self) -> terminal::Result<TerminalSize> {
-        self.terminal().size()
+        match self.device.size() {
+            Ok(size) if size_is_usable(size) => Ok(size),
+            Ok(size) => environment_size().ok_or(terminal::Error::InvalidTerminalSize {
+                columns: size.columns(),
+                rows: size.rows(),
+            }),
+            Err(error) => environment_size().ok_or(error),
+        }
     }
 
     /// Writes one terminal command immediately.
@@ -151,7 +271,7 @@ impl TerminalSession {
     ///
     /// Returns an error when the terminal device cannot write all bytes.
     pub fn bytes(&mut self, bytes: impl AsRef<[u8]>) -> terminal::Result<&mut Self> {
-        self.terminal_mut().write_all(bytes.as_ref())?;
+        self.device.write_all(bytes.as_ref())?;
         Ok(self)
     }
 
@@ -184,7 +304,7 @@ impl TerminalSession {
             return Ok(InputBytes::default());
         }
 
-        let len = self.terminal_mut().read(buffer)?;
+        let len = self.device.read(buffer)?;
         Ok(InputBytes::new(buffer[..len].to_vec()))
     }
 
@@ -197,46 +317,26 @@ impl TerminalSession {
     ///
     /// Returns an error when the terminal device cannot flush output.
     pub fn flush(&mut self) -> terminal::Result<&mut Self> {
-        self.terminal_mut().flush()?;
+        self.device.flush()?;
         Ok(self)
     }
 
-    /// Leaves the session and restores the terminal.
-    ///
-    /// This is the orderly cleanup path. It replays the session's mode ledger in reverse
-    /// enablement order, attempts every step even after a failure, flushes, and reports the first
-    /// error. Today the ledger holds raw-mode restoration; alternate screen, cursor visibility,
-    /// mouse mode, paste mode, and vendor protocol cleanup join it in later slices.
-    ///
-    /// If the panic-safe restore handle already restored the terminal, `leave` does nothing and
-    /// returns success.
-    ///
-    /// Call [`TerminalSession::flush`] before `leave` when output visibility matters.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first error encountered while restoring terminal state.
-    pub fn leave(mut self) -> terminal::Result<()> {
-        #[cfg(unix)]
-        if !self.restore.mark_restored() {
-            return Ok(());
-        }
-        #[cfg(not(unix))]
-        {
-            self.left = true;
-        }
-
-        self.replay_ledger()
+    /// Records the terminal state every session applies on entry.
+    fn record_initial_state(&mut self) {
+        self.ledger.record(
+            ModeKind::Raw,
+            StateAction::SetMode(DeviceMode::Raw),
+            StateAction::SetMode(DeviceMode::Cooked),
+        );
     }
 
-    /// Replays the mode ledger in reverse enablement order, reporting the first error.
-    fn replay_ledger(&mut self) -> terminal::Result<()> {
+    /// Undoes the mode ledger in reverse enablement order, reporting the first error.
+    fn restore_state(&mut self) -> terminal::Result<()> {
         let mut first_error = None;
-        for undo in self.ledger.drain_reversed() {
-            let result = match undo {
-                UndoAction::WriteBytes(bytes) => self.terminal.write_all(&bytes),
-                UndoAction::SetMode(DeviceMode::Cooked) => self.terminal.set_cooked_mode(),
-                UndoAction::SetMode(DeviceMode::Raw) => self.terminal.set_raw_mode(),
+        for action in self.ledger.undo_actions() {
+            let result = match action {
+                StateAction::WriteBytes(bytes) => self.device.write_all(bytes),
+                StateAction::SetMode(mode) => self.device.set_mode(*mode),
             };
             if let Err(error) = result
                 && first_error.is_none()
@@ -245,7 +345,7 @@ impl TerminalSession {
             }
         }
 
-        if let Err(error) = self.terminal.flush()
+        if let Err(error) = self.device.flush()
             && first_error.is_none()
         {
             first_error = Some(error);
@@ -256,27 +356,27 @@ impl TerminalSession {
             None => Ok(()),
         }
     }
+}
 
-    fn terminal(&self) -> &Terminal {
-        &self.terminal
-    }
-
-    fn terminal_mut(&mut self) -> &mut Terminal {
-        &mut self.terminal
+impl<D: TerminalDevice> Drop for TerminalSession<D> {
+    fn drop(&mut self) {
+        _ = self.leave();
     }
 }
 
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        if self.restore.mark_restored() {
-            _ = self.replay_ledger();
-        }
-        #[cfg(not(unix))]
-        if !self.left {
-            _ = self.replay_ledger();
-        }
-    }
+/// Returns whether a reported size is usable rather than a known degenerate value.
+fn size_is_usable(size: TerminalSize) -> bool {
+    let columns = size.columns();
+    let rows = size.rows();
+    columns != 0 && rows != 0 && columns != u16::MAX && rows != u16::MAX
+}
+
+/// Reads a terminal size from the `COLUMNS` and `LINES` environment variables.
+fn environment_size() -> Option<TerminalSize> {
+    let columns = std::env::var("COLUMNS").ok()?.parse().ok()?;
+    let rows = std::env::var("LINES").ok()?.parse().ok()?;
+    let size = TerminalSize::new(columns, rows);
+    size_is_usable(size).then_some(size)
 }
 
 /// Opens the best-effort device for the emergency restore path.

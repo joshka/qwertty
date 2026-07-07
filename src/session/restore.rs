@@ -74,8 +74,9 @@ fn lock(buffer: &Mutex<Vec<u8>>) -> MutexGuard<'_, Vec<u8>> {
 /// terminal mode captured when the session opened. Both steps are best-effort: the emergency
 /// path exists to leave the terminal usable, not to report errors.
 ///
-/// Restoration runs at most once across all paths: whichever of the panic hook, orderly leave,
-/// or drop runs first wins, and the others skip.
+/// Restoration runs at most once per entered period: whichever of the panic hook, orderly
+/// leave, or drop runs first wins, and the others skip. Re-entering the session arms the handle
+/// again, so one hook installation covers the whole lifetime of a cycling session.
 ///
 /// # Example
 ///
@@ -83,7 +84,7 @@ fn lock(buffer: &Mutex<Vec<u8>>) -> MutexGuard<'_, Vec<u8>> {
 /// use qwertty::TerminalSession;
 ///
 /// fn main() -> qwertty::Result<()> {
-///     let session = TerminalSession::open()?;
+///     let mut session = TerminalSession::open()?;
 ///
 ///     let restore = session.restore_handle();
 ///     let previous = std::panic::take_hook();
@@ -113,7 +114,7 @@ pub struct RestoreHandle {
 struct RestoreShared {
     device: File,
     cooked: Termios,
-    restored: AtomicBool,
+    armed: AtomicBool,
     blob: DoubleBuffered,
 }
 
@@ -123,7 +124,7 @@ impl RestoreHandle {
             shared: Arc::new(RestoreShared {
                 device,
                 cooked,
-                restored: AtomicBool::new(false),
+                armed: AtomicBool::new(false),
                 blob: DoubleBuffered::default(),
             }),
         }
@@ -134,24 +135,32 @@ impl RestoreHandle {
         self.shared.blob.publish(bytes);
     }
 
-    /// Marks restoration as done so later paths skip it.
+    /// Arms the emergency path after the session (re-)enters terminal state.
+    pub(crate) fn arm(&self) {
+        self.shared
+            .armed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Claims restoration, disarming the emergency path.
     ///
-    /// Returns `true` when this call was the first to claim restoration.
-    pub(crate) fn mark_restored(&self) -> bool {
-        !self
-            .shared
-            .restored
-            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    /// Returns `true` when this call was the one that disarmed it, so exactly one path restores
+    /// per armed period.
+    pub(crate) fn disarm(&self) -> bool {
+        self.shared
+            .armed
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
     /// Restores the terminal, best-effort.
     ///
     /// Writes the precomposed teardown bytes with a bounded retry so a stalled terminal cannot
     /// hang the hook, then restores the captured terminal mode. Returns `true` when this call
-    /// performed restoration and `false` when another exit path already had.
+    /// performed restoration and `false` when the session is not currently in a state that
+    /// needs it (never entered, already left, or already restored).
     #[must_use = "the result reports whether this call performed restoration"]
     pub fn restore(&self) -> bool {
-        if !self.mark_restored() {
+        if !self.disarm() {
             return false;
         }
 

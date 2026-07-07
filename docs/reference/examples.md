@@ -15,6 +15,8 @@ point without scanning the repository tree.
   cooked mode on leave.
 - `panic_safe_restore.rs`: install a panic hook with `RestoreHandle` so a panic restores the
   terminal before the backtrace prints.
+- `session_cycles.rs`: cycle the re-entrant session enter/leave lifecycle headless, the way a
+  line editor hands the terminal back between prompts.
 - `read_input_bytes.rs`: read raw terminal bytes through the synchronous session boundary.
 - `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
   input and asserting output without opening a terminal.

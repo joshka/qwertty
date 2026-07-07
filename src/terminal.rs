@@ -84,6 +84,16 @@ pub enum Error {
         /// Source I/O error.
         source: io::Error,
     },
+    /// The reported terminal dimensions are a known degenerate value, not a real measurement.
+    ///
+    /// Piped stdio, some CI environments, and some IDE terminals report zero or `u16::MAX`
+    /// dimensions. Callers receiving this error should apply their own default size.
+    InvalidTerminalSize {
+        /// Reported column count.
+        columns: u16,
+        /// Reported row count.
+        rows: u16,
+    },
     /// Writing or flushing terminal output failed.
     WriteTerminal {
         /// Source I/O error.
@@ -160,6 +170,9 @@ impl fmt::Display for Error {
             Self::GetTerminalMode { .. } => f.write_str("failed to get terminal mode"),
             Self::SetTerminalMode { .. } => f.write_str("failed to set terminal mode"),
             Self::GetTerminalSize { .. } => f.write_str("failed to get terminal size"),
+            Self::InvalidTerminalSize { columns, rows } => {
+                write!(f, "terminal reported a degenerate size of {columns}x{rows}")
+            }
             Self::WriteTerminal { .. } => f.write_str("failed to write terminal output"),
             Self::ReadTerminal { .. } => f.write_str("failed to read terminal input"),
             Self::QueryTimeout { operation, timeout } => {
@@ -184,7 +197,9 @@ impl error::Error for Error {
             | Self::GetTerminalSize { source }
             | Self::WriteTerminal { source }
             | Self::ReadTerminal { source } => Some(source),
-            Self::QueryTimeout { .. } | Self::Unsupported { .. } => None,
+            Self::InvalidTerminalSize { .. }
+            | Self::QueryTimeout { .. }
+            | Self::Unsupported { .. } => None,
         }
     }
 }

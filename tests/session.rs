@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use qwertty::{ProtocolPosition, Terminal, TerminalSession, commands};
+use qwertty::{
+    DeviceMode, Error, FakeDevice, ProtocolPosition, Terminal, TerminalSession, commands,
+};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 use rustix::termios::{LocalModes, Termios, tcgetattr};
@@ -51,7 +53,7 @@ fn pty_session_leave_restores_cooked_mode() {
     let original = tcgetattr(&slave).expect("read original termios");
 
     let terminal = Terminal::open_path(&slave_path).expect("open pty-backed terminal");
-    let session = TerminalSession::from_terminal(terminal).expect("start terminal session");
+    let mut session = TerminalSession::from_terminal(terminal).expect("start terminal session");
 
     let raw = tcgetattr(&slave).expect("read raw termios");
     assert_ne!(
@@ -78,7 +80,7 @@ fn pty_restore_handle_restores_from_another_thread_once() {
     let original = tcgetattr(&slave).expect("read original termios");
 
     let terminal = Terminal::open_path(&slave_path).expect("open pty-backed terminal");
-    let session = TerminalSession::from_terminal(terminal).expect("start terminal session");
+    let mut session = TerminalSession::from_terminal(terminal).expect("start terminal session");
     let restore = session.restore_handle();
 
     let raw = tcgetattr(&slave).expect("read raw termios");
@@ -105,6 +107,92 @@ fn pty_restore_handle_restores_from_another_thread_once() {
     session
         .leave()
         .expect("leave should succeed after emergency restoration");
+}
+
+#[test]
+fn fake_device_session_round_trips_headless() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .command(commands::screen::clear())
+        .expect("write clear command")
+        .text("Ready")
+        .expect("write text")
+        .flush()
+        .expect("flush session output");
+
+    fake_terminal.feed_input(b"q").expect("feed input");
+    let mut buffer = [0; 4];
+    let input = session.read_input(&mut buffer).expect("read input");
+
+    assert_eq!(input.as_bytes(), b"q");
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[2JReady");
+    assert_eq!(fake_terminal.modes(), [DeviceMode::Raw]);
+
+    session.leave().expect("leave fake session");
+    assert_eq!(fake_terminal.modes(), [DeviceMode::Raw, DeviceMode::Cooked]);
+}
+
+#[test]
+fn session_enter_and_leave_cycle_and_are_idempotent() {
+    let (device, fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session.enter().expect("entering while entered is a no-op");
+    session.leave().expect("first leave");
+    session.leave().expect("leaving while left is a no-op");
+    session.enter().expect("re-enter");
+    session.leave().expect("second leave");
+
+    assert_eq!(
+        fake_terminal.modes(),
+        [
+            DeviceMode::Raw,
+            DeviceMode::Cooked,
+            DeviceMode::Raw,
+            DeviceMode::Cooked,
+        ]
+    );
+}
+
+#[test]
+fn session_cycles_ten_thousand_times_without_drift() {
+    let (device, fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    for _ in 0..10_000 {
+        session.leave().expect("cycle leave");
+        session.enter().expect("cycle enter");
+    }
+    session.leave().expect("final leave");
+
+    // One initial enter plus 10,000 cycles plus the final leave: every mode change is a
+    // deliberate ledger replay, and nothing accumulates or drifts across cycles.
+    let modes = fake_terminal.modes();
+    assert_eq!(modes.len(), 20_002);
+    assert_eq!(modes.first(), Some(&DeviceMode::Raw));
+    assert_eq!(modes.last(), Some(&DeviceMode::Cooked));
+}
+
+#[test]
+fn degenerate_device_sizes_are_never_returned() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    fake_terminal.set_size(qwertty::TerminalSize::new(0, 0));
+    let session = TerminalSession::from_device(device).expect("start fake session");
+
+    // The environment may legitimately provide COLUMNS/LINES in some test environments, so the
+    // contract under test is only: a degenerate device size never reaches the caller.
+    match session.size() {
+        Ok(size) => {
+            assert_ne!(size.columns(), 0);
+            assert_ne!(size.rows(), 0);
+        }
+        Err(Error::InvalidTerminalSize { columns, rows }) => {
+            assert_eq!((columns, rows), (0, 0));
+        }
+        Err(other) => panic!("unexpected size error: {other}"),
+    }
 }
 
 fn open_test_pty() -> Option<(File, PathBuf)> {

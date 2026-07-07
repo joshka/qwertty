@@ -44,8 +44,8 @@ The first async public surface is `TokioTerminalSession`, a Tokio-specific sessi
 optional `tokio` Cargo feature. The feature is disabled by default so command, protocol, terminal
 device, and runtime-neutral session users do not compile Tokio unless they opt in.
 
-The Tokio session owner uses runtime-backed terminal reads and writes, feeds reads through
-`InputDecoder`, preserves unrelated decoded input in its internal event queue, and documents
+The Tokio session owner uses runtime-backed terminal reads and writes, feeds reads through a
+`SemanticDecoder`, preserves unrelated decoded input in its internal event queue, and documents
 cancellation at the event-delivery boundary. It is not a thin async wrapper around the synchronous
 `TerminalSession` methods.
 

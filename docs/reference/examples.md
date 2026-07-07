@@ -23,10 +23,8 @@ point without scanning the repository tree.
 
 ## Input Decoding And Reports
 
-- `decode_input_chunks.rs`: feed byte chunks through `InputDecoder` and inspect decoded input
-  events.
-- `parse_cursor_position_report.rs`: parse a cursor-position report from CSI bytes and inspect the
-  typed result.
+- `parse_cursor_position_report.rs`: tokenize a reply through `SyntaxParser` and parse a
+  cursor-position report from the CSI token with `report::CursorPositionReport`.
 - `decode_syntax_tokens.rs`: feed OSC-8 hyperlink and CSI corpus lines through `SyntaxParser` and
   inspect the lossless `SyntaxToken` families.
 - `decode_key_events.rs`: feed input through `SemanticDecoder` and inspect the typed `Event`

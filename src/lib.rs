@@ -2,12 +2,13 @@
 //!
 //! qwertty is growing in small slices. The current public surface can build the bytes a terminal
 //! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
-//! management, a small terminal session lifecycle, raw terminal input bytes, and basic terminal
-//! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
-//! position and terminal status report parsing. With the optional `tokio` feature on Unix, it also
-//! exposes a Tokio-backed session owner that drives the sans-io core (device, [`SemanticDecoder`],
-//! and query correlator) for runtime-backed reads, writes, decoded [`Event`] delivery, and explicit
-//! cleanup, including live cursor position and terminal status queries.
+//! management, a small terminal session lifecycle, and raw terminal input bytes decoded through a
+//! total, lossless syntax layer and a semantic layer that maps its tokens to typed [`Event`]
+//! values, with typed cursor position and terminal status report parsing over that syntax layer.
+//! With the optional `tokio` feature on Unix, it also exposes a Tokio-backed session owner that
+//! drives the sans-io core (device, [`SemanticDecoder`], and query correlator) for runtime-backed
+//! reads, writes, decoded [`Event`] delivery, and explicit cleanup, including live cursor position
+//! and terminal status queries.
 //!
 //! The main types are:
 //!
@@ -22,12 +23,9 @@
 //!   explicit leave cleanup.
 //! - `RestoreHandle`, a panic-safe emergency terminal-restore handle on Unix.
 //! - [`InputBytes`], raw terminal input bytes read through a session.
-//! - [`CsiInput`], lossless syntax for complete Control Sequence Introducer input.
 //! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
-//! - [`CursorPositionReportMatch`], event-level cursor position report matching.
-//! - [`TerminalStatusReport`], parsed `CSI 0 n` and `CSI 3 n` terminal status reports.
-//! - [`InputDecoder`], stateful classification for input split across byte chunks.
-//! - [`InputEvent`], basic classification for simple text, control, key, and undecoded input.
+//! - [`TerminalStatusReport`] and [`TerminalStatus`], parsed `CSI 0 n` and `CSI 3 n` terminal
+//!   status reports.
 //! - [`SyntaxParser`], the total, lossless, bounded, stateful syntax tokenizer over input bytes.
 //! - [`SyntaxToken`], one classified byte-span in the syntax layer (text, control, CSI, OSC, DCS,
 //!   APC, PM, SOS, escape, or malformed).
@@ -40,11 +38,11 @@
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
 //! - [`commands`], user-intent helpers that return [`Command`].
-//! - [`report`], typed terminal reports (`report::CursorPositionReport`,
-//!   `report::TerminalStatusReport`) parsed from the lossless syntax layer. These are the
-//!   forward-looking report parsers the query correlator consumes; the crate-root
-//!   [`CursorPositionReport`]/[`TerminalStatusReport`] over the older `CsiInput` path retire once
-//!   the swap lands.
+//! - [`report`], the module home of the typed terminal reports parsed from the lossless syntax
+//!   layer. [`CursorPositionReport`], [`TerminalStatusReport`], and [`TerminalStatus`] are
+//!   re-exported at the crate root for convenience and also reachable as `report::` for a stable
+//!   module path (the ghostty-rs encode oracle uses the module path). These are the report parsers
+//!   the query correlator consumes.
 //!
 //! # Example
 //!
@@ -81,11 +79,8 @@ mod tokio_session;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use event::{Event, Key, KeyEvent, KeyEventKind, Modifiers, SemanticDecoder, TextPayload};
-pub use input::{
-    ControlInput, CsiInput, CursorPositionReport, CursorPositionReportMatch, InputBytes,
-    InputDecoder, InputEvent, KeyInput, TerminalStatus, TerminalStatusReport,
-    TerminalStatusReportMatch,
-};
+pub use input::InputBytes;
+pub use report::{CursorPositionReport, TerminalStatus, TerminalStatusReport};
 #[cfg(unix)]
 pub use session::RestoreHandle;
 pub use session::TerminalSession;

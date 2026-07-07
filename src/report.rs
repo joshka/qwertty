@@ -11,15 +11,17 @@
 //! timeout policy. Correlating a report to the query that provoked it is the job of the internal
 //! query correlator; matching happens over these same typed parsers.
 //!
-//! # Relationship to the old parsers
+//! # Canonical paths
 //!
-//! qwertty's first input slice shipped `CursorPositionReport` and `TerminalStatusReport` that
-//! parsed from the old `CsiInput` value. Those types still exist at the crate root during the
-//! transition. The types here carry the same names and the same exact acceptance and rejection
-//! behavior, but parse from the new [`ControlSequence`] token instead, so they are the reports the
-//! correlator and the ghostty-rs encode oracle consume. They are exported as [`report::`](self)
-//! and are deliberately **not** re-exported at the crate root yet; the crate-root swap happens when
-//! the old `CsiInput` path retires.
+//! These types are the single home for terminal report parsing. They are re-exported at the crate
+//! root ([`crate::CursorPositionReport`], [`crate::TerminalStatusReport`],
+//! [`crate::TerminalStatus`]) for convenience and are also reachable through this module as
+//! [`report::`](self) for a stable module path — the ghostty-rs encode oracle uses the module path.
+//! Both paths name the same types.
+//!
+//! An earlier input slice shipped `CursorPositionReport` and `TerminalStatusReport` parsers over a
+//! basic `CsiInput` value; that path has been retired, and these `ControlSequence`-based parsers
+//! are the only report parsers qwertty ships.
 //!
 //! [`report::`]: self
 
@@ -43,8 +45,6 @@ use crate::syntax::ControlSequence;
 ///
 /// Anything else — a different final byte, private markers or intermediates, a missing or extra
 /// field, a non-decimal or zero field, or a value that overflows `u16` — is rejected with `None`.
-/// This is byte-for-byte the same acceptance the crate-root cursor report applied over the old
-/// `CsiInput`, ported to the [`ControlSequence`] token.
 ///
 /// # Modified-F3 ambiguity
 ///
@@ -175,8 +175,7 @@ impl TerminalStatus {
 /// The report must be a CSI sequence with final byte `n`, no private markers or intermediate bytes,
 /// and a single parameter of exactly `0` (ready) or `3` (malfunction). Any other parameter, a
 /// private marker (`CSI ? 0 n` is a DEC private status form, not this report), an intermediate
-/// byte, or a different final byte is rejected with `None`. This matches the crate-root status
-/// report's acceptance over the old `CsiInput`, ported to the [`ControlSequence`] token.
+/// byte, or a different final byte is rejected with `None`.
 ///
 /// # Example
 ///

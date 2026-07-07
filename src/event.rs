@@ -13,8 +13,8 @@
 //! # Scope
 //!
 //! The vocabulary is **pre-freeze until milestone M4 exit** (design 08: `event::` types change
-//! freely before publish and calcify at 0.1). This slice reaches parity with the old
-//! [`InputDecoder`] path only, mapping:
+//! freely before publish and calcify at 0.1). This slice reaches parity with the retired basic
+//! input-decoder path only, mapping:
 //!
 //! - printable UTF-8 text to one [`KeyEvent`] per character, with the decoded character carried in
 //!   the event's [`TextPayload`];

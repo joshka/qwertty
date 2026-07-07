@@ -66,7 +66,7 @@ Why it is release-blocking:
 
 Why it is release-blocking:
 
-- proves decoded `InputEvent` delivery through `TokioTerminalSession::next_event`;
+- proves decoded `Event` delivery through `TokioTerminalSession::next_event`;
 - keeps the first release target honest about owning async input events, not just query helpers and
   output writes;
 - represents the decoded async event stream that users should expect from the Tokio session owner.

@@ -1,19 +1,20 @@
 # Terminal Input Reference
 
-`InputBytes` is qwertty's first public input value. It represents raw bytes read from a terminal
-session. `InputEvent` is the first basic classification layer above those bytes. It can distinguish
-complete UTF-8 text, ASCII control bytes, a small set of Escape-prefixed keys, complete Control
-Sequence Introducer input, and bytes qwertty intentionally leaves undecoded. `InputDecoder` owns the
-first stateful decoding boundary for input that arrives split across terminal reads.
+`InputBytes` is qwertty's raw input value: one operating-system read, kept exactly as the terminal
+device reported it, with no meaning assigned. Decoding those bytes happens in two layers above it.
+`SyntaxParser` is the total, lossless syntax layer that classifies every byte into a `SyntaxToken`
+by its ECMA-48 family. `SemanticDecoder` is the semantic layer that maps those tokens to the typed
+`Event` vocabulary applications consume. Typed terminal reports (cursor position and terminal
+status) parse from the same syntax tokens through the `report` module.
 
 ## Runtime Boundary
 
-This slice adds no runtime dependency and no Cargo feature. `TerminalSession::read_input` uses the
-same runtime-neutral terminal device owner as output and cleanup.
+Reading raw bytes adds no runtime dependency and no Cargo feature. `TerminalSession::read_input`
+uses the same runtime-neutral terminal device owner as output and cleanup.
 
 qwertty remains async-first. The first async public surface is `TokioTerminalSession`, a
 Tokio-specific session owner behind an optional `tokio` Cargo feature. It reads through
-runtime-backed terminal I/O, feeds bytes through `InputDecoder`, preserves unrelated decoded
+runtime-backed terminal I/O, feeds bytes through a `SemanticDecoder`, preserves unrelated decoded
 events, and documents cancellation behavior at the event-delivery boundary.
 
 Adding an async method that only wraps a blocking file read would make the public API look async
@@ -66,254 +67,20 @@ In byte form:
 
 `InputBytes::as_bytes` returns that byte sequence exactly as read.
 
-## Chunk-Local Events
-
-`InputBytes::events` classifies the small subset qwertty can name honestly today:
-
-```rust
-use qwertty::{ControlInput, CsiInput, InputBytes, InputEvent, KeyInput};
-
-let input = InputBytes::new(b"A\x1b[A\x1b[?25n\r\x03".to_vec());
-
-assert_eq!(
-    input.events(),
-    vec![
-        InputEvent::Text('A'),
-        InputEvent::Key(KeyInput::Up),
-        InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap()),
-        InputEvent::Control(ControlInput::CarriageReturn),
-        InputEvent::Control(ControlInput::Other(0x03)),
-    ]
-);
-```
-
-The classified text set is complete UTF-8 text within the current `InputBytes` chunk. Incomplete or
-invalid UTF-8 remains `InputEvent::Undecoded` with the original bytes preserved:
-
-```rust
-use qwertty::{InputBytes, InputEvent};
-
-let input = InputBytes::new(vec![0xc3]);
-
-assert_eq!(
-    input.events(),
-    vec![InputEvent::Undecoded(InputBytes::new(vec![0xc3]))]
-);
-```
-
-This method does not buffer across terminal reads. If a multi-byte UTF-8 character is split across
-two `TerminalSession::read_input` calls, each incomplete chunk remains undecoded. Use
-`InputDecoder` when the caller wants qwertty to carry incomplete input across reads.
-
-## Stateful Decoding
-
-`InputDecoder` buffers the boundary cases qwertty can describe today: incomplete UTF-8 scalar
-values and incomplete Control Sequence Introducer input. It accepts byte slices or `InputBytes`
-values and returns the same `InputEvent` values as the chunk-local classifier:
-
-```rust
-use qwertty::{CsiInput, InputDecoder, InputEvent, KeyInput};
-
-let mut decoder = InputDecoder::new();
-
-assert!(decoder.decode([0xc3]).is_empty());
-assert_eq!(decoder.decode([0xa9]), vec![InputEvent::Text('é')]);
-
-assert!(decoder.decode(b"\x1b[").is_empty());
-assert_eq!(decoder.decode(b"A"), vec![InputEvent::Key(KeyInput::Up)]);
-
-assert!(decoder.decode(b"\x1b[?25").is_empty());
-assert_eq!(
-    decoder.decode(b"n"),
-    vec![InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap())]
-);
-```
-
-`InputDecoder::pending_bytes` exposes the exact buffered bytes for diagnostics and tests. The
-decoder keeps those bytes until a later `decode` call resolves them or `finish` returns them as
-undecoded input:
-
-```rust
-use qwertty::{InputBytes, InputDecoder, InputEvent};
-
-let mut decoder = InputDecoder::new();
-
-assert!(decoder.decode(b"\x1b[").is_empty());
-assert_eq!(decoder.pending_bytes(), b"\x1b[");
-assert_eq!(
-    decoder.finish(),
-    vec![InputEvent::Undecoded(InputBytes::new(b"\x1b[".to_vec()))]
-);
-```
-
-`finish` does not guess whether a pending Escape byte was a standalone Escape key or the start of a
-longer sequence. That timing and ambiguity policy belongs to a later input layer.
-
-The classified control set is ASCII C0 controls and Delete. Common controls have named
-`ControlInput` variants such as `Tab`, `LineFeed`, `CarriageReturn`, `Escape`, and `Delete`. Less
-common controls remain available as `ControlInput::Other(byte)`.
-
-## Escape-Prefixed Keys
-
-Escape is classified as `ControlInput::Escape` only when it appears by itself. The first Escape
-parser recognizes these common arrow-key encodings:
-
-- Up arrow: `ESC [ A`, byte form `\x1b[A`.
-- Down arrow: `ESC [ B`, byte form `\x1b[B`.
-- Right arrow: `ESC [ C`, byte form `\x1b[C`.
-- Left arrow: `ESC [ D`, byte form `\x1b[D`.
-
-Other complete CSI input is preserved as `CsiInput` instead of being interpreted:
-
-```rust
-use qwertty::{CsiInput, InputBytes, InputEvent};
-
-let input = InputBytes::new(b"\x1b[?25n".to_vec());
-
-assert_eq!(
-    input.events(),
-    vec![InputEvent::Csi(CsiInput::from_bytes(b"\x1b[?25n").unwrap())]
-);
-```
-
-Unsupported non-CSI Escape-prefixed input remains undecoded:
-
-```rust
-use qwertty::{InputBytes, InputEvent};
-
-let input = InputBytes::new(b"\x1bZ".to_vec());
-
-assert_eq!(
-    input.events(),
-    vec![InputEvent::Undecoded(InputBytes::new(b"\x1bZ".to_vec()))]
-);
-```
-
-## CSI Input
-
-`CsiInput` preserves the original bytes and exposes the syntax qwertty can identify without
-assigning meaning. The supported shape is `ESC [`, followed by parameter bytes `0x30..=0x3f`,
-intermediate bytes `0x20..=0x2f`, and one final byte `0x40..=0x7e`.
-
-```rust
-use qwertty::CsiInput;
-
-let csi = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
-
-assert_eq!(csi.as_bytes(), b"\x1b[?25n");
-assert_eq!(csi.parameter_bytes(), b"?25");
-assert_eq!(csi.private_marker_bytes(), b"?");
-assert_eq!(csi.intermediate_bytes(), b"");
-assert_eq!(csi.final_byte(), b'n');
-```
-
-Most CSI input is syntax, not policy. qwertty does not yet decide whether a generic CSI value is a
-device status report, keyboard enhancement response, mouse event, or vendor extension.
-
-## Cursor Position Reports
-
-`CursorPositionReport` parses the first interpreted query-shaped CSI input. Terminals commonly
-answer a cursor position query with `CSI row ; column R`, using one-based terminal protocol
-coordinates:
-
-```rust
-use qwertty::{CsiInput, CursorPositionReport, ProtocolPosition};
-
-let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
-let report = CursorPositionReport::from_csi(&csi).unwrap();
-
-assert_eq!(report.position(), ProtocolPosition::new(12, 34));
-assert_eq!(report.row(), 12);
-assert_eq!(report.column(), 34);
-```
-
-Malformed reports, unrelated CSI input, private reports, and reports with intermediate bytes do not
-produce a cursor position report:
-
-```rust
-use qwertty::{CsiInput, CursorPositionReport};
-
-let csi = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
-
-assert_eq!(CursorPositionReport::from_csi(&csi), None);
-```
-
-This parser does not prove which query caused the report. With the optional `tokio` feature on
-Unix, `TokioTerminalSession::request_cursor_position` writes the request, flushes output, waits for
-this report shape, applies a timeout, and preserves unrelated decoded input. General query routing
-starts as Tokio-session-owned state rather than a public router.
-
-`CursorPositionReport::match_events` separates the first cursor position report from decoded input
-events while returning all unrelated events to the caller:
-
-```rust
-use qwertty::{CsiInput, CursorPositionReport, InputEvent, ProtocolPosition};
-
-let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
-let matched = CursorPositionReport::match_events(vec![
-    InputEvent::Text('x'),
-    InputEvent::Csi(csi),
-]);
-
-assert_eq!(
-    matched.report().map(CursorPositionReport::position),
-    Some(ProtocolPosition::new(12, 34))
-);
-assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
-```
-
-## Terminal Status Reports
-
-`TerminalStatusReport` parses ECMA-48 Device Status Report terminal status replies. Terminals
-commonly answer a terminal status query with `CSI 0 n` for ready or `CSI 3 n` for malfunction:
-
-```rust
-use qwertty::{CsiInput, TerminalStatus, TerminalStatusReport};
-
-let ready = CsiInput::from_bytes(b"\x1b[0n").unwrap();
-let report = TerminalStatusReport::from_csi(&ready).unwrap();
-
-assert_eq!(report.status(), TerminalStatus::Ready);
-
-let malfunction = CsiInput::from_bytes(b"\x1b[3n").unwrap();
-let report = TerminalStatusReport::from_csi(&malfunction).unwrap();
-
-assert_eq!(report.status(), TerminalStatus::Malfunction);
-```
-
-Malformed reports, private reports, reports with intermediate bytes, and unsupported status codes
-do not produce a terminal status report:
-
-```rust
-use qwertty::{CsiInput, TerminalStatusReport};
-
-let csi = CsiInput::from_bytes(b"\x1b[?0n").unwrap();
-
-assert_eq!(TerminalStatusReport::from_csi(&csi), None);
-```
-
-`TerminalStatusReport::match_events` separates the first terminal status report from decoded input
-events while returning all unrelated events to the caller:
-
-```rust
-use qwertty::{CsiInput, InputEvent, TerminalStatus, TerminalStatusReport};
-
-let csi = CsiInput::from_bytes(b"\x1b[0n").unwrap();
-let matched = TerminalStatusReport::match_events(vec![
-    InputEvent::Text('x'),
-    InputEvent::Csi(csi),
-]);
-
-assert_eq!(
-    matched.report().map(TerminalStatusReport::status),
-    Some(TerminalStatus::Ready)
-);
-assert_eq!(matched.remaining_events(), &[InputEvent::Text('x')]);
-```
-
-This parser and matcher do not prove which query caused the report. Live status requests belong to
-`TokioTerminalSession::request_terminal_status`, which owns terminal writes, flushing, timeout
-policy, and preserved unrelated input.
+## Decoding Layers
+
+The raw bytes above are decoded by two layers, documented in full below:
+
+- [Syntax Tokens](#syntax-tokens) — `SyntaxParser` classifies *every* byte into a lossless
+  `SyntaxToken` by its ECMA-48 family (text, C0 control, CSI, OSC, DCS, APC, PM, SOS, escape, or
+  malformed), carrying partial sequences across `read_input` chunks so split input tokenizes
+  identically to feeding it whole.
+- [Key Events](#key-events) — `SemanticDecoder` maps those tokens to the typed `Event` vocabulary:
+  `KeyEvent` values for keys and lossless `Event::Syntax` passthrough for complete-but-unmapped
+  tokens.
+
+Typed terminal reports (cursor position and terminal status) parse from the same CSI syntax tokens;
+see [Typed Reports](#typed-reports).
 
 ## Query Routing
 
@@ -326,7 +93,7 @@ later `TokioTerminalSession::next_event` calls.
 
 If a query helper times out before its matching reply arrives, qwertty does not keep claiming that
 future reply. A later `TokioTerminalSession::next_event` call receives it through the ordinary
-decoded input path, typically as `InputEvent::Csi(...)`.
+decoded input path, typically as an `Event::Syntax` passthrough carrying the CSI token.
 
 If the terminal path closes before any matching reply arrives, the live helper returns a terminal
 read error instead of a timeout. Under the current implementation, the source error kind is
@@ -354,10 +121,8 @@ available.
 
 ## Syntax Tokens
 
-`SyntaxParser` is qwertty's total, lossless syntax layer. Where the `InputEvent` decoder above names
-only the small set of shapes it can classify honestly and leaves everything else as
-`InputEvent::Undecoded`, `SyntaxParser` classifies *every* input byte into a `SyntaxToken` by its
-ECMA-48 family without assigning protocol meaning:
+`SyntaxParser` is qwertty's total, lossless syntax layer. It classifies *every* input byte into a
+`SyntaxToken` by its ECMA-48 family without assigning protocol meaning:
 
 - `SyntaxToken::Text` for maximal runs of printable UTF-8, including multibyte characters.
 - `SyntaxToken::Control` for a single C0 control byte that is not a sequence introducer.
@@ -366,11 +131,9 @@ ECMA-48 family without assigning protocol meaning:
 - `SyntaxToken::Esc` for a complete non-CSI, non-string escape, or a bare trailing `ESC`.
 - `SyntaxToken::Malformed` for any byte run that cannot be valid syntax.
 
-The old `InputEvent` decoder preserves bytes but only recognizes complete UTF-8, C0 controls, the
-four arrow keys, and 7-bit CSI input; OSC, DCS, APC, PM, SOS, 8-bit C1 forms, and malformed runs all
-collapse into `InputEvent::Undecoded`. `SyntaxParser` closes that gap: OSC/DCS/APC/PM/SOS payloads,
-8-bit C1 introducers and terminators (per ECMA-48), and aborted or invalid input are all preserved
-as their own honest tokens.
+Nothing collapses into an opaque "undecoded" bucket: OSC/DCS/APC/PM/SOS payloads, 8-bit C1
+introducers and terminators (per ECMA-48), and aborted or invalid input are each preserved as their
+own honest token, so no input byte is ever lost.
 
 ```rust
 use qwertty::{SyntaxParser, SyntaxToken};
@@ -458,7 +221,8 @@ assert_eq!(
 
 ### What Maps Today
 
-This slice reaches parity with the old `InputDecoder` path, over the richer syntax layer:
+This slice decodes the legacy input set — text, C0 controls, the four arrow keys, and standalone
+Escape — over the richer syntax layer, and passes everything else through losslessly:
 
 - **Text.** A printable UTF-8 run becomes one `KeyEvent` per character. The keycode is the trivial
   `Key::Char(c)` and the decoded character is also carried in the event's `TextPayload`, so text and
@@ -505,11 +269,11 @@ report, and later device attributes, mode reports, and colour reports. The `repo
 typed parsers for these over the syntax layer. `report::CursorPositionReport` parses a
 `CSI row ; column R` cursor report from a `ControlSequence`, and `report::TerminalStatusReport`
 parses `CSI 0 n` (ready) and `CSI 3 n` (malfunction). Each parser is pure: it reads one CSI token and
-returns a typed value or `None`, with the same exact acceptance and rejection the earlier
-`CsiInput`-based reports applied, ported to the `ControlSequence` token. These are the report parsers
-the query correlator consumes and the ghostty-rs encode oracle checks against; they are exported as
-`report::` and are deliberately not re-exported at the crate root yet, so they can carry the same
-names as the older crate-root types until the older `CsiInput` path retires.
+returns a typed value or `None`, rejecting anything that is not exactly the report shape. These are
+the report parsers the query correlator consumes and the ghostty-rs encode oracle checks against.
+They are re-exported at the crate root (`CursorPositionReport`, `TerminalStatusReport`,
+`TerminalStatus`) for convenience and are also reachable through `report::` for a stable module
+path; both paths name the same types.
 
 Matching a report to the query that provoked it is a separate concern from parsing it. The
 correlator is a sans-io state machine (no clock, no I/O, no async) that holds a small ordered set of
@@ -526,21 +290,20 @@ in a later slice. Applications that need to read an arbitrary reply the typed me
 still get it losslessly through the ordinary event stream as an `Event::Syntax` passthrough, so
 nothing is stolen or reordered.
 
-## What Remains Undecoded
+## What Is Not Yet Decoded Semantically
 
-The basic event layer does not classify or interpret:
+The syntax layer tokenizes every byte losslessly, but the semantic layer does not yet map every
+token to a typed high-level event. It does not yet interpret:
 
-- incomplete or invalid UTF-8;
-- unsupported or incomplete Escape-prefixed sequences;
 - terminal query responses other than cursor position and terminal status reports;
-- interpreted Control Sequence Introducer meanings other than cursor position and terminal status
-  reports;
+- CSI meanings other than the four arrow keys and those two report shapes;
+- kitty `CSI u` functional keys, modifiers, key-event kinds, and associated text;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 
-Those behaviors belong to later parser, query-routing, and policy slices. Until those layers exist,
-callers that need richer interpretation should handle `InputEvent::Undecoded` at the application
-boundary.
+Those behaviors belong to the milestone M4 semantic slices. Until then such input still reaches the
+application losslessly through `Event::Syntax`, carrying its `SyntaxToken`, so callers that need
+richer interpretation can inspect the token at the application boundary without losing bytes.
 
 ## Cleanup
 

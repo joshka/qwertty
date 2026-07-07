@@ -44,9 +44,8 @@ pub enum Key {
     /// `0x08`).
     ///
     /// Terminals disagree on which byte the Backspace key sends: most modern terminals send `DEL`
-    /// and reserve `BS` for `Ctrl+H`, while some send `BS`. The old decoder named `0x08` and `0x7f`
-    /// as separate `ControlInput::Backspace` and `ControlInput::Delete` byte classifications; this
-    /// layer folds both into the Backspace *key* to match the kitty model and consumer
+    /// and reserve `BS` for `Ctrl+H`, while some send `BS`. This layer folds both `0x08` and `0x7f`
+    /// into the Backspace *key* to match the kitty model and consumer
     /// expectations. A dedicated Delete key (the `CSI 3 ~` functional key) is a distinct code
     /// that arrives with the milestone M4 `CSI u` decode.
     Backspace,

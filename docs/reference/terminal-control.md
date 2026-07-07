@@ -41,17 +41,24 @@ let command = b"\x1b[3;5H";
 assert_eq!(command, &[0x1b, b'[', b'3', b';', b'5', b'H']);
 ```
 
-CSI input uses the same syntax shape. qwertty preserves complete CSI input as bytes plus
-parameters, intermediates, and the final byte before later query-routing or policy layers interpret
-it.
+CSI input uses the same syntax shape. qwertty's syntax layer preserves complete CSI input as a
+`SyntaxToken::Csi` carrying its bytes plus structured parameters, intermediates, and the final byte
+before the semantic and report layers interpret it.
 
 ```rust
-use qwertty::CsiInput;
+use qwertty::{SyntaxParser, SyntaxToken};
 
-let report = CsiInput::from_bytes(b"\x1b[?25n").unwrap();
+let mut parser = SyntaxParser::new();
+let mut tokens = parser.feed(b"\x1b[?25n");
+tokens.extend(parser.finish());
 
-assert_eq!(report.parameter_bytes(), b"?25");
-assert_eq!(report.final_byte(), b'n');
+let SyntaxToken::Csi(csi) = &tokens[0] else {
+    panic!("expected a CSI token");
+};
+
+assert_eq!(csi.params().private_markers(), b"?");
+assert_eq!(csi.params().param_bytes(), b"25");
+assert_eq!(csi.params().final_byte(), b'n');
 ```
 
 ### ECMA-48
@@ -105,14 +112,20 @@ frame.command(cursor::request_position());
 assert_eq!(frame.as_bytes(), b"\x1b[6n");
 ```
 
-Terminals commonly answer with `CSI row ; column R`. qwertty can parse that report from a complete
-CSI input value:
+Terminals commonly answer with `CSI row ; column R`. qwertty parses that report from the CSI syntax
+token:
 
 ```rust
-use qwertty::{CsiInput, CursorPositionReport, ProtocolPosition};
+use qwertty::{CursorPositionReport, ProtocolPosition, SyntaxParser, SyntaxToken};
 
-let csi = CsiInput::from_bytes(b"\x1b[12;34R").unwrap();
-let report = CursorPositionReport::from_csi(&csi).unwrap();
+let mut parser = SyntaxParser::new();
+let mut tokens = parser.feed(b"\x1b[12;34R");
+tokens.extend(parser.finish());
+let SyntaxToken::Csi(csi) = &tokens[0] else {
+    panic!("expected a CSI token");
+};
+
+let report = CursorPositionReport::from_control_sequence(csi).unwrap();
 
 assert_eq!(report.position(), ProtocolPosition::new(12, 34));
 ```
@@ -159,14 +172,20 @@ frame.command(terminal::request_status());
 assert_eq!(frame.as_bytes(), b"\x1b[5n");
 ```
 
-Terminals commonly answer with `CSI 0 n` for ready or `CSI 3 n` for malfunction. qwertty can parse
-those reports from complete CSI input values:
+Terminals commonly answer with `CSI 0 n` for ready or `CSI 3 n` for malfunction. qwertty parses
+those reports from the CSI syntax token:
 
 ```rust
-use qwertty::{CsiInput, TerminalStatus, TerminalStatusReport};
+use qwertty::{SyntaxParser, SyntaxToken, TerminalStatus, TerminalStatusReport};
 
-let csi = CsiInput::from_bytes(b"\x1b[0n").unwrap();
-let report = TerminalStatusReport::from_csi(&csi).unwrap();
+let mut parser = SyntaxParser::new();
+let mut tokens = parser.feed(b"\x1b[0n");
+tokens.extend(parser.finish());
+let SyntaxToken::Csi(csi) = &tokens[0] else {
+    panic!("expected a CSI token");
+};
+
+let report = TerminalStatusReport::from_control_sequence(csi).unwrap();
 
 assert_eq!(report.status(), TerminalStatus::Ready);
 ```

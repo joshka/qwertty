@@ -18,8 +18,9 @@ These APIs are platform-neutral because they only build or interpret bytes in me
 
 - `Command` and `CommandBuffer`
 - terminal command helpers under `commands`
-- `InputBytes`, `InputDecoder`, and `InputEvent`
-- cursor-position and terminal-status report parsing
+- `InputBytes`, the raw read value
+- `SyntaxParser`/`SyntaxToken` and `SemanticDecoder`/`Event`, the input decoding layers
+- cursor-position and terminal-status report parsing under `report`
 
 Those types do not open a live terminal device, enter raw mode, or depend on Tokio.
 

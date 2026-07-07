@@ -299,6 +299,44 @@ fn bounds_hold_parser_memory_for_unterminated_osc_stream() {
 }
 
 #[test]
+fn bounds_hold_for_dcs_with_large_param_prefix_and_payload() {
+    // Regression (fuzz target syntax_no_panic_bounded): a DCS whose parameter prefix runs to the
+    // cap *and* whose payload runs to the cap must not retain prefix + payload as two independent
+    // cap-sized budgets. Before the fix, `ESC P <cap intermediates> q <cap payload>` held ~2x the
+    // limit in parser memory (131,075 bytes at the 64 KiB default), violating the "payload limit
+    // plus a small constant" bound. The prefix now counts against the same budget as the payload.
+    let limit = 64;
+    let mut input = Vec::from(*b"\x1bP");
+    input.extend(std::iter::repeat_n(b'/', limit)); // cap-length intermediate prefix
+    input.push(b'q'); // final byte completes the prefix at exactly the cap
+    input.extend(std::iter::repeat_n(b'A', limit)); // cap-length payload, unterminated
+
+    let mut parser = SyntaxParser::with_payload_limit(limit);
+    for chunk in input.chunks(3) {
+        let _ = parser.feed(chunk);
+        assert!(
+            parser.pending_bytes().len() <= limit + 16,
+            "DCS pending grew past the bound: {}",
+            parser.pending_bytes().len()
+        );
+    }
+
+    let tokens = parser.finish();
+    assert_eq!(tokens.len(), 1);
+    let SyntaxToken::Dcs(dcs) = &tokens[0] else {
+        panic!("expected Dcs, got {:?}", tokens[0]);
+    };
+    // The prefix consumed the whole budget, so every payload byte is dropped and accounted for.
+    assert!(dcs.truncated());
+    let accounted = dcs.as_bytes().len() + dcs.dropped_bytes();
+    assert_eq!(
+        accounted,
+        input.len(),
+        "DCS dropped count must restore the input length"
+    );
+}
+
+#[test]
 fn bounds_hold_when_terminator_straddles_chunks_after_overflow() {
     // Same stream, but the `ESC \` terminator arrives split across two chunks after the bound
     // was exceeded: the token still carries the terminator and the exact dropped count.

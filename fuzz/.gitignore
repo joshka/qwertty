@@ -1,0 +1,4 @@
+# cargo-fuzz build output and crash artifacts. The seed corpus under corpus/ is committed; the
+# fuzzer-grown corpus and any crash cases are not.
+/target/
+/artifacts/

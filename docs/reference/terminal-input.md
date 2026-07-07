@@ -405,6 +405,17 @@ The semantic layer that turns these tokens into typed key, mouse, paste, and rep
 later slices. Until then, `SyntaxParser` is the lossless, forward-compatible foundation those layers
 build on.
 
+### Fuzzing
+
+Three of these invariants are fuzzed continuously, not just checked against a fixed corpus. A
+`cargo-fuzz` target backs each one: reconstruction (token bytes plus recorded dropped counts always
+account for the input length, exactly), split-equivalence (an arbitrary chunking of any input yields
+the same token sequence as feeding it whole, including under a small payload limit), and bounded
+no-panic (parser memory stays within the payload limit plus a small constant after every `feed`, and
+no input panics). The deterministic suites in `tests/syntax.rs` prove these over the escape-layer
+spike corpus and adversarial cases; the fuzz targets generalize the same three properties over
+random input. CI runs each target briefly on every push, and `just fuzz` runs them locally.
+
 ## What Remains Undecoded
 
 The basic event layer does not classify or interpret:

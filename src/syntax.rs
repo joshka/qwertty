@@ -278,6 +278,8 @@ struct StringAccum {
     kind: StringKind,
     /// Retained raw bytes: introducer, DCS parameter prefix, and payload up to the bound.
     retained: Vec<u8>,
+    /// Length of the introducer (`1` for a C1 byte, `2` for the 7-bit `ESC`-prefixed form).
+    introducer_len: usize,
     /// Offset in `retained` where the payload begins.
     payload_start: usize,
     /// Payload bytes counted and dropped past the bound.
@@ -401,8 +403,16 @@ fn consume_string(
 }
 
 /// Stores one payload byte up to the bound, counting it as dropped past the bound.
+///
+/// The bound caps the *retained bytes past the introducer* (the DCS parameter prefix plus the kept
+/// payload) at `limit`, not the payload alone: a DCS parameter prefix (itself capped at `limit` by
+/// `scan_control_prefix`) counts against the same budget, so an over-long prefix shrinks the
+/// retained payload rather than letting prefix and payload each reach `limit` and double parser
+/// memory. Total parser memory for a string sequence therefore stays at `introducer_len + limit`.
+/// Dropped bytes are still counted exactly, so reconstruction accounting is unaffected, and the cap
+/// position depends only on the retained length, so split-equivalence holds.
 fn push_payload_byte(accum: &mut StringAccum, byte: u8, limit: usize) {
-    if accum.retained.len() - accum.payload_start < limit {
+    if accum.retained.len() - accum.introducer_len < limit {
         accum.retained.push(byte);
     } else {
         accum.dropped += 1;
@@ -551,6 +561,7 @@ fn parse_string(
     let accum = StringAccum {
         kind,
         retained: bytes[start..cursor].to_vec(),
+        introducer_len: prefix_len,
         payload_start: cursor - start,
         dropped: 0,
         esc_held: false,

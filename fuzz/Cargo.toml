@@ -1,0 +1,42 @@
+# Fuzz crate for the qwertty syntax layer.
+#
+# The empty `[workspace]` table keeps this crate out of the main workspace so `cargo` commands over
+# the library (and `just check`) never try to build the fuzz targets, which need nightly and the
+# `libfuzzer-sys` runtime. CI runs the targets in a dedicated `fuzz` job (see .github/workflows).
+[package]
+name = "qwertty-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.qwertty]
+path = ".."
+
+[[bin]]
+name = "syntax_reconstruction"
+path = "fuzz_targets/syntax_reconstruction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "syntax_split_equivalence"
+path = "fuzz_targets/syntax_split_equivalence.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "syntax_no_panic_bounded"
+path = "fuzz_targets/syntax_no_panic_bounded.rs"
+test = false
+doc = false
+bench = false

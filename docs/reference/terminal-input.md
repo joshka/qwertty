@@ -407,14 +407,18 @@ below.
 
 ### Fuzzing
 
-Three of these invariants are fuzzed continuously, not just checked against a fixed corpus. A
-`cargo-fuzz` target backs each one: reconstruction (token bytes plus recorded dropped counts always
-account for the input length, exactly), split-equivalence (an arbitrary chunking of any input yields
-the same token sequence as feeding it whole, including under a small payload limit), and bounded
-no-panic (parser memory stays within the payload limit plus a small constant after every `feed`, and
-no input panics). The deterministic suites in `tests/syntax.rs` prove these over the escape-layer
-spike corpus and adversarial cases; the fuzz targets generalize the same three properties over
-random input. CI runs each target briefly on every push, and `just fuzz` runs them locally.
+Three of these syntax-layer invariants are fuzzed continuously, not just checked against a fixed
+corpus. A `cargo-fuzz` target backs each one: reconstruction (token bytes plus recorded dropped
+counts always account for the input length, exactly), split-equivalence (an arbitrary chunking of any
+input yields the same token sequence as feeding it whole, including under a small payload limit), and
+bounded no-panic (parser memory stays within the payload limit plus a small constant after every
+`feed`, and no input panics). A fourth target, `correlator_properties`, fuzzes the query correlator's
+race-freedom invariants (see [Typed Reports](#typed-reports)): the passthrough sequence equals the
+fed non-consumed events in order, every completion matches its expectation's reply shape, and no
+reply completes an expectation registered after that reply was fed. The deterministic suites in
+`tests/syntax.rs` and the correlator's seeded property test prove these over fixed and pseudo-random
+cases; the fuzz targets generalize them over arbitrary input. CI runs each target briefly on every
+push, and `just fuzz` runs them locally.
 
 ## Key Events
 
@@ -493,6 +497,34 @@ The vocabulary is deliberately shaped for the milestone M4 input work, which add
 
 Until then `Event` carries only `Key` and `Syntax`, and the modifier, key-kind, and multi-codepoint
 text capacity exists so those M4 additions need no vocabulary change.
+
+## Typed Reports
+
+A report is a reply a terminal sends in answer to a query: a cursor position report, a device status
+report, and later device attributes, mode reports, and colour reports. The `report` module holds the
+typed parsers for these over the syntax layer. `report::CursorPositionReport` parses a
+`CSI row ; column R` cursor report from a `ControlSequence`, and `report::TerminalStatusReport`
+parses `CSI 0 n` (ready) and `CSI 3 n` (malfunction). Each parser is pure: it reads one CSI token and
+returns a typed value or `None`, with the same exact acceptance and rejection the earlier
+`CsiInput`-based reports applied, ported to the `ControlSequence` token. These are the report parsers
+the query correlator consumes and the ghostty-rs encode oracle checks against; they are exported as
+`report::` and are deliberately not re-exported at the crate root yet, so they can carry the same
+names as the older crate-root types until the older `CsiInput` path retires.
+
+Matching a report to the query that provoked it is a separate concern from parsing it. The
+correlator is a sans-io state machine (no clock, no I/O, no async) that holds a small ordered set of
+typed expectations, is fed decoded events, and for each event either completes the first matching
+expectation or passes the event through untouched in arrival order. Its rules are the risk core of
+the query story: full-discriminator matching so no two pending expectations share a reply; duplicate
+identical queries coalesce to one expectation with a waiter count and a shared result; a late reply
+that arrives after its query timed out, was cancelled, or hit EOF is never matched and passes
+through; and a `CSI c` Primary Device Attributes reply acts as a shape-tolerant fence. One report
+shape is deliberately ambiguous: `CSI 1 ; modifier R` is both a row-1 cursor report and a modified-F3
+key report, so the cursor matcher refuses that form and lets it pass through rather than guess. The
+correlator is currently an internal (`pub(crate)`) building block; the sessions that drive it arrive
+in a later slice. Applications that need to read an arbitrary reply the typed methods do not cover
+still get it losslessly through the ordinary event stream as an `Event::Syntax` passthrough, so
+nothing is stolen or reordered.
 
 ## What Remains Undecoded
 

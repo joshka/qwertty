@@ -113,6 +113,9 @@ jobs:
       - name: Fuzz no-panic bounded
         run: cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
 
+      - name: Fuzz correlator properties
+        run: cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
+
   required:
     runs-on: ubuntu-latest
     needs:

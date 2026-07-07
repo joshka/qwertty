@@ -1,0 +1,10 @@
+# The query correlator is a sans-io state machine: it holds no clock (design 03 and 04). Time enters
+# only through the driver, which injects `Resolution::Timeout`/`Eof`/`Cancelled`. Reading the wall
+# or monotonic clock inside the core would kill its testability and break the blocking driver, so
+# `Instant::now` and `SystemTime::now` are disallowed crate-wide; drivers that genuinely need a
+# deadline own it outside this core. If a legitimate use appears, `#[allow]` it at the call site
+# with a comment rather than removing this guard.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "sans-io core holds no clock; deadlines are driver-injected (design 03/04)" },
+    { path = "std::time::SystemTime::now", reason = "sans-io core holds no clock; deadlines are driver-injected (design 03/04)" },
+]

@@ -39,6 +39,11 @@
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
 //! - [`commands`], user-intent helpers that return [`Command`].
+//! - [`report`], typed terminal reports (`report::CursorPositionReport`,
+//!   `report::TerminalStatusReport`) parsed from the lossless syntax layer. These are the
+//!   forward-looking report parsers the query correlator consumes; the crate-root
+//!   [`CursorPositionReport`]/[`TerminalStatusReport`] over the older `CsiInput` path retire once
+//!   the swap lands.
 //!
 //! # Example
 //!
@@ -61,10 +66,12 @@
 
 mod command;
 pub mod commands;
+pub(crate) mod correlate;
 pub mod docs;
 mod escape;
 mod event;
 mod input;
+pub mod report;
 mod session;
 mod syntax;
 mod terminal;

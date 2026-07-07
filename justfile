@@ -28,11 +28,12 @@ loom:
 markdown:
     markdownlint-cli2 "**/*.md"
 
-# Run each syntax-layer fuzz target briefly. Requires nightly + cargo-fuzz, which are not guaranteed
-# locally, so this is deliberately kept out of the `check` chain; CI runs it in a dedicated job.
+# Run each fuzz target briefly. Requires nightly + cargo-fuzz, which are not guaranteed locally, so
+# this is deliberately kept out of the `check` chain; CI runs it in a dedicated job.
 fuzz:
     cargo +nightly fuzz run syntax_reconstruction -- -max_total_time=30 -rss_limit_mb=1024
     cargo +nightly fuzz run syntax_split_equivalence -- -max_total_time=30 -rss_limit_mb=1024
     cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
+    cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
 check: metadata fmt-check test loom clippy doc markdown

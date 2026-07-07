@@ -1,4 +1,4 @@
-# Fuzz crate for the qwertty syntax layer.
+# Fuzz crate for the qwertty syntax layer and query correlator.
 #
 # The empty `[workspace]` table keeps this crate out of the main workspace so `cargo` commands over
 # the library (and `just check`) never try to build the fuzz targets, which need nightly and the
@@ -37,6 +37,13 @@ bench = false
 [[bin]]
 name = "syntax_no_panic_bounded"
 path = "fuzz_targets/syntax_no_panic_bounded.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "correlator_properties"
+path = "fuzz_targets/correlator_properties.rs"
 test = false
 doc = false
 bench = false

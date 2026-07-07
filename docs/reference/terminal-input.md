@@ -401,9 +401,9 @@ Because bytes `0x80..=0x9f` are both C1 controls and UTF-8 continuation bytes, a
 as an introducer only at a position where a new character starts, never inside an in-progress UTF-8
 sequence.
 
-The semantic layer that turns these tokens into typed key, mouse, paste, and report events lands in
-later slices. Until then, `SyntaxParser` is the lossless, forward-compatible foundation those layers
-build on.
+The semantic layer that turns these tokens into typed key, mouse, paste, and report events builds on
+`SyntaxParser`. Its first slice, the key-event vocabulary, is described in [Key Events](#key-events)
+below.
 
 ### Fuzzing
 
@@ -415,6 +415,84 @@ no-panic (parser memory stays within the payload limit plus a small constant aft
 no input panics). The deterministic suites in `tests/syntax.rs` prove these over the escape-layer
 spike corpus and adversarial cases; the fuzz targets generalize the same three properties over
 random input. CI runs each target briefly on every push, and `just fuzz` runs them locally.
+
+## Key Events
+
+`SemanticDecoder` is qwertty's semantic input layer. It owns a `SyntaxParser` and maps its lossless
+tokens to the typed `Event` vocabulary applications consume. Feed input chunks with
+`SemanticDecoder::feed` and flush pending state with `SemanticDecoder::finish`, exactly like the
+syntax parser; the owned parser carries partial sequences across chunks, so split input decodes
+identically to feeding it whole.
+
+The `Event` vocabulary is **pre-freeze until milestone M4 exit**. These `event::` types (`Event`,
+`KeyEvent`, `Key`, `Modifiers`, `KeyEventKind`, `TextPayload`) change freely before the first
+published version and calcify at that release. Every enum is non-exhaustive, so the M4 variants add
+without breaking existing code.
+
+```rust
+use qwertty::{Event, Key, SemanticDecoder};
+
+let mut decoder = SemanticDecoder::new();
+let mut events = decoder.feed(b"hi\r\x1b[A\x1b[?25n");
+events.extend(decoder.finish());
+
+// Text -> one key event per character, with the character carried as associated text.
+assert_eq!(events[0].key_event().map(|k| k.key()), Some(Key::Char('h')));
+assert_eq!(
+    events[0].key_event().and_then(|k| k.text()).map(|t| t.as_str()),
+    Some("h")
+);
+// CR -> Enter, ESC [ A -> Up.
+assert_eq!(events[2].key_event().map(|k| k.key()), Some(Key::Enter));
+assert_eq!(events[3].key_event().map(|k| k.key()), Some(Key::Up));
+// A CSI qwertty does not decode yet passes through losslessly as syntax.
+assert_eq!(
+    events[4].syntax_token().map(|t| t.as_bytes()),
+    Some(&b"\x1b[?25n"[..])
+);
+```
+
+### What Maps Today
+
+This slice reaches parity with the old `InputDecoder` path, over the richer syntax layer:
+
+- **Text.** A printable UTF-8 run becomes one `KeyEvent` per character. The keycode is the trivial
+  `Key::Char(c)` and the decoded character is also carried in the event's `TextPayload`, so text and
+  key association is never lost. Legacy input always carries exactly one character per event.
+- **C0 controls.** `CR` (`0x0d`) maps to `Key::Enter`, `HT` (`0x09`) to `Key::Tab`, and both `DEL`
+  (`0x7f`) and `BS` (`0x08`) to `Key::Backspace`. Terminals disagree on which byte the Backspace key
+  sends, so this layer folds both into the Backspace key to match the kitty model; a dedicated
+  Delete key is a distinct `CSI u` code that arrives in M4. Every other C0 control is preserved as
+  `Key::Control(byte)` so no input is lost.
+- **Arrow keys.** `ESC [ A/B/C/D` (with no parameters or the single default parameter `1`) map to
+  `Key::Up`, `Key::Down`, `Key::Right`, and `Key::Left`.
+- **Standalone Escape.** A bare Escape, flushed by the layer above and surfaced by the parser as a
+  lone `SyntaxToken::Esc`, maps to `Key::Escape`. The Escape-versus-sequence timing policy stays in
+  the layer above this decoder; the decoder only ever sees a bare Escape once that layer has
+  decided it stood alone.
+- **Everything else** — a CSI qwertty does not decode yet, an OSC/DCS/APC/PM/SOS control string,
+  another escape sequence, or a malformed run — passes through losslessly as `Event::Syntax`,
+  carrying its token and bytes. New protocols degrade to visible, lossless syntax, never a fake
+  keypress.
+
+A `KeyEvent` from this slice is always a press (`KeyEventKind::Press`) with no modifiers
+(`Modifiers::empty()`), because legacy input carries neither a press/release distinction nor
+modifier information for these keys.
+
+### What Arrives In Milestone M4
+
+The vocabulary is deliberately shaped for the milestone M4 input work, which adds:
+
+- **kitty `CSI u` key decoding**: functional keys (Home, End, F-keys, and the rest), real
+  `Modifiers` values, `KeyEventKind::Repeat` and `KeyEventKind::Release`, and multi-codepoint
+  associated `TextPayload` values.
+- **mouse** events (SGR and legacy).
+- **paste** as a dedicated aggregated event, not keyless text.
+- **focus** in and out events.
+- **resize** events.
+
+Until then `Event` carries only `Key` and `Syntax`, and the modifier, key-kind, and multi-codepoint
+text capacity exists so those M4 additions need no vocabulary change.
 
 ## What Remains Undecoded
 

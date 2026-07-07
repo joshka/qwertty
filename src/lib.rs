@@ -30,6 +30,12 @@
 //! - [`SyntaxParser`], the total, lossless, bounded, stateful syntax tokenizer over input bytes.
 //! - [`SyntaxToken`], one classified byte-span in the syntax layer (text, control, CSI, OSC, DCS,
 //!   APC, PM, SOS, escape, or malformed).
+//! - [`SemanticDecoder`], the semantic layer over [`SyntaxParser`] that maps tokens to typed
+//!   [`Event`] values.
+//! - [`Event`], a semantic input event: a [`KeyEvent`] or lossless [`SyntaxToken`] passthrough.
+//! - [`KeyEvent`], a kitty-shaped key event with a [`Key`], [`Modifiers`], [`KeyEventKind`], and
+//!   optional [`TextPayload`].
+//! - [`Key`], [`Modifiers`], [`KeyEventKind`], and [`TextPayload`], the parts of a [`KeyEvent`].
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
 //! - [`commands`], user-intent helpers that return [`Command`].
@@ -57,6 +63,7 @@ mod command;
 pub mod commands;
 pub mod docs;
 mod escape;
+mod event;
 mod input;
 mod session;
 mod syntax;
@@ -65,6 +72,7 @@ mod terminal;
 mod tokio_session;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
+pub use event::{Event, Key, KeyEvent, KeyEventKind, Modifiers, SemanticDecoder, TextPayload};
 pub use input::{
     ControlInput, CsiInput, CursorPositionReport, CursorPositionReportMatch, InputBytes,
     InputDecoder, InputEvent, KeyInput, TerminalStatus, TerminalStatusReport,

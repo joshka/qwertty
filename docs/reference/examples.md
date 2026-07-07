@@ -29,6 +29,9 @@ point without scanning the repository tree.
   typed result.
 - `decode_syntax_tokens.rs`: feed OSC-8 hyperlink and CSI corpus lines through `SyntaxParser` and
   inspect the lossless `SyntaxToken` families.
+- `decode_key_events.rs`: feed input through `SemanticDecoder` and inspect the typed `Event`
+  vocabulary — `KeyEvent` values for keys and lossless `Event::Syntax` passthrough for unmapped
+  tokens.
 
 ## Tokio Session Basics
 

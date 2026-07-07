@@ -17,6 +17,11 @@ point without scanning the repository tree.
   OSC 8 hyperlink open/close pair, and an OSC 52 clipboard write (`commands::osc::set_clipboard`,
   documented as an FM-X4 exfiltration surface a session must policy-gate) — all without opening a
   terminal.
+- `scroll_region.rs`: build a synchronized-output frame (`commands::screen::begin_synchronized_update`/
+  `end_synchronized_update`, mode 2026) around a scroll-region insert-and-scroll sequence
+  (`set_scroll_region`, `insert_lines`, `scroll_up`, `reset_scroll_region`, DECSTBM/IL/SU) with
+  `CommandBuffer`, all without opening a terminal — and documents why neither mode 2026 (FM-V4) nor
+  DECSTBM (FM-V2) emission is gated at this layer.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore

@@ -121,6 +121,218 @@ pub fn leave_alternate_screen() -> Command {
     escape::csi("?1049", 'l')
 }
 
+/// Begins a synchronized-output frame.
+///
+/// This encodes the xterm/Contour private mode 2026 set: `CSI ? 2026 h`, emitted as
+/// `b"\x1b[?2026h"`. It asks a supporting terminal to buffer subsequent output and paint it
+/// atomically once [`end_synchronized_update`] closes the frame, avoiding the partial-frame flash
+/// a full redraw can otherwise produce mid-paint.
+///
+/// **Caller contract.** This helper only builds the begin bytes; it does not know whether the
+/// terminal understands mode 2026. Per R-OUT-3 and FM-V4 (codex#24543: mode-2026-adjacent bytes
+/// leaking raw onto terminals that do not support them), emission of this pair must be
+/// detection-gated by the caller — probe for mode 2026 support (DECRQM or an equivalent capability
+/// check) before writing these bytes to a real terminal, the way `TokioTerminalSession`'s capture
+/// probing does for other capabilities. This module has no session or device, so it cannot gate
+/// anything itself; a later session slice owns applying that gate. Pair every `begin` with a
+/// matching [`end_synchronized_update`] so a terminal never gets left mid-frame — wrap one full
+/// frame per pair, never leave a begin unmatched across an error path.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::begin_synchronized_update());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?2026h");
+/// ```
+#[must_use]
+pub fn begin_synchronized_update() -> Command {
+    escape::csi("?2026", 'h')
+}
+
+/// Ends a synchronized-output frame.
+///
+/// This encodes the xterm/Contour private mode 2026 reset: `CSI ? 2026 l`, emitted as
+/// `b"\x1b[?2026l"`. Use this as the closing pair for [`begin_synchronized_update`]; a supporting
+/// terminal paints everything buffered since the matching begin as one atomic update.
+///
+/// Subject to the same detection-gating caller contract as [`begin_synchronized_update`] (FM-V4):
+/// this helper builds bytes only and does not verify mode 2026 support itself.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::end_synchronized_update());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?2026l");
+/// ```
+#[must_use]
+pub fn end_synchronized_update() -> Command {
+    escape::csi("?2026", 'l')
+}
+
+/// Sets the vertical scroll region (DECSTBM).
+///
+/// This encodes ECMA-48/DEC "Set Top and Bottom Margins": `CSI top ; bottom r`, with `top` and
+/// `bottom` as 1-based protocol row numbers. For example, `set_scroll_region(2, 10)` emits
+/// `b"\x1b[2;10r"`, confining subsequent scrolling (including [`scroll_up`], [`scroll_down`], and
+/// wrap-driven scrolling at the bottom margin) to rows 2 through 10.
+///
+/// **Caller contract — this primitive is not portable (FM-V2).** DECSTBM is the core
+/// inline-viewport primitive ratatui's `insert_before`-shaped consumers need (R-OUT-6), but codex's
+/// tui2 postmortem found it drops or duplicates scrollback lines on some hosts, and xterm.js-based
+/// terminals (notably VS Code's integrated terminal) permanently drop scrollback when a scroll
+/// region is set (codex#27644). This helper only builds the bytes; it has no device, session, or
+/// capability model, so it cannot refuse to emit on a host known to be unsafe. Per R-OUT-6, callers
+/// should gate emission of scroll-region commands on the `inline_insertion_safe` capability a later
+/// session/capability slice adds (backed by the conformance matrix's per-terminal
+/// scroll-region/clear semantics), rather than assuming DECSTBM is safe everywhere it is accepted
+/// syntactically.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::set_scroll_region(2, 10));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[2;10r");
+/// ```
+#[must_use]
+pub fn set_scroll_region(top: u16, bottom: u16) -> Command {
+    escape::csi(format!("{top};{bottom}"), 'r')
+}
+
+/// Resets the scroll region to the full viewport (DECSTBM with no parameters).
+///
+/// This encodes `CSI r`, emitted as `b"\x1b[r"`. Use this as the cleanup pair for
+/// [`set_scroll_region`]: an omitted `Pt`/`Pb` pair resets the top and bottom margins to the first
+/// and last row of the terminal.
+///
+/// Subject to the same `inline_insertion_safe` gating caveat as [`set_scroll_region`] (FM-V2):
+/// this helper builds bytes only.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::reset_scroll_region());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[r");
+/// ```
+#[must_use]
+pub fn reset_scroll_region() -> Command {
+    escape::csi("", 'r')
+}
+
+/// Scrolls the active scroll region up (SU).
+///
+/// This encodes ECMA-48 "Scroll Up": `CSI n S`, emitted as `b"\x1b[nS"`. Content within the active
+/// scroll region ([`set_scroll_region`], or the whole viewport when no region is set) moves up by
+/// `n` lines; `n` blank lines are introduced at the bottom of the region. `n` is written even when
+/// it equals the ECMA-48 default of 1, so `scroll_up(1)` emits `b"\x1b[1S"` rather than the
+/// parameter-omitted form.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::scroll_up(3));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[3S");
+/// ```
+#[must_use]
+pub fn scroll_up(n: u16) -> Command {
+    escape::csi(n.to_string(), 'S')
+}
+
+/// Scrolls the active scroll region down (SD).
+///
+/// This encodes ECMA-48 "Scroll Down": `CSI n T`, emitted as `b"\x1b[nT"`. Content within the
+/// active scroll region ([`set_scroll_region`], or the whole viewport when no region is set) moves
+/// down by `n` lines; `n` blank lines are introduced at the top of the region. `n` is written even
+/// when it equals the ECMA-48 default of 1, so `scroll_down(1)` emits `b"\x1b[1T"` rather than the
+/// parameter-omitted form.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::scroll_down(3));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[3T");
+/// ```
+#[must_use]
+pub fn scroll_down(n: u16) -> Command {
+    escape::csi(n.to_string(), 'T')
+}
+
+/// Inserts blank lines at the cursor (IL).
+///
+/// This encodes ECMA-48 "Insert Line": `CSI n L`, emitted as `b"\x1b[nL"`. `n` blank lines are
+/// inserted at the cursor's line within the active scrolling area; lines at and below the cursor
+/// shift down, and lines shifted past the bottom margin are discarded. `n` is written even when it
+/// equals the ECMA-48 default of 1, so `insert_lines(1)` emits `b"\x1b[1L"` rather than the
+/// parameter-omitted form.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::insert_lines(3));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[3L");
+/// ```
+#[must_use]
+pub fn insert_lines(n: u16) -> Command {
+    escape::csi(n.to_string(), 'L')
+}
+
+/// Deletes lines at the cursor (DL).
+///
+/// This encodes ECMA-48 "Delete Line": `CSI n M`, emitted as `b"\x1b[nM"`. `n` lines starting at
+/// the cursor's line are deleted within the active scrolling area; lines below shift up, and blank
+/// lines are introduced at the bottom margin. `n` is written even when it equals the ECMA-48
+/// default of 1, so `delete_lines(1)` emits `b"\x1b[1M"` rather than the parameter-omitted form.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::screen;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(screen::delete_lines(3));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[3M");
+/// ```
+#[must_use]
+pub fn delete_lines(n: u16) -> Command {
+    escape::csi(n.to_string(), 'M')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +389,100 @@ mod tests {
         let command = leave_alternate_screen();
         assert_bytes(&command, b"\x1b[?1049l");
         assert_round_trips_as_csi(&command, b'l');
+    }
+
+    #[test]
+    fn begin_synchronized_update_bytes() {
+        let command = begin_synchronized_update();
+        assert_bytes(&command, b"\x1b[?2026h");
+        assert_round_trips_as_csi(&command, b'h');
+    }
+
+    #[test]
+    fn end_synchronized_update_bytes() {
+        let command = end_synchronized_update();
+        assert_bytes(&command, b"\x1b[?2026l");
+        assert_round_trips_as_csi(&command, b'l');
+    }
+
+    #[test]
+    fn set_scroll_region_bytes() {
+        let command = set_scroll_region(2, 10);
+        assert_bytes(&command, b"\x1b[2;10r");
+        assert_round_trips_as_csi(&command, b'r');
+    }
+
+    #[test]
+    fn set_scroll_region_full_viewport() {
+        // Edge case: top=1 is the ECMA-48 default but qwertty still writes it explicitly, the
+        // same policy as the n=1 scroll/insert/delete helpers below.
+        let command = set_scroll_region(1, 24);
+        assert_bytes(&command, b"\x1b[1;24r");
+        assert_round_trips_as_csi(&command, b'r');
+    }
+
+    #[test]
+    fn reset_scroll_region_bytes() {
+        let command = reset_scroll_region();
+        assert_bytes(&command, b"\x1b[r");
+        assert_round_trips_as_csi(&command, b'r');
+    }
+
+    #[test]
+    fn scroll_up_bytes() {
+        let command = scroll_up(3);
+        assert_bytes(&command, b"\x1b[3S");
+        assert_round_trips_as_csi(&command, b'S');
+    }
+
+    #[test]
+    fn scroll_up_default_form() {
+        // n=1 is the ECMA-48 default; qwertty still writes it explicitly rather than omitting the
+        // parameter, matching the documented n=1 behavior.
+        let command = scroll_up(1);
+        assert_bytes(&command, b"\x1b[1S");
+        assert_round_trips_as_csi(&command, b'S');
+    }
+
+    #[test]
+    fn scroll_down_bytes() {
+        let command = scroll_down(3);
+        assert_bytes(&command, b"\x1b[3T");
+        assert_round_trips_as_csi(&command, b'T');
+    }
+
+    #[test]
+    fn scroll_down_default_form() {
+        let command = scroll_down(1);
+        assert_bytes(&command, b"\x1b[1T");
+        assert_round_trips_as_csi(&command, b'T');
+    }
+
+    #[test]
+    fn insert_lines_bytes() {
+        let command = insert_lines(3);
+        assert_bytes(&command, b"\x1b[3L");
+        assert_round_trips_as_csi(&command, b'L');
+    }
+
+    #[test]
+    fn insert_lines_default_form() {
+        let command = insert_lines(1);
+        assert_bytes(&command, b"\x1b[1L");
+        assert_round_trips_as_csi(&command, b'L');
+    }
+
+    #[test]
+    fn delete_lines_bytes() {
+        let command = delete_lines(3);
+        assert_bytes(&command, b"\x1b[3M");
+        assert_round_trips_as_csi(&command, b'M');
+    }
+
+    #[test]
+    fn delete_lines_default_form() {
+        let command = delete_lines(1);
+        assert_bytes(&command, b"\x1b[1M");
+        assert_round_trips_as_csi(&command, b'M');
     }
 }

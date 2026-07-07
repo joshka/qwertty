@@ -288,6 +288,77 @@ Upstream references:
 
 - [xterm alternate screen buffer `CSI ? 1049 h` / `CSI ? 1049 l`](https://www.xfree86.org/current/ctlseqs.html#:~:text=P%20s%20%3D%201%200%204%209)
 
+### Synchronized Output
+
+`commands::screen::begin_synchronized_update` and `commands::screen::end_synchronized_update` use
+the xterm/Contour private mode 2026, which asks a supporting terminal to buffer output written
+between the pair and paint it as one atomic update instead of redrawing progressively:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::screen;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(screen::begin_synchronized_update())
+    .text("frame contents")
+    .command(screen::end_synchronized_update());
+
+assert_eq!(frame.as_bytes(), b"\x1b[?2026hframe contents\x1b[?2026l");
+```
+
+**This pair must be detection-gated (FM-V4).** `commands::screen` only builds bytes; it does not
+probe whether a terminal understands mode 2026. codex found mode-2026-adjacent sequences leaking
+raw onto consoles that do not support them because it emitted unconditionally (codex#24543) — a
+caller should probe for mode 2026 support before writing these bytes to a real terminal, and a
+later session/capability slice owns applying that gate. Wrap exactly one full frame per `begin`/
+`end` pair.
+
+Upstream references:
+
+- [Contour synchronized output](https://github.com/contour-terminal/contour/blob/master/docs/vt-extensions/synchronized-output.md)
+
+### Scroll Regions
+
+`commands::screen::set_scroll_region` (DECSTBM) confines subsequent scrolling to a band of rows;
+`commands::screen::reset_scroll_region` restores the full viewport. `commands::screen::scroll_up`
+and `commands::screen::scroll_down` (SU/SD) scroll within whatever region is active;
+`commands::screen::insert_lines` and `commands::screen::delete_lines` (IL/DL) shift lines at the
+cursor within the active scrolling area:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::screen;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(screen::set_scroll_region(2, 10))
+    .command(screen::insert_lines(1))
+    .command(screen::scroll_up(1))
+    .command(screen::reset_scroll_region());
+
+assert_eq!(frame.as_bytes(), b"\x1b[2;10r\x1b[1L\x1b[1S\x1b[r");
+```
+
+SU, SD, IL, and DL all write their count parameter explicitly even at the ECMA-48 default of 1 —
+`scroll_up(1)` emits `b"\x1b[1S"`, not the parameter-omitted form.
+
+**DECSTBM is not portable (FM-V2).** It is the core primitive ratatui-shaped `insert_before`
+inline-viewport consumers need (R-OUT-6) — the scroll-region-plus-reverse-index shape codex uses to
+insert history above a live viewport — but it is *known* to misbehave on some hosts: codex's tui2
+postmortem found scroll-region history insertion could drop or duplicate content depending on the
+terminal, and xterm.js-based terminals (notably VS Code's integrated terminal) permanently drop
+scrollback when a scroll region is set (codex#27644). `commands::screen` builds the bytes only; it
+has no capability model and cannot refuse to emit on a host known to be unsafe. Per R-OUT-6,
+callers should gate scroll-region emission on an `inline_insertion_safe` capability — backed by the
+conformance matrix's per-terminal scroll-region/clear semantics — that a later session/capability
+slice adds, rather than assuming DECSTBM is safe everywhere it parses.
+
+Upstream references:
+
+- [xterm `CSI Ps ; Ps r` (DECSTBM)](https://www.xfree86.org/current/ctlseqs.html#:~:text=CSI%20P%20t%20%3B%20P%20b%20r)
+- [ECMA-48 SU/SD/IL/DL](https://ecma-international.org/publications-and-standards/standards/ecma-48/)
+
 ### Cursor Visibility
 
 `commands::cursor::hide` and `commands::cursor::show` use the widely supported xterm/DEC private

@@ -259,3 +259,58 @@ fn osc_hyperlink_and_clipboard_each_round_trip_as_single_osc() {
         b"clip",
     ));
 }
+
+/// A synchronized-output frame that sets a scroll region, inserts a line, scrolls, and restores
+/// the full viewport before ending the frame — the inline-viewport shape R-OUT-3/R-OUT-6 target
+/// (codex-style history insertion above a live viewport). This is a byte-composition test only:
+/// it does not assert anything about whether emitting this against a real terminal is safe:
+/// mode 2026 and DECSTBM gating (FM-V2, FM-V4) are session/capability concerns documented on
+/// `commands::screen::begin_synchronized_update` and `commands::screen::set_scroll_region`, not
+/// enforced here.
+#[test]
+fn screen_composes_synchronized_scroll_region_frame_in_order() {
+    let mut output = CommandBuffer::new();
+
+    output
+        .command(commands::screen::begin_synchronized_update())
+        .command(commands::screen::set_scroll_region(2, 10))
+        .command(commands::screen::insert_lines(1))
+        .command(commands::screen::scroll_up(1))
+        .command(commands::screen::reset_scroll_region())
+        .command(commands::screen::end_synchronized_update());
+
+    assert_eq!(
+        output.as_bytes(),
+        b"\x1b[?2026h\x1b[2;10r\x1b[1L\x1b[1S\x1b[r\x1b[?2026l"
+    );
+}
+
+#[test]
+fn screen_scroll_region_and_line_commands_each_round_trip_as_single_csi() {
+    /// Asserts a command's bytes parse back through `SyntaxParser` as exactly one CSI token whose
+    /// final byte matches `final_byte`.
+    fn assert_csi_round_trip(command: &Command, final_byte: u8) {
+        let mut bytes = Vec::new();
+        command.encode(&mut bytes);
+
+        let mut parser = SyntaxParser::new();
+        let mut tokens = parser.feed(&bytes);
+        tokens.extend(parser.finish());
+
+        assert_eq!(tokens.len(), 1, "expected one token from {bytes:?}");
+        let SyntaxToken::Csi(csi) = &tokens[0] else {
+            panic!("expected a CSI token from {bytes:?}, got {:?}", tokens[0]);
+        };
+        assert_eq!(csi.params().final_byte(), final_byte);
+        assert_eq!(csi.as_bytes(), bytes.as_slice());
+    }
+
+    assert_csi_round_trip(&commands::screen::begin_synchronized_update(), b'h');
+    assert_csi_round_trip(&commands::screen::end_synchronized_update(), b'l');
+    assert_csi_round_trip(&commands::screen::set_scroll_region(1, 24), b'r');
+    assert_csi_round_trip(&commands::screen::reset_scroll_region(), b'r');
+    assert_csi_round_trip(&commands::screen::scroll_up(1), b'S');
+    assert_csi_round_trip(&commands::screen::scroll_down(1), b'T');
+    assert_csi_round_trip(&commands::screen::insert_lines(1), b'L');
+    assert_csi_round_trip(&commands::screen::delete_lines(1), b'M');
+}

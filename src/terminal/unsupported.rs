@@ -3,7 +3,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::terminal::{Error, Result, TerminalSize};
+use crate::terminal::{DeviceMode, Error, Result, TerminalDevice, TerminalSize};
 
 const PLATFORM: &str = "this platform";
 
@@ -93,5 +93,28 @@ impl Terminal {
     /// Always returns [`io::ErrorKind::Unsupported`] on this platform.
     pub fn flush(&mut self) -> Result<()> {
         Err(Error::unsupported("flush terminal output", PLATFORM))
+    }
+}
+
+impl TerminalDevice for Terminal {
+    fn set_mode(&mut self, mode: DeviceMode) -> Result<()> {
+        let _ = mode;
+        Err(Error::unsupported("set terminal mode", PLATFORM))
+    }
+
+    fn size(&self) -> Result<TerminalSize> {
+        Self::size(self)
+    }
+
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        Self::read(self, buffer)
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
+        Self::write_all(self, bytes)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        Self::flush(self)
     }
 }

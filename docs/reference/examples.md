@@ -14,6 +14,8 @@ point without scanning the repository tree.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore
   cooked mode on leave.
 - `read_input_bytes.rs`: read raw terminal bytes through the synchronous session boundary.
+- `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
+  input and asserting output without opening a terminal.
 
 ## Input Decoding And Reports
 

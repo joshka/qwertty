@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use qwertty::{CommandBuffer, Terminal, TerminalSize, commands};
+use qwertty::{
+    CommandBuffer, DeviceMode, FakeDevice, Terminal, TerminalDevice, TerminalSize, commands,
+};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 use rustix::termios::{LocalModes, Termios, tcgetattr};
@@ -102,6 +104,52 @@ fn pty_write_and_flush_preserve_command_buffer_bytes() {
 
     let bytes = read_available_after_quiet(&mut master).expect("read pty master");
     assert_eq!(bytes, b"\x1b[2Jprobe\x1b[?25l");
+}
+
+#[test]
+fn device_trait_drives_fake_device_headless() {
+    let (mut device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+
+    write_probe(&mut device).expect("write probe through the trait");
+
+    assert_eq!(
+        fake_terminal.output().expect("fake terminal output"),
+        b"\x1b[2Jprobe\x1b[?25l"
+    );
+    assert_eq!(
+        fake_terminal.modes(),
+        [DeviceMode::Raw, DeviceMode::Cooked],
+        "trait-level mode changes should be recorded in order"
+    );
+}
+
+#[test]
+fn device_trait_drives_pty_backed_terminal() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+
+    let mut terminal = Terminal::open_path(slave_path).expect("open pty-backed terminal");
+    write_probe(&mut terminal).expect("write probe through the trait");
+
+    let bytes = read_available_after_quiet(&mut master).expect("read pty master");
+    assert_eq!(bytes, b"\x1b[2Jprobe\x1b[?25l");
+}
+
+/// Drives any [`TerminalDevice`] through the same session-shaped byte sequence.
+fn write_probe(device: &mut impl TerminalDevice) -> qwertty::Result<()> {
+    device.set_mode(DeviceMode::Raw)?;
+
+    let mut output = CommandBuffer::new();
+    output
+        .command(commands::screen::clear())
+        .text("probe")
+        .command(commands::cursor::hide());
+
+    device.write_all(output.as_bytes())?;
+    device.flush()?;
+    device.set_mode(DeviceMode::Cooked)
 }
 
 fn open_test_pty() -> Option<(File, PathBuf)> {

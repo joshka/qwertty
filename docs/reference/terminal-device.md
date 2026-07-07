@@ -67,6 +67,24 @@ fn main() -> qwertty::Result<()> {
 }
 ```
 
+## The Device Seam
+
+[`TerminalDevice`](crate::TerminalDevice) is the substitutable boundary over the device layer.
+Session-shaped code that takes `impl TerminalDevice` works with any implementation:
+
+- [`Terminal`](crate::Terminal) implements it for a live terminal.
+- On Unix, `FakeDevice` implements it over an in-process socket pair, with a paired
+  `FakeTerminal` that scripts input bytes, drains output bytes, reports a configurable size, and
+  records requested [`DeviceMode`](crate::DeviceMode) changes.
+
+`FakeDevice` exists so sessions and downstream tests run headless: a unit test can drive real
+terminal-facing code and assert on the exact bytes written, with no pseudoterminal and no
+operating-system terminal state. The device side is backed by a real file descriptor, so
+readiness-driven drivers register it exactly like a live terminal.
+
+The `fake_device.rs` example shows the round trip. PTY-backed integration tests remain the tier
+above: they validate real termios behavior that a fake cannot.
+
 ## Platform Status
 
 The first terminal device implementation is Unix-only. Other platforms return a documented

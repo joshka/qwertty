@@ -4,15 +4,24 @@
 //! captures the original terminal mode, enters raw mode, restores cooked mode, queries terminal
 //! size, and writes bytes. It does not parse input, route terminal queries, enter the alternate
 //! screen, or clean up emulator protocol state.
+//!
+//! [`TerminalDevice`] is the substitutable seam over that boundary: [`Terminal`] implements it
+//! for a live terminal, and `FakeDevice` implements it in process for headless tests on Unix.
 
 use std::time::Duration;
 use std::{error, fmt, io};
 
+mod device;
+#[cfg(unix)]
+mod fake;
 #[cfg(unix)]
 mod unix;
 #[cfg(not(unix))]
 mod unsupported;
 
+pub use device::{DeviceMode, TerminalDevice};
+#[cfg(unix)]
+pub use fake::{FakeDevice, FakeTerminal};
 #[cfg(unix)]
 pub use unix::Terminal;
 #[cfg(not(unix))]

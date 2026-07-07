@@ -2,11 +2,12 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::{Path, PathBuf};
 
 use rustix::termios::{OptionalActions, Termios, tcgetattr, tcgetwinsize, tcsetattr};
 
-use crate::terminal::{Error, Result, TerminalSize};
+use crate::terminal::{DeviceMode, Error, Result, TerminalDevice, TerminalSize};
 
 const DEV_TTY: &str = "/dev/tty";
 
@@ -145,6 +146,35 @@ impl Terminal {
     /// Returns an I/O error when the operating system cannot flush the device.
     pub fn flush(&mut self) -> Result<()> {
         self.device.flush().map_err(Error::write_terminal)
+    }
+}
+
+impl TerminalDevice for Terminal {
+    fn set_mode(&mut self, mode: DeviceMode) -> Result<()> {
+        match mode {
+            DeviceMode::Raw => self.set_raw_mode(),
+            DeviceMode::Cooked => self.set_cooked_mode(),
+        }
+    }
+
+    fn size(&self) -> Result<TerminalSize> {
+        Self::size(self)
+    }
+
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        Self::read(self, buffer)
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
+        Self::write_all(self, bytes)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        Self::flush(self)
+    }
+
+    fn as_fd(&self) -> Option<BorrowedFd<'_>> {
+        Some(self.device.as_fd())
     }
 }
 

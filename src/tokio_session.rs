@@ -675,6 +675,61 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         Ok(())
     }
 
+    /// Enters the alternate screen buffer.
+    ///
+    /// Writes `CSI ? 1049 h` followed by an explicit `CSI 2 J` clear, flushes, and records the pair
+    /// as one ledger entry's apply action so teardown (leave, drop, or the panic-safe emergency
+    /// path) resets it with `CSI ? 1049 l`.
+    ///
+    /// The explicit clear after entry is deliberate (R-OUT-3, design 01): mosh does not clear the
+    /// alternate buffer on 1049 the way most terminals do, and helix works around exactly this by
+    /// clearing right after entering, so qwertty follows that evidence instead of trusting the
+    /// terminal's own 1049 behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the enter-and-clear bytes.
+    pub async fn enter_alternate_screen(&mut self) -> terminal::Result<()> {
+        self.command(commands::screen::enter_alternate_screen())
+            .await?;
+        self.command(commands::screen::clear()).await?;
+        self.flush().await?;
+        self.session.record_alternate_screen_entered();
+        Ok(())
+    }
+
+    /// Hides the cursor.
+    ///
+    /// Writes `CSI ? 25 l`, flushes, and records a ledger entry whose undo shows the cursor again
+    /// (`CSI ? 25 h`) on `leave`/drop/emergency (FM-L3). Hiding is the tracked state: a session
+    /// that hides the cursor is guaranteed to show it again on every exit path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the hide bytes.
+    pub async fn hide_cursor(&mut self) -> terminal::Result<()> {
+        self.command(commands::cursor::hide()).await?;
+        self.flush().await?;
+        self.session.record_cursor_hidden();
+        Ok(())
+    }
+
+    /// Shows the cursor.
+    ///
+    /// Writes `CSI ? 25 h` immediately and flushes. Showing is not itself a ledger-tracked mode
+    /// change — the visible cursor is the safe, default state, so there is nothing to undo on
+    /// leave. Calling this after [`hide_cursor`](Self::hide_cursor) makes the cursor visible again
+    /// right away; the hide entry recorded in the ledger remains, so a later `leave` writes one
+    /// more redundant, harmless show.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the show bytes.
+    pub async fn show_cursor(&mut self) -> terminal::Result<()> {
+        self.command(commands::cursor::show()).await?;
+        self.flush().await
+    }
+
     /// Runs one typed query end to end against the correlator.
     ///
     /// The steps, in the order design 03 mandates:
@@ -916,15 +971,16 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
 
     /// Leaves the session and restores cooked mode.
     ///
-    /// This is the orderly cleanup path. It replays the composed session's mode ledger (raw-mode
-    /// restoration today) and restores the device status flags captured at construction, reporting
-    /// terminal-mode restoration errors to the caller. Teardown never routes through
-    /// `spawn_blocking` (design 04 amendment): the ledger replay is synchronous and does not block.
+    /// This is the orderly cleanup path. It replays the composed session's mode ledger — raw-mode
+    /// restoration, the input-mode enables, alternate screen, and cursor visibility — and restores
+    /// the device status flags captured at construction, reporting terminal-mode restoration errors
+    /// to the caller. Teardown never routes through `spawn_blocking` (design 04 amendment): the
+    /// ledger replay is synchronous and does not block.
     ///
-    /// It does not flush pending output or clean up protocol state such as alternate screen, cursor
-    /// visibility, mouse mode, paste mode, graphics, clipboard, or vendor extensions. Call
-    /// [`flush`](Self::flush) before `leave` when output visibility matters. Drop still attempts
-    /// best-effort restoration, but drop-time failures cannot be returned.
+    /// It does not flush pending output or clean up protocol state such as graphics, clipboard, or
+    /// vendor extensions. Call [`flush`](Self::flush) before `leave` when output visibility
+    /// matters. Drop still attempts best-effort restoration, but drop-time failures cannot be
+    /// returned.
     ///
     /// # Errors
     ///

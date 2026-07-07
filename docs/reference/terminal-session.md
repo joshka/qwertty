@@ -90,6 +90,52 @@ only and never reopens the device, so cycling stays as cheap as the mode changes
 Sessions also run headless over any `TerminalDevice` through `TerminalSession::from_device` — the
 `session_cycles.rs` example drives the full lifecycle against a `FakeDevice`.
 
+## Screen And Cursor Lifecycle
+
+`enter_alternate_screen()` switches to the alternate screen buffer for full-screen applications.
+It writes `CSI ? 1049 h` **followed by an explicit `CSI 2 J` clear** and records both as one
+ledger entry's apply action (`ModeKind::AlternateScreen`), so a later `enter` replays the pair.
+The undo action is the plain leave sequence, `CSI ? 1049 l`, written on `leave`/drop/emergency —
+never a matching clear, since the primary screen was never touched while alternate.
+
+The explicit clear is deliberate, not decorative (R-OUT-3, design 01 evidence): mode 1049 usually
+clears the alternate buffer implicitly, but mosh does not, and helix works around exactly this by
+emitting its own clear right after entering. Without it, a host that skips the implicit clear can
+show stale content through the new alternate buffer until the application's first frame overwrites
+every cell. qwertty follows that evidence rather than trusting the terminal's own 1049 behavior.
+
+```rust,no_run
+use qwertty::TerminalSession;
+
+# fn main() -> qwertty::Result<()> {
+let mut session = TerminalSession::open()?;
+session.enter_alternate_screen()?;
+session.text("full-screen frame\r\n")?.flush()?;
+session.leave()
+# }
+```
+
+`hide_cursor()` writes `CSI ? 25 l` and records a ledger entry (`ModeKind::CursorVisibility`)
+whose undo shows the cursor again (`CSI ? 25 h`) on `leave`/drop/emergency. Hiding is the tracked
+state (FM-L3): a session that hides the cursor is guaranteed to show it again on every exit path,
+whether or not the application calls `show_cursor` itself. `show_cursor()` writes `CSI ? 25 h`
+immediately and is **not** itself ledger-tracked — the visible cursor is the safe default state,
+so there is nothing to undo on leave; calling it after `hide_cursor()` makes the cursor visible
+right away, and the still-present hide entry writes one more redundant, harmless show on the next
+`leave`.
+
+Cursor shape (DECSCUSR, `commands::cursor::set_shape`) is a plain command, not a ledger-tracked
+mode: a shape change has no single universal reset (FM-L3 — helix#10089, libvaxis#10/#98; no one
+DECSCUSR value restores every terminal profile's prior shape). `commands::cursor::reset_shape()`
+emits `CSI 0 SP q`, the terminal-profile-default request, but an application that changes the
+cursor shape and cares about restoring the exact prior shape should track and restore it
+explicitly rather than rely on `reset_shape` alone. See [Cursor
+Shape](crate::docs#cursor-shape).
+
+Both are available on the Tokio session (`TokioTerminalSession`) with the same names and the same
+ledger semantics, writing through its readiness path before recording the ledger entry. See the
+`alternate_screen.rs` example for the full enter/hide/write/leave cycle.
+
 Restoration runs at most once per entered period. Whichever of `leave`, drop, or the panic-safe
 restore handle runs first performs it; the others skip. Dropping an entered session still
 restores the terminal, but drop-time failures cannot be reported.
@@ -187,8 +233,9 @@ session.leave().await
 If a task waiting in `next_event` is canceled before another terminal read completes, the session
 remains usable. Events already decoded from earlier reads stay queued for later calls. The Tokio
 session enables and tears down mouse, focus, and bracketed-paste modes (see
-[Input Modes](#input-modes)); it does not yet add alternate screen cleanup, graphics, clipboard, or
-vendor protocol policy.
+[Input Modes](#input-modes)) and alternate screen and cursor visibility (see [Screen And Cursor
+Lifecycle](#screen-and-cursor-lifecycle)); it does not yet add graphics, clipboard, or vendor
+protocol policy.
 
 ## Live Cursor Position Query
 

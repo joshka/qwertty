@@ -257,6 +257,37 @@ Upstream references:
 - [ECMA-48](https://ecma-international.org/publications-and-standards/standards/ecma-48/)
 - [xterm `CSI Ps K`](https://www.xfree86.org/current/ctlseqs.html#:~:text=CSI%20P%20s%20K)
 
+### Alternate Screen
+
+`commands::screen::enter_alternate_screen` and `commands::screen::leave_alternate_screen` use the
+widely supported xterm private mode 1049, which switches to a separate screen buffer and saves the
+cursor position:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::screen;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(screen::enter_alternate_screen())
+    .command(screen::leave_alternate_screen());
+
+assert_eq!(frame.as_bytes(), b"\x1b[?1049h\x1b[?1049l");
+```
+
+These helpers only build the enter and leave bytes. `TerminalSession::enter_alternate_screen`
+(R-OUT-3) pairs the enter bytes with an **explicit clear** (`commands::screen::clear`,
+`CSI 2 J`) immediately after entry, and tracks the pair in the session's mode ledger so `leave`
+restores the primary screen automatically. The explicit clear exists because mode 1049 does not
+clear the alternate buffer implicitly on every host: mosh does not, and helix works around exactly
+this by clearing right after entering, so qwertty follows that evidence rather than trusting the
+terminal's own 1049 behavior. See [Screen And Cursor
+Lifecycle](crate::docs#screen-and-cursor-lifecycle) for the session-level API.
+
+Upstream references:
+
+- [xterm alternate screen buffer `CSI ? 1049 h` / `CSI ? 1049 l`](https://www.xfree86.org/current/ctlseqs.html#:~:text=P%20s%20%3D%201%200%204%209)
+
 ### Cursor Visibility
 
 `commands::cursor::hide` and `commands::cursor::show` use the widely supported xterm/DEC private
@@ -300,6 +331,38 @@ Upstream references:
 
 - [xterm `ESC 7`](https://www.xfree86.org/current/ctlseqs.html#:~:text=ESC%207)
 - [xterm `ESC 8`](https://www.xfree86.org/current/ctlseqs.html#:~:text=ESC%208)
+
+### Cursor Shape
+
+`commands::cursor::set_shape` encodes DEC's "Set Cursor Style" control, DECSCUSR: `CSI Ps SP q`,
+where `Ps` selects a `CursorShape` — `Default`, `BlinkingBlock`, `SteadyBlock`,
+`BlinkingUnderline`, `SteadyUnderline`, `BlinkingBar`, or `SteadyBar`, mapping to `Ps` 0 through 6:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::cursor::{self, CursorShape};
+
+let mut frame = CommandBuffer::new();
+frame.command(cursor::set_shape(CursorShape::SteadyBar));
+
+assert_eq!(frame.as_bytes(), b"\x1b[6 q");
+```
+
+`commands::cursor::reset_shape` emits the same bytes as `set_shape(CursorShape::Default)`
+(`CSI 0 SP q`) under a name that documents restore intent at call sites.
+
+Cursor shape is a plain command, not a session-tracked mode. Per FM-L3 (helix#10089, open;
+libvaxis#10, #98), no single DECSCUSR value is a universal reset: `Ps` = 0 asks for "the terminal
+profile's own default," which is not guaranteed to match whatever shape was active before an
+application changed it — helix builds its own restore recipe from terminfo `Se` plus `cnorm` plus
+`CSI 0 SP q` rather than trusting one value. qwertty does not pretend otherwise: an application
+that changes the cursor shape and needs to restore the exact prior shape should track and restore
+it explicitly. See [Screen And Cursor Lifecycle](crate::docs#screen-and-cursor-lifecycle) for how
+this differs from the ledger-tracked alternate screen and cursor visibility.
+
+Upstream references:
+
+- [xterm `CSI Ps SP q` (DECSCUSR)](https://www.xfree86.org/current/ctlseqs.html#:~:text=CSI%20P%20s%20SP%20q)
 
 ## Styling
 

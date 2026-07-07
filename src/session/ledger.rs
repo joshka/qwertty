@@ -60,6 +60,24 @@ pub(crate) enum ModeKind {
     /// [`ResizeEvent`](crate::ResizeEvent), so an app can avoid `SIGWINCH` entirely (design 01,
     /// R-IN-8). Like the other byte-based mode entries, its reset flows into the emergency blob.
     InBandResize,
+    /// Alternate screen buffer (xterm private mode 1049).
+    ///
+    /// The apply action is `CSI ? 1049 h` **followed by an explicit `CSI 2 J`** clear (R-OUT-3):
+    /// some hosts (mosh) do not clear the alternate buffer on entry the way most terminals do, and
+    /// helix emits an explicit clear for exactly this reason, so qwertty follows that evidence
+    /// rather than trusting the terminal's own 1049 behavior. The undo action is `CSI ? 1049 l`
+    /// alone — leaving never needs to clear, since the terminal is switching back to the primary
+    /// buffer it never touched. Like the other byte-based mode entries, the leave bytes flow into
+    /// the emergency blob, so a panic teardown returns to the primary screen.
+    AlternateScreen,
+    /// Cursor visibility (DECTCEM, DEC private mode 25).
+    ///
+    /// Only *hiding* the cursor is ledger-tracked: the apply action is `CSI ? 25 l` (hide), and the
+    /// undo action is `CSI ? 25 h` (show) — the ledger entry exists to guarantee the cursor is
+    /// shown again on leave/drop/emergency, not to track visibility generically (FM-L3). A session
+    /// that never hides the cursor never records this entry, so it never appears in the undo
+    /// sequence or the emergency blob.
+    CursorVisibility,
 }
 
 #[derive(Debug)]

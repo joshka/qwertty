@@ -151,6 +151,44 @@ fn emergency_blob_resets_enabled_modes_on_a_panic_teardown() {
 }
 
 #[test]
+fn emergency_blob_contains_alternate_screen_leave_and_cursor_show() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+
+    let terminal = Terminal::open_path(&slave_path).expect("open pty-backed terminal");
+    let mut session = TerminalSession::from_terminal(terminal).expect("start terminal session");
+    let restore = session.restore_handle();
+
+    // Enter the alternate screen, then hide the cursor; each records a byte-based ledger entry
+    // whose undo joins the emergency blob published to the restore handle.
+    session
+        .enter_alternate_screen()
+        .expect("enter alternate screen")
+        .hide_cursor()
+        .expect("hide cursor")
+        .flush()
+        .expect("flush");
+    // Drain the enter/clear/hide bytes so the next read sees only the emergency output.
+    let _ = read_available_after_quiet(&mut master).expect("drain enable bytes");
+
+    // The emergency path (as a panic hook would) writes the precomposed reset blob directly.
+    let restored = thread::spawn(move || restore.restore())
+        .join()
+        .expect("join restore thread");
+    assert!(restored, "the emergency path should perform restoration");
+
+    let blob = read_available_after_quiet(&mut master).expect("read emergency blob");
+    // The blob resets in reverse enablement order: show the cursor, then leave the alternate
+    // screen — the leave bytes alone, since the emergency path never needs the entry's clear.
+    assert_eq!(blob, b"\x1b[?25h\x1b[?1049l");
+
+    // Orderly leave after an emergency restoration is a clean no-op (idempotent).
+    session.leave().expect("leave after emergency restoration");
+}
+
+#[test]
 fn fake_device_session_round_trips_headless() {
     let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
     let mut session = TerminalSession::from_device(device).expect("start fake session");
@@ -286,6 +324,128 @@ fn switching_mouse_mode_replaces_the_tracking_mode() {
         fake_terminal.output().expect("output"),
         b"\x1b[?1006l\x1b[?1003l",
         "only the latest mouse mode is undone",
+    );
+}
+
+#[test]
+fn enter_alternate_screen_writes_enter_and_clear_and_leave_undoes_it() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .enter_alternate_screen()
+        .expect("enter alternate screen")
+        .flush()
+        .expect("flush");
+
+    // The apply action is the enter sequence followed by an explicit clear (R-OUT-3): some hosts
+    // (mosh) do not clear the alternate buffer on 1049 the way most terminals do.
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?1049h\x1b[2J",
+    );
+
+    session.leave().expect("leave fake session");
+
+    // Leave undoes with the leave sequence alone; no matching clear is needed since the primary
+    // buffer was never touched while alternate.
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?1049l");
+}
+
+#[test]
+fn hide_cursor_writes_hide_and_leave_shows_it_again() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .hide_cursor()
+        .expect("hide cursor")
+        .flush()
+        .expect("flush");
+
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?25l");
+
+    session.leave().expect("leave fake session");
+
+    // Hiding is the tracked state (FM-L3): leave restores the shown state regardless of whether
+    // the application called `show_cursor` itself.
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?25h");
+}
+
+#[test]
+fn show_cursor_writes_immediately_and_is_not_undone_on_leave() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .show_cursor()
+        .expect("show cursor")
+        .flush()
+        .expect("flush");
+
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?25h");
+
+    session.leave().expect("leave fake session");
+
+    // Showing was never ledger-tracked (no prior hide entry), so leave writes nothing for cursor
+    // visibility.
+    assert_eq!(fake_terminal.output().expect("output"), b"");
+}
+
+#[test]
+fn show_cursor_after_hide_cursor_is_visible_immediately_and_leave_writes_a_redundant_show() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .hide_cursor()
+        .expect("hide cursor")
+        .show_cursor()
+        .expect("show cursor")
+        .flush()
+        .expect("flush");
+
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?25l\x1b[?25h"
+    );
+
+    session.leave().expect("leave fake session");
+
+    // The hide entry is still in the ledger (recording never removes an entry), so leave writes
+    // one more redundant, harmless show.
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?25h");
+}
+
+#[test]
+fn ledger_undoes_raw_alt_screen_and_hidden_cursor_in_reverse_order() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    // Raw mode is already recorded at construction; enable alternate screen, then hide the
+    // cursor, in that order.
+    session
+        .enter_alternate_screen()
+        .expect("enter alternate screen")
+        .hide_cursor()
+        .expect("hide cursor")
+        .flush()
+        .expect("flush");
+    let _ = fake_terminal.output().expect("drain enables");
+
+    session.leave().expect("leave fake session");
+
+    // Undo runs in reverse enablement order: hide-cursor's undo (show) first, then alternate
+    // screen's undo (leave); raw mode is a device mode, restored through `modes()` not bytes.
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?25h\x1b[?1049l",
+        "undo order is hide-undo then altscreen-undo, then cooked mode",
+    );
+    assert_eq!(
+        fake_terminal.modes(),
+        [DeviceMode::Raw, DeviceMode::Cooked],
+        "raw mode restore (cooked) is the device-mode step of the same reverse-order undo",
     );
 }
 

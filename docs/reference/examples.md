@@ -16,6 +16,9 @@ point without scanning the repository tree.
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore
   cooked mode on leave.
+- `alternate_screen.rs`: enter the alternate screen (`enter_alternate_screen`, `CSI ? 1049 h` plus
+  an explicit clear — R-OUT-3) and hide the cursor (`hide_cursor`), write a frame, then `leave` to
+  restore the primary screen and show the cursor again through the mode ledger.
 - `panic_safe_restore.rs`: install a panic hook with `RestoreHandle` so a panic restores the
   terminal before the backtrace prints.
 - `session_cycles.rs`: cycle the re-entrant session enter/leave lifecycle headless, the way a

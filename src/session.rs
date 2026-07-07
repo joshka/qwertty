@@ -199,8 +199,9 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// This is the orderly cleanup path. It replays the session's mode ledger in reverse
     /// enablement order, attempts every step even after a failure, flushes, and reports the
-    /// first error. Today the ledger holds raw-mode restoration; alternate screen, cursor
-    /// visibility, mouse mode, paste mode, and vendor protocol cleanup join it in later slices.
+    /// first error. Today the ledger holds raw-mode restoration, the input-mode enables, alternate
+    /// screen, and cursor visibility; paste mode and vendor protocol cleanup join it in later
+    /// slices.
     ///
     /// Leaving is idempotent: if the session already left, or the panic-safe restore handle
     /// already restored the terminal, `leave` does nothing and returns success. Call
@@ -455,6 +456,76 @@ impl<D: TerminalDevice> TerminalSession<D> {
         )
     }
 
+    /// Enters the alternate screen buffer.
+    ///
+    /// This writes `CSI ? 1049 h` **followed by an explicit `CSI 2 J`** now and records the pair as
+    /// one ledger entry's apply action, so a later `enter` replays both. The undo action is
+    /// `CSI ? 1049 l` alone, written on `leave`/drop/emergency.
+    ///
+    /// The explicit clear after entry is deliberate, not decorative (R-OUT-3, design 01 evidence):
+    /// mosh does not clear the alternate buffer on 1049 the way most terminals do, and helix works
+    /// around exactly this by emitting its own clear right after entering. Without it, a host that
+    /// skips the implicit clear can show stale primary-screen content (or the previous alternate-
+    /// screen session's leftovers) through the new alternate buffer until the application's first
+    /// frame overwrites every cell. Because leaving switches back to the primary buffer — which
+    /// this session never wrote to while alternate — the undo action never needs a matching
+    /// clear.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the enter-and-clear bytes.
+    pub fn enter_alternate_screen(&mut self) -> terminal::Result<&mut Self> {
+        let mut apply = Vec::new();
+        commands::screen::enter_alternate_screen().encode(&mut apply);
+        commands::screen::clear().encode(&mut apply);
+
+        // Apply now so the alternate screen is active for the caller's next write.
+        self.device.write_all(&apply)?;
+        self.record_mode_entry(
+            ModeKind::AlternateScreen,
+            apply,
+            &commands::screen::leave_alternate_screen(),
+        );
+        Ok(self)
+    }
+
+    /// Hides the cursor.
+    ///
+    /// This writes `CSI ? 25 l` now and records a ledger entry whose undo shows the cursor again
+    /// (`CSI ? 25 h`) on `leave`/drop/emergency (FM-L3). Hiding is the tracked state: a session
+    /// that hides the cursor is guaranteed to show it again on every exit path, whether or not
+    /// the application calls [`TerminalSession::show_cursor`] itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the hide bytes.
+    pub fn hide_cursor(&mut self) -> terminal::Result<&mut Self> {
+        self.record_mode(
+            ModeKind::CursorVisibility,
+            &commands::cursor::hide(),
+            &commands::cursor::show(),
+        )
+    }
+
+    /// Shows the cursor.
+    ///
+    /// This writes `CSI ? 25 h` immediately. Showing is not itself a ledger-tracked mode change —
+    /// the visible cursor is the safe, default state, so there is nothing to undo on leave. Calling
+    /// this after [`TerminalSession::hide_cursor`] makes the cursor visible again right away; the
+    /// hide entry recorded in the ledger remains (its undo is the same show bytes this method just
+    /// wrote), so a later `leave` writes one more redundant, harmless show.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the show bytes.
+    pub fn show_cursor(&mut self) -> terminal::Result<&mut Self> {
+        self.bytes({
+            let mut bytes = Vec::new();
+            commands::cursor::show().encode(&mut bytes);
+            bytes
+        })
+    }
+
     /// Records a byte-based mode entry, writing its enable bytes now and refreshing the emergency
     /// blob so its reset bytes are covered even before the next `enter`.
     fn record_mode(
@@ -547,6 +618,36 @@ impl<D: TerminalDevice> TerminalSession<D> {
             apply,
             &commands::terminal::disable_in_band_resize(),
         );
+    }
+
+    /// Records an already-written alternate-screen enter-and-clear in the ledger (Tokio driver
+    /// path).
+    ///
+    /// The driver has written `CSI ? 1049 h` followed by the explicit `CSI 2 J` clear (R-OUT-3)
+    /// through its own readiness path; this records the ledger entry — apply is the enter-and-clear
+    /// pair, undo is `CSI ? 1049 l` — and refreshes the emergency blob without a second write.
+    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    pub(crate) fn record_alternate_screen_entered(&mut self) {
+        let mut apply = Vec::new();
+        commands::screen::enter_alternate_screen().encode(&mut apply);
+        commands::screen::clear().encode(&mut apply);
+        self.record_mode_entry(
+            ModeKind::AlternateScreen,
+            apply,
+            &commands::screen::leave_alternate_screen(),
+        );
+    }
+
+    /// Records an already-written cursor-hide in the ledger (Tokio driver path).
+    ///
+    /// The driver has written `CSI ? 25 l` through its own readiness path; this records the ledger
+    /// entry — apply hides, undo shows (FM-L3) — and refreshes the emergency blob without a second
+    /// write.
+    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    pub(crate) fn record_cursor_hidden(&mut self) {
+        let mut apply = Vec::new();
+        commands::cursor::hide().encode(&mut apply);
+        self.record_mode_entry(ModeKind::CursorVisibility, apply, &commands::cursor::show());
     }
 
     /// Undoes the mode ledger in reverse enablement order, reporting the first error.

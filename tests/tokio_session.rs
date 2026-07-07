@@ -372,6 +372,48 @@ async fn tokio_session_in_band_resize_lifecycle_over_fake_device() {
     );
 }
 
+/// Entering the alternate screen over a headless `FakeDevice` writes the enter-and-clear pair
+/// (`CSI ? 1049 h CSI 2 J`) and leaving undoes it with `CSI ? 1049 l` alone (R-OUT-3: the explicit
+/// clear guards against hosts like mosh that do not clear the alternate buffer on 1049).
+#[tokio::test]
+async fn tokio_session_alternate_screen_lifecycle_over_fake_device() {
+    let (device, mut peer) = FakeDevice::open().expect("open fake device");
+    let mut session =
+        TokioTerminalSession::from_device(device).expect("open Tokio session over fake device");
+
+    session
+        .enter_alternate_screen()
+        .await
+        .expect("enter alternate screen");
+
+    let enter = peer.output().expect("read enter output");
+    assert_eq!(enter, b"\x1b[?1049h\x1b[2J");
+
+    session.leave().await.expect("leave Tokio session");
+
+    let undo = peer.output().expect("read undo output");
+    assert_eq!(undo, b"\x1b[?1049l");
+}
+
+/// Hiding the cursor over a headless `FakeDevice` writes `CSI ? 25 l`; leave shows it again
+/// (`CSI ? 25 h`) regardless of whether the application called `show_cursor` itself (FM-L3).
+#[tokio::test]
+async fn tokio_session_hide_cursor_lifecycle_over_fake_device() {
+    let (device, mut peer) = FakeDevice::open().expect("open fake device");
+    let mut session =
+        TokioTerminalSession::from_device(device).expect("open Tokio session over fake device");
+
+    session.hide_cursor().await.expect("hide cursor");
+
+    let hide = peer.output().expect("read hide output");
+    assert_eq!(hide, b"\x1b[?25l");
+
+    session.leave().await.expect("leave Tokio session");
+
+    let show = peer.output().expect("read show output");
+    assert_eq!(show, b"\x1b[?25h");
+}
+
 #[tokio::test]
 async fn tokio_session_requests_cursor_position() {
     let Some((mut master, slave_path)) = open_test_pty() else {

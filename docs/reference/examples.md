@@ -12,6 +12,11 @@ point without scanning the repository tree.
 - `styled_text.rs`: build ordered SGR styling bytes with `CommandBuffer` — bold, named and
   truecolor colors, an underline substyle, and underline color — then reset with
   `commands::style::reset_all`, all without opening a terminal.
+- `osc_families.rs`: build ordered OSC command bytes with `CommandBuffer` — a sanitized window
+  title (`commands::osc::set_title`, stripping an embedded bidi-override character per FM-X3), an
+  OSC 8 hyperlink open/close pair, and an OSC 52 clipboard write (`commands::osc::set_clipboard`,
+  documented as an FM-X4 exfiltration surface a session must policy-gate) — all without opening a
+  terminal.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore

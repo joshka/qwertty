@@ -1,5 +1,6 @@
 //! Encoding behavior tests.
 
+use qwertty::commands::osc::ClipboardSelection;
 use qwertty::commands::style::{Color, UnderlineStyle};
 use qwertty::{Command, CommandBuffer, ProtocolPosition, SyntaxParser, SyntaxToken, commands};
 
@@ -168,4 +169,93 @@ fn style_all_named_colors_and_underline_styles_round_trip_as_single_sgr_csi() {
 
     assert_sgr_round_trip(&commands::style::underline_color(Color::Rgb(1, 2, 3)));
     assert_sgr_round_trip(&commands::style::underline_color(Color::Indexed(9)));
+}
+
+/// Asserts a command's bytes parse back through `SyntaxParser` as exactly one OSC token.
+fn assert_osc_round_trip(command: &Command) {
+    let mut bytes = Vec::new();
+    command.encode(&mut bytes);
+
+    let mut parser = SyntaxParser::new();
+    let mut tokens = parser.feed(&bytes);
+    tokens.extend(parser.finish());
+
+    assert_eq!(tokens.len(), 1, "expected one token from {bytes:?}");
+    let SyntaxToken::Osc(osc) = &tokens[0] else {
+        panic!("expected an OSC token from {bytes:?}, got {:?}", tokens[0]);
+    };
+    assert_eq!(osc.as_bytes(), bytes.as_slice());
+}
+
+#[test]
+fn osc_buffer_composes_title_hyperlink_and_clipboard() {
+    let mut output = CommandBuffer::new();
+
+    output
+        .command(commands::osc::set_title("qwertty"))
+        .command(commands::osc::hyperlink(
+            "https://example.com",
+            Some("docs"),
+        ))
+        .text("docs")
+        .command(commands::osc::close_hyperlink())
+        .command(commands::osc::set_clipboard(
+            ClipboardSelection::Clipboard,
+            b"Hello",
+        ));
+
+    assert_eq!(
+        output.as_bytes(),
+        b"\x1b]2;qwertty\x1b\\\x1b]8;id=docs;https://example.com\x1b\\docs\x1b]8;;\x1b\\\x1b]52;c;SGVsbG8=\x1b\\"
+    );
+}
+
+#[test]
+fn osc_title_sanitizes_control_and_bidi_injection() {
+    let command = commands::osc::set_title("a\x1b[31mb\u{202E}c");
+
+    assert_osc_round_trip(&command);
+
+    let mut bytes = Vec::new();
+    command.encode(&mut bytes);
+    assert_eq!(bytes, b"\x1b]2;a[31mbc\x1b\\");
+}
+
+#[test]
+fn osc_semantic_prompt_sequence_round_trips() {
+    let mut output = CommandBuffer::new();
+
+    output
+        .command(commands::osc::prompt_start())
+        .text("$ ")
+        .command(commands::osc::prompt_end())
+        .text("ls")
+        .command(commands::osc::command_executed())
+        .text("file.txt\n")
+        .command(commands::osc::command_finished(Some(0)));
+
+    assert_eq!(
+        output.as_bytes(),
+        b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\ls\x1b]133;C\x1b\\file.txt\n\x1b]133;D;0\x1b\\"
+    );
+
+    for command in [
+        commands::osc::prompt_start(),
+        commands::osc::prompt_end(),
+        commands::osc::command_executed(),
+        commands::osc::command_finished(Some(0)),
+    ] {
+        assert_osc_round_trip(&command);
+    }
+}
+
+#[test]
+fn osc_hyperlink_and_clipboard_each_round_trip_as_single_osc() {
+    assert_osc_round_trip(&commands::osc::hyperlink("https://example.com", None));
+    assert_osc_round_trip(&commands::osc::hyperlink("https://example.com", Some("a")));
+    assert_osc_round_trip(&commands::osc::close_hyperlink());
+    assert_osc_round_trip(&commands::osc::set_clipboard(
+        ClipboardSelection::Primary,
+        b"clip",
+    ));
 }

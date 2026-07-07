@@ -453,6 +453,120 @@ Upstream references:
 - [ECMA-48](https://ecma-international.org/publications-and-standards/standards/ecma-48/)
 - [xterm `CSI Pm m` (SGR)](https://www.xfree86.org/current/ctlseqs.html#:~:text=CSI%20P%20m%20m)
 
+## OSC Commands
+
+`OSC` means "Operating System Command", written `OSC Ps ; Pt ST`: `Ps` selects the command, `Pt`
+(when present) carries its text, and `ST` (String Terminator) ends it. `commands::osc` builds OSC
+command bytes for window titles, hyperlinks, clipboard writes, and shell semantic-prompt marks.
+Every helper always emits the 7-bit `ESC \` spelling of `ST`, never the legacy BEL (`0x07`)
+terminator some producers use.
+
+### Window Title
+
+`commands::osc::set_title` (OSC 2) sets the window title; `commands::osc::set_icon_and_title`
+(OSC 0) sets both the icon name and the window title:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::osc;
+
+let mut frame = CommandBuffer::new();
+frame.command(osc::set_title("qwertty"));
+
+assert_eq!(frame.as_bytes(), b"\x1b]2;qwertty\x1b\\");
+```
+
+Both helpers sanitize their argument first. Terminal title-report echo has been the exact shape of
+several CVEs (`ConEmu` CVE-2022-46387 and its bypass CVE-2023-39150; Windows Terminal's OSC 9;9
+working-directory injection, CVE-2022-44702) — a terminal that echoes a title back onto a
+controlling program's stdin turns attacker-influenced title text into attacker-controlled input.
+`commands::osc::sanitize_title` strips every C0/C1 control character plus a documented
+bidi/invisible-formatting blocklist (the "Trojan Source" set: explicit bidi embedding/override and
+isolate controls, zero-width and directional marks, `U+2028`/`U+2029` line separators, and the
+byte-order-mark code point), and caps the result at 240 characters.
+
+### Hyperlinks
+
+`commands::osc::hyperlink` (OSC 8) opens a hyperlink; text written afterward is a clickable link
+until `commands::osc::close_hyperlink` closes it:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::osc;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(osc::hyperlink("https://example.com", Some("docs")))
+    .text("docs")
+    .command(osc::close_hyperlink());
+
+assert_eq!(
+    frame.as_bytes(),
+    b"\x1b]8;id=docs;https://example.com\x1b\\docs\x1b]8;;\x1b\\"
+);
+```
+
+The optional `id` groups multiple text spans (for example, a link wrapped across lines) as one
+hyperlink. Both the URI and `id` have control bytes stripped before encoding, so neither can
+terminate the OSC sequence early.
+
+### Clipboard Write
+
+`commands::osc::set_clipboard` (OSC 52) writes `ClipboardSelection::Clipboard` (target `c`) or
+`ClipboardSelection::Primary` (target `p`), base64-encoding the payload:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::osc::{self, ClipboardSelection};
+
+let mut frame = CommandBuffer::new();
+frame.command(osc::set_clipboard(ClipboardSelection::Clipboard, b"Hello"));
+
+assert_eq!(frame.as_bytes(), b"\x1b]52;c;SGVsbG8=\x1b\\");
+```
+
+**This command is an exfiltration surface, not merely a formatting choice.** OSC 52 lets any text
+a terminal displays reach the local clipboard; MITRE ATT&CK catalogs this as T1115, and terminals
+increasingly prompt or drop these writes themselves (kitty#9428). `commands::osc` only builds
+bytes — it has no policy and cannot prompt — so **a session or application must apply its own
+policy gate (opt-in, allowlist, size/rate limiting) before writing this command's bytes to a real
+terminal.** Payloads over 100,000 raw bytes are dropped: `set_clipboard` returns an empty command
+rather than truncate silently.
+
+### Semantic Prompt Marks
+
+`commands::osc::prompt_start`, `prompt_end` (alias: `command_start`), `command_executed`, and
+`command_finished` encode OSC 133 (`FinalTerm`) shell-integration marks, letting a terminal or
+multiplexer navigate by prompt/command boundary instead of by raw line:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::osc;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(osc::prompt_start())
+    .text("$ ")
+    .command(osc::prompt_end())
+    .text("ls")
+    .command(osc::command_executed())
+    .text("file.txt\n")
+    .command(osc::command_finished(Some(0)));
+
+assert_eq!(
+    frame.as_bytes(),
+    b"\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\ls\x1b]133;C\x1b\\file.txt\n\x1b]133;D;0\x1b\\"
+);
+```
+
+`command_finished` takes an optional exit code: `Some(code)` emits `OSC 133 ; D ; code ST`, `None`
+emits `OSC 133 ; D ST`.
+
+Upstream references:
+
+- [xterm Control Sequences (OSC 0/2, OSC 8, OSC 52)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html)
+- [terminal-wg specifications, issue 14 (OSC 133 / FinalTerm)](https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/14)
+
 ## External References
 
 The official ECMA-48 standard is published by Ecma International:

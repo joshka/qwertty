@@ -92,18 +92,20 @@ Two rules make it correct:
   batch has been fed to the correlator*, so a DA1 reply and a slower reply landing in the same
   `read()` both land before the fence acts. A fully silent terminal (no DA1 either) costs one
   timeout total, not one per query.
-- **Unknown is not unsupported (FM-C4).** The returned `Capabilities` has an `Option<T>` per finding;
-  `None` means *unknown*, never *unsupported*. A silent terminal, or a multiplexer that swallowed
-  the queries, yields an all-`None` result. DA1 is a fence, not a feature oracle — its presence
-  proves nothing about features, and its silence means the whole probe is unknown. A DECRQM
-  "mode not recognized" answer is also `None` for that field.
+- **Unknown is not unsupported (FM-C4).** Every DECRQM/query-backed `Capabilities` field is a
+  `Finding<T>` whose `.value()` is `Option<T>`; `None` means *unknown*, never *unsupported*. A
+  silent terminal, or a multiplexer that swallowed the queries, yields an all-unknown result. DA1
+  is a fence, not a feature oracle — its presence proves nothing about features, and its silence
+  means the whole probe is unknown. A DECRQM "mode not recognized" answer is also `None` value for
+  that field, though its `.evidence()` is still `Probed` (the terminal did answer, just in the
+  negative-unknown way DECRQM allows) — see [Capability Model: Evidence,
+  Identity, And Environment Inference](crate::docs#capability-model-evidence-identity-and-environment-inference)
+  for the full evidence/identity/env-inference model this probe populates.
 
 Typeahead typed during the probe is preserved: non-reply input passes through as ordinary events
 buffered for later `next_event` delivery, in arrival order. A probe never eats typeahead (FM-Q1).
 
-This slice returns the minimal typed `Capabilities`; a later slice adds per-finding evidence
-provenance, terminal identity, and environment-based inference. For a runnable example see
-`examples/probe_capabilities.rs` in the repository.
+For a runnable example see `examples/probe_capabilities.rs` in the repository.
 
 ```rust,no_run
 use std::time::Duration;
@@ -113,9 +115,9 @@ use qwertty::TokioTerminalSession;
 # async fn run() -> qwertty::Result<()> {
 let mut session = TokioTerminalSession::open()?;
 
-// One write, one deadline; None fields are unknown, not unsupported.
+// One write, one deadline; unknown findings mean unknown, not unsupported.
 let caps = session.probe_capabilities(Duration::from_millis(150)).await?;
-if caps.synchronized_output == Some(true) {
+if caps.synchronized_output.value_copied() == Some(true) {
     // safe to emit mode-2026 framing
 }
 

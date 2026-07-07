@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use qwertty::report::TerminalStatus;
 use qwertty::{
-    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, PixelSize,
+    Error, Event, Evidence, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, PixelSize,
     ProtocolPosition, Rgb, SyntaxParser, SyntaxToken, TerminalSize, TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
@@ -1345,31 +1345,71 @@ async fn tokio_probe_answers_a_subset_and_da1_fence_resolves_the_rest_fast() {
 
     let ((_session, caps, elapsed), ()) = tokio::join!(probe, peer);
 
-    // The answered fields are set...
+    // The answered fields are set, with Probed evidence naming the exact query that answered...
     assert_eq!(
-        caps.synchronized_output,
+        caps.synchronized_output.value_copied(),
         Some(true),
         "mode 2026 reported set"
     );
     assert_eq!(
-        caps.background_color,
+        caps.synchronized_output.evidence(),
+        &Evidence::Probed { via: "DECRQM 2026" },
+        "mode 2026 finding is Probed"
+    );
+    assert_eq!(
+        caps.background_color.value_copied(),
         Some(Rgb::new(0x1a, 0x2b, 0x3c)),
         "OSC 11 background parsed"
+    );
+    assert_eq!(
+        caps.background_color.evidence(),
+        &Evidence::Probed { via: "OSC 11" },
+        "OSC 11 finding is Probed"
     );
     assert!(
         caps.primary_device_attributes.is_some(),
         "DA1 fence arrived"
     );
-    // ...and every unanswered field is None (unknown, not unsupported).
+    // ...and every unanswered field is None (unknown, not unsupported) with Unknown evidence — a
+    // silent field carries no evidence at all, distinct from a Probed field that answered "no".
     assert_eq!(
-        caps.grapheme_clustering, None,
+        caps.grapheme_clustering.value_copied(),
+        None,
         "mode 2027 silent -> unknown"
     );
-    assert_eq!(caps.in_band_resize, None, "mode 2048 silent -> unknown");
-    assert_eq!(caps.bracketed_paste, None, "mode 2004 silent -> unknown");
-    assert_eq!(caps.kitty_keyboard, None, "CSI ? u silent -> unknown");
-    assert_eq!(caps.terminal_version, None, "XTVERSION silent -> unknown");
-    assert_eq!(caps.foreground_color, None, "OSC 10 silent -> unknown");
+    assert_eq!(
+        caps.grapheme_clustering.evidence(),
+        &Evidence::Unknown,
+        "mode 2027 silent -> Unknown evidence"
+    );
+    assert_eq!(
+        caps.in_band_resize.value_copied(),
+        None,
+        "mode 2048 silent -> unknown"
+    );
+    assert_eq!(caps.in_band_resize.evidence(), &Evidence::Unknown);
+    assert_eq!(
+        caps.bracketed_paste.value_copied(),
+        None,
+        "mode 2004 silent -> unknown"
+    );
+    assert_eq!(caps.bracketed_paste.evidence(), &Evidence::Unknown);
+    assert_eq!(
+        caps.kitty_keyboard.value(),
+        None,
+        "CSI ? u silent -> unknown"
+    );
+    assert_eq!(caps.kitty_keyboard.evidence(), &Evidence::Unknown);
+    assert_eq!(
+        caps.identity.version, None,
+        "XTVERSION silent -> unknown identity version"
+    );
+    assert_eq!(
+        caps.foreground_color.value_copied(),
+        None,
+        "OSC 10 silent -> unknown"
+    );
+    assert_eq!(caps.foreground_color.evidence(), &Evidence::Unknown);
 
     // The DA1 fence, not the timeout, ended the probe: it returned well under the 30 s budget.
     assert!(
@@ -1407,6 +1447,11 @@ async fn tokio_probe_silent_terminal_returns_all_unknown_after_timeout_and_typea
         caps.is_all_unknown(),
         "a silent terminal answers nothing: every field is None, got {caps:?}"
     );
+    // A fully silent field carries Unknown evidence, not Probed — nothing answered at all.
+    assert_eq!(caps.synchronized_output.evidence(), &Evidence::Unknown);
+    assert_eq!(caps.kitty_keyboard.evidence(), &Evidence::Unknown);
+    assert_eq!(caps.foreground_color.evidence(), &Evidence::Unknown);
+    assert_eq!(caps.background_color.evidence(), &Evidence::Unknown);
 
     // The typeahead typed during the probe survives to next_event, in order.
     assert_eq!(
@@ -1450,14 +1495,24 @@ async fn tokio_probe_two_decrqm_modes_do_not_cross_complete() {
     let ((_session, caps), ()) = tokio::join!(probe, peer);
 
     assert_eq!(
-        caps.synchronized_output,
+        caps.synchronized_output.value_copied(),
         Some(true),
         "mode 2026 answered SET -> Some(true)"
     );
     assert_eq!(
-        caps.grapheme_clustering,
+        caps.synchronized_output.evidence(),
+        &Evidence::Probed { via: "DECRQM 2026" },
+        "mode 2026 finding names its own query, not 2027's"
+    );
+    assert_eq!(
+        caps.grapheme_clustering.value_copied(),
         Some(false),
         "mode 2027 answered RESET -> Some(false), not cross-completed with 2026's answer"
+    );
+    assert_eq!(
+        caps.grapheme_clustering.evidence(),
+        &Evidence::Probed { via: "DECRQM 2027" },
+        "mode 2027 finding names its own query, not 2026's"
     );
 }
 

@@ -13,3 +13,4 @@
 #![doc = include_str!("../docs/reference/terminal-session.md")]
 #![doc = include_str!("../docs/reference/terminal-input.md")]
 #![doc = include_str!("../docs/reference/tokio-input-ownership.md")]
+#![doc = include_str!("../docs/reference/capability-model.md")]

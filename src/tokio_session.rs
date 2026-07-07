@@ -31,7 +31,9 @@ use tokio::io::unix::AsyncFd;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::time::{Instant, timeout_at};
 
-use crate::caps::Capabilities;
+use crate::caps::{
+    Capabilities, Finding, identity_from_env, infer_hyperlinks, infer_truecolor, std_env_source,
+};
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::report::{
@@ -665,7 +667,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// In one buffer, written in this order (DA1 **last**, as the fence):
     ///
-    /// - XTVERSION (`CSI > q`) → [`terminal_version`](Capabilities::terminal_version);
+    /// - XTVERSION (`CSI > q`) → [`identity`](Capabilities::identity) (program, version);
     /// - DECRQM for modes 2026, 2027, 2048, 2004 → the four booleans
     ///   ([`synchronized_output`](Capabilities::synchronized_output),
     ///   [`grapheme_clustering`](Capabilities::grapheme_clustering),
@@ -676,6 +678,11 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///   [`background_color`](Capabilities::background_color);
     /// - DA1 (`CSI c`), the fence →
     ///   [`primary_device_attributes`](Capabilities::primary_device_attributes).
+    ///
+    /// [`hyperlinks`](Capabilities::hyperlinks) and [`truecolor`](Capabilities::truecolor) are not
+    /// asked for at all — no query exists for either (FM-C12) — and are populated purely from the
+    /// environment, always with [`Evidence::Inferred`](crate::Evidence::Inferred) or
+    /// [`Evidence::Unknown`](crate::Evidence::Unknown) evidence.
     ///
     /// # The fence (FM-Q7, the drain-before-read rule)
     ///
@@ -749,7 +756,17 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         self.bytes(buffer.into_bytes()).await?;
         self.flush().await?;
 
-        let mut capabilities = Capabilities::default();
+        // The env-inferred findings and the env-only identity fallback never come from a terminal
+        // reply (FM-C12: no query exists for hyperlinks/truecolor), so they are populated once, up
+        // front, from the environment alone. If an XTVERSION reply arrives later,
+        // `store_bundle_reply` overwrites `identity` with the XTVERSION-informed cross-check; until
+        // then this is the best identity available (env only, no probed signal).
+        let mut capabilities = Capabilities {
+            hyperlinks: infer_hyperlinks(std_env_source),
+            truecolor: infer_truecolor(std_env_source),
+            identity: identity_from_env(None, std_env_source),
+            ..Capabilities::default()
+        };
 
         // Step 4: drain already-buffered events through the correlator before any read (design 03's
         // drain-before-read rule): a reply that arrived interleaved with earlier typeahead, already
@@ -1521,7 +1538,25 @@ impl ProbeBundle {
     }
 }
 
-/// Records one bundle reply into the matching [`Capabilities`] field.
+/// The evidence label recorded on every DECRQM-backed [`Finding`] the probe bundle populates.
+///
+/// One stable string per mode number so a consumer's `Evidence::Probed { via }` match names the
+/// exact query that answered (design 06).
+const fn decrqm_evidence(mode: u16) -> &'static str {
+    match mode {
+        2026 => "DECRQM 2026",
+        2027 => "DECRQM 2027",
+        2048 => "DECRQM 2048",
+        2004 => "DECRQM 2004",
+        _ => "DECRQM",
+    }
+}
+
+/// Records one bundle reply into the matching [`Capabilities`] field, as a [`Finding`] with
+/// [`Evidence::Probed`] naming the query that answered.
+///
+/// The XTVERSION reply also feeds `capabilities.identity` (design 06, R-CAP-5: identity is a
+/// finding too) via [`identity_from_env`], cross-checked against the environment.
 fn store_bundle_reply(
     bundle: &ProbeBundle,
     id: ExpectationId,
@@ -1530,14 +1565,20 @@ fn store_bundle_reply(
 ) {
     match reply {
         Reply::XtVersion(report) => {
-            capabilities.terminal_version = Some(report.version().to_owned());
+            let version = report.version().to_owned();
+            capabilities.identity = identity_from_env(Some(&version), std_env_source);
         }
         Reply::KittyKeyboardFlags(bits) => {
-            capabilities.kitty_keyboard = Some(KittyKeyboardFlags::from_bits(bits));
+            capabilities.kitty_keyboard =
+                Finding::probed(Some(KittyKeyboardFlags::from_bits(bits)), "CSI ?u");
         }
         Reply::OscColor(report) => match report.kind() {
-            OscColorKind::Foreground => capabilities.foreground_color = Some(report.rgb()),
-            OscColorKind::Background => capabilities.background_color = Some(report.rgb()),
+            OscColorKind::Foreground => {
+                capabilities.foreground_color = Finding::probed(Some(report.rgb()), "OSC 10");
+            }
+            OscColorKind::Background => {
+                capabilities.background_color = Finding::probed(Some(report.rgb()), "OSC 11");
+            }
         },
         Reply::DecPrivateMode(report) => store_mode_reply(bundle, id, report, capabilities),
         Reply::PrimaryDeviceAttributes(attrs) => {
@@ -1549,11 +1590,13 @@ fn store_bundle_reply(
     }
 }
 
-/// Stores a DECRQM answer into the [`Capabilities`] boolean its mode maps to (via the bundle).
+/// Stores a DECRQM answer into the [`Capabilities`] finding its mode maps to (via the bundle), as
+/// [`Evidence::Probed`] naming the exact mode queried.
 ///
-/// The mode's enabled/reset/permanently-* state becomes `Some(true)`/`Some(false)`; a
-/// "not recognized" (value 0) answer leaves the field `None` (unknown, FM-C4). The bundle maps the
-/// completing expectation id back to which of the four fields it fills.
+/// The mode's enabled/reset/permanently-* state becomes a `Some(true)`/`Some(false)` finding value;
+/// a "not recognized" (value 0) answer leaves the finding's value `None` but its evidence is still
+/// `Probed` — the terminal *did* answer, just in the negative-unknown way DECRQM allows (FM-C4).
+/// The bundle maps the completing expectation id back to which of the four fields it fills.
 fn store_mode_reply(
     bundle: &ProbeBundle,
     id: ExpectationId,
@@ -1564,11 +1607,13 @@ fn store_mode_reply(
         return;
     };
     let enabled = report.is_enabled();
+    let evidence_via = decrqm_evidence(report.mode());
+    let finding = Finding::probed(enabled, evidence_via);
     match field {
-        CapabilityField::SynchronizedOutput => capabilities.synchronized_output = enabled,
-        CapabilityField::GraphemeClustering => capabilities.grapheme_clustering = enabled,
-        CapabilityField::InBandResize => capabilities.in_band_resize = enabled,
-        CapabilityField::BracketedPaste => capabilities.bracketed_paste = enabled,
+        CapabilityField::SynchronizedOutput => capabilities.synchronized_output = finding,
+        CapabilityField::GraphemeClustering => capabilities.grapheme_clustering = finding,
+        CapabilityField::InBandResize => capabilities.in_band_resize = finding,
+        CapabilityField::BracketedPaste => capabilities.bracketed_paste = finding,
     }
 }
 

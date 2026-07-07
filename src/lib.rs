@@ -84,7 +84,10 @@ mod terminal;
 #[cfg(all(feature = "tokio", unix))]
 mod tokio_session;
 
-pub use caps::{Capabilities, DeviceAttributes, Rgb};
+pub use caps::{
+    Capabilities, DeviceAttributes, Evidence, Finding, Multiplexer, Rgb, TerminalIdentity,
+    TerminalProgram,
+};
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use commands::terminal::MouseMode;
 pub use event::{

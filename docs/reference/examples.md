@@ -57,8 +57,11 @@ point without scanning the repository tree.
   (`TokioTerminalSession::request_kitty_keyboard`), inspect the granted subset, and decode rich key
   events including releases and modifiers; the session pops the granted flags on `leave`.
 - `probe_capabilities.rs`: probe the terminal with one DA1-fenced query bundle
-  (`TokioTerminalSession::probe_capabilities`) and print each finding as yes/no/unknown — a single
-  write, one deadline, with `None` meaning *unknown, not unsupported* (FM-C4).
+  (`TokioTerminalSession::probe_capabilities`) and print each finding as yes/no/unknown alongside
+  its evidence (probed/inferred/unknown) plus the derived `TerminalIdentity` — a single write, one
+  deadline, with an unknown finding meaning *unknown, not unsupported* (FM-C4). See [Capability
+  Model](crate::docs#capability-model-evidence-identity-and-environment-inference) for the
+  `Finding`/`Evidence`/identity/env-heuristic model.
 - `mouse_and_paste.rs`: enable SGR mouse (`enable_mouse`), focus (`enable_focus_events`), and
   bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
   and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control

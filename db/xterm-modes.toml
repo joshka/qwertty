@@ -184,3 +184,87 @@ syntax      = "CSI ? 25 l"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/xterm/dec_mode_25_reset.seq"]
 replay      = "modal"
+
+[[sequence]]
+id          = "dec.mode.synchronized_output.query"
+name        = "DECRQM Synchronized Output (2026)"
+description = "Probes mode 2026; the DA1-fenced capability bundle routes the reply by mode number."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2026 $ p"
+refs        = [{ doc = "contour-synchronized-output" }]
+fixtures    = []
+replay      = "safe"
+responds    = "dec.mode.synchronized_output.report"
+
+[[sequence]]
+id          = "dec.mode.synchronized_output.report"
+name        = "DECRPM Synchronized Output (2026)"
+description = "Reports whether mode 2026 (synchronized output) is set, reset, or not recognized."
+direction   = "terminal-to-host"
+refs        = [{ doc = "contour-synchronized-output" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture; the shared DECRPM event preserves mode and state."
+
+[[sequence]]
+id          = "dec.mode.grapheme_clustering.query"
+name        = "DECRQM Grapheme Clustering (2027)"
+description = "Probes mode 2027; the DA1-fenced capability bundle routes the reply by mode number."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2027 $ p"
+refs        = [{ doc = "wezterm-escape-sequences" }]
+fixtures    = []
+replay      = "safe"
+responds    = "dec.mode.grapheme_clustering.report"
+
+[[sequence]]
+id          = "dec.mode.grapheme_clustering.report"
+name        = "DECRPM Grapheme Clustering (2027)"
+description = "Reports whether mode 2027 (grapheme clustering) is set, reset, or not recognized."
+direction   = "terminal-to-host"
+refs        = [{ doc = "wezterm-escape-sequences" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture; the shared DECRPM event preserves mode and state."
+
+[[sequence]]
+id          = "dec.mode.in_band_resize.query"
+name        = "DECRQM In-Band Resize (2048)"
+description = "Probes mode 2048; the DA1-fenced capability bundle routes the reply by mode number."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2048 $ p"
+refs        = [{ doc = "wezterm-escape-sequences" }]
+fixtures    = []
+replay      = "safe"
+responds    = "dec.mode.in_band_resize.report"
+
+[[sequence]]
+id          = "dec.mode.in_band_resize.report"
+name        = "DECRPM In-Band Resize (2048)"
+description = "Reports whether mode 2048 (in-band resize) is set, reset, or not recognized."
+direction   = "terminal-to-host"
+refs        = [{ doc = "wezterm-escape-sequences" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture; the shared DECRPM event preserves mode and state."
+
+[[sequence]]
+id          = "dec.mode.bracketed_paste.query"
+name        = "DECRQM Bracketed Paste (2004)"
+description = "Probes mode 2004; the DA1-fenced capability bundle routes the reply by mode number."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 2004 $ p"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+responds    = "dec.mode.bracketed_paste.report"
+
+[[sequence]]
+id          = "dec.mode.bracketed_paste.report"
+name        = "DECRPM Bracketed Paste (2004)"
+description = "Reports whether mode 2004 (bracketed paste) is set, reset, or not recognized."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = []
+replay      = "safe"
+notes       = "reply syntax pending live capture; the shared DECRPM event preserves mode and state."

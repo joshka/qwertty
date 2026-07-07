@@ -98,8 +98,11 @@
 // module's unit tests but unused in a plain non-test lib build, so each carries a targeted
 // `cfg_attr(not(test), allow(dead_code))` with this rationale rather than a module-wide allow.
 use crate::event::Event;
-use crate::report::{CursorPositionReport, TerminalStatusReport};
-use crate::syntax::{ControlSequence, SyntaxToken};
+use crate::report::{
+    CursorPositionReport, DecPrivateModeReport, OscColorKind, OscColorReport, TerminalStatusReport,
+    XtVersionReport,
+};
+use crate::syntax::{ControlSequence, StringSequence, SyntaxToken};
 
 /// A typed expectation: the identity of a reply the correlator is waiting for.
 ///
@@ -141,6 +144,38 @@ pub enum Expectation {
     /// shape (`CSI ? … u`) is disjoint from the M2 variants by final byte and from DA1 by final
     /// byte, so it distinguishes from all of them.
     KittyKeyboardFlags,
+    /// A DEC private mode report (DECRPM), answering a DEC private-mode DECRQM query
+    /// `CSI ? mode $ p`.
+    ///
+    /// Matches `CSI ? mode ; value $ y` **only when the reported mode equals `mode`** — the mode
+    /// number is the discriminator (FM-Q10). Two `DecPrivateMode` expectations for different modes
+    /// therefore [`distinguishes`], so a bundle can query several modes at once and each answer
+    /// completes only its own query; the prototype's cross-completion bug was matching any mode
+    /// report regardless of the mode number, which this discriminator makes impossible. Two for the
+    /// same mode coalesce.
+    DecPrivateMode {
+        /// The private-mode number this expectation is waiting for (for example 2026).
+        mode: u16,
+    },
+    /// The XTVERSION report, answering a `CSI > q` query.
+    ///
+    /// Matches the `DCS > | text ST` reply the terminal sends with its name and version. The reply
+    /// is DCS-framed (`SyntaxToken::Dcs`), so its shape is disjoint from every CSI-based
+    /// expectation and from the OSC colour reports; there is no discriminator because a probe
+    /// issues at most one XTVERSION query.
+    XtVersion,
+    /// An OSC default-colour report, answering an `OSC 10 ; ? ST` (foreground) or `OSC 11 ; ? ST`
+    /// (background) query.
+    ///
+    /// Matches the `OSC 10 ; rgb:… ST` / `OSC 11 ; rgb:… ST` reply for the colour named by `which`.
+    /// The colour index (foreground 10 vs background 11) is the discriminator: two `OscColor`
+    /// expectations with different [`OscColorKind`] [`distinguishes`], so a bundle can query both
+    /// colours at once and each answer completes only its own query. Two for the same colour
+    /// coalesce.
+    OscColor {
+        /// Which default colour this expectation is waiting for.
+        which: OscColorKind,
+    },
 }
 
 impl Expectation {
@@ -151,17 +186,37 @@ impl Expectation {
     /// key event or any other syntax token never does. Matching is *full-discriminator*: the whole
     /// reply identity must match, so no two pending expectations are ever completed by one event.
     fn match_event(self, event: &Event) -> Option<Reply> {
-        let csi = control_sequence(event)?;
         match self {
-            Self::CursorPosition => match_cursor_position(csi).map(Reply::CursorPosition),
+            // CSI-framed replies.
+            Self::CursorPosition => {
+                match_cursor_position(control_sequence(event)?).map(Reply::CursorPosition)
+            }
             Self::TerminalStatus => {
-                TerminalStatusReport::from_control_sequence(csi).map(Reply::TerminalStatus)
+                TerminalStatusReport::from_control_sequence(control_sequence(event)?)
+                    .map(Reply::TerminalStatus)
             }
             Self::PrimaryDeviceAttributes => {
-                match_primary_device_attributes(csi).map(Reply::PrimaryDeviceAttributes)
+                match_primary_device_attributes(control_sequence(event)?)
+                    .map(Reply::PrimaryDeviceAttributes)
             }
             Self::KittyKeyboardFlags => {
-                crate::event::decode_kitty_flags_report(csi).map(Reply::KittyKeyboardFlags)
+                crate::event::decode_kitty_flags_report(control_sequence(event)?)
+                    .map(Reply::KittyKeyboardFlags)
+            }
+            Self::DecPrivateMode { mode } => {
+                let report = DecPrivateModeReport::from_control_sequence(control_sequence(event)?)?;
+                // The discriminator (FM-Q10): only the report for *this* mode completes the query.
+                (report.mode() == mode).then_some(Reply::DecPrivateMode(report))
+            }
+            // DCS-framed reply.
+            Self::XtVersion => {
+                XtVersionReport::from_string_sequence(dcs_string(event)?).map(Reply::XtVersion)
+            }
+            // OSC-framed reply.
+            Self::OscColor { which } => {
+                let report = OscColorReport::from_osc_payload(osc_string(event)?.payload())?;
+                // The discriminator: only the report for *this* colour completes the query.
+                (report.kind() == which).then_some(Reply::OscColor(report))
             }
         }
     }
@@ -177,11 +232,15 @@ impl Expectation {
 /// never distinguishes from itself — that is the coalescing case), symmetric, and enumerable per
 /// pair.
 ///
-/// For the current variants the reply shapes are disjoint by final byte — CPR ends in `R`, DSR in
-/// `n`, DA1 in `c`, and the kitty flags report in `u` (with a `?` marker DA1 lacks) — so every pair
-/// of *different* variants distinguishes. The only non-distinguishing pairs are the identical ones.
-/// M3's discriminator-carrying variants (DECRQM by mode, OSC colour by index) refine this: same
-/// variant, different discriminator distinguishes; same discriminator does not.
+/// For the fieldless variants the reply shapes are disjoint by frame and final byte — CPR ends in
+/// `R`, DSR in `n`, DA1 in `c`, the kitty flags report in `u` (with a `?` marker DA1 lacks),
+/// XTVERSION is DCS-framed, and the OSC colour reports are OSC-framed — so every pair of
+/// *different* variants distinguishes. The discriminator-carrying variants (DECRQM by mode number,
+/// OSC colour by index) refine this: two same-variant expectations distinguish exactly when their
+/// discriminators differ, because the matcher for each requires its own mode/colour (FM-Q10). Since
+/// [`Expectation`] derives structural equality, "different discriminator" is simply "not equal," so
+/// the whole relation collapses to `a != b`: identical expectations (same variant, same
+/// discriminator) are the only non-distinguishing pairs, and those coalesce.
 ///
 /// # Example
 ///
@@ -211,11 +270,13 @@ impl Expectation {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[must_use]
 pub fn distinguishes(a: &Expectation, b: &Expectation) -> bool {
-    // For the M2 variants, distinguishing is exactly "not the same variant": the three reply shapes
-    // are disjoint by final byte, and no variant carries a discriminator yet, so identical variants
-    // are the only non-distinguishing pair. When M3 adds a discriminator-carrying variant, this
-    // relation gains an arm that compares the discriminators of two same-variant expectations
-    // (e.g. two `DecPrivateMode` distinguish iff their mode numbers differ).
+    // Two expectations fail to distinguish exactly when a single event could complete both. Every
+    // pair of different variants has disjoint reply shapes (by frame and final byte), and each
+    // discriminator-carrying variant's matcher accepts only its own discriminator's reply — so two
+    // same-variant expectations with different discriminators (e.g. `DecPrivateMode { 2026 }` vs
+    // `DecPrivateMode { 2027 }`, FM-Q10) also cannot be completed by one event. Both cases reduce
+    // to "the two expectations are not structurally equal," and the only non-distinguishing
+    // pair is an identical one, which coalesces (design 03 rule 3).
     a != b
 }
 
@@ -245,6 +306,17 @@ pub enum Reply {
     /// 06): the granted set can be a subset of the requested set, and the ledger records the
     /// granted reality.
     KittyKeyboardFlags(u8),
+    /// A DEC private mode report completed an [`Expectation::DecPrivateMode`].
+    ///
+    /// Carries the queried mode number and its reported state. The mode in the report always equals
+    /// the mode in the expectation it completed (that is the discriminator, FM-Q10).
+    DecPrivateMode(DecPrivateModeReport),
+    /// An XTVERSION report completed an [`Expectation::XtVersion`], carrying the terminal's
+    /// self-reported version string.
+    XtVersion(XtVersionReport),
+    /// An OSC default-colour report completed an [`Expectation::OscColor`], carrying the parsed
+    /// colour and which default (foreground/background) it describes.
+    OscColor(OscColorReport),
 }
 
 /// The parameters of a Primary Device Attributes (DA1) fence reply.
@@ -326,6 +398,17 @@ pub enum Resolution {
     Eof,
     /// The waiting future was dropped (cancelled) before a reply arrived.
     Cancelled,
+    /// A probe fence resolved a still-pending expectation with no answer.
+    ///
+    /// This is the DA1-fence outcome (design 03, FM-Q7): a capability probe writes its query bundle
+    /// with a trailing DA1 request as a fence, and when DA1 completes — meaning every reply that
+    /// was coming has arrived — the probe layer resolves every *other* still-pending bundle
+    /// expectation as `NoReply`. It is a distinct resolution from a timeout: a `NoReply` means
+    /// "the terminal finished answering and did not answer this one," which is *unknown*, not
+    /// *unsupported* (FM-C4). The correlator treats it like the other resolutions here (a
+    /// synchronous removal that makes a later matching reply pass through, rule 4); the
+    /// *meaning* — supported-unknown — lives in the probe layer that reads it.
+    NoReply,
 }
 
 /// What [`Correlator::resolve`] did to the named expectation.
@@ -659,6 +742,28 @@ impl Correlator {
 fn control_sequence(event: &Event) -> Option<&ControlSequence> {
     match event.syntax_token()? {
         SyntaxToken::Csi(csi) => Some(csi),
+        _ => None,
+    }
+}
+
+/// Returns the DCS string sequence carried by a passthrough syntax event, or `None`.
+///
+/// Only a [`Event::Syntax`] holding a [`SyntaxToken::Dcs`] can be an XTVERSION report; every other
+/// token is never a match candidate for [`Expectation::XtVersion`].
+fn dcs_string(event: &Event) -> Option<&StringSequence> {
+    match event.syntax_token()? {
+        SyntaxToken::Dcs(dcs) => Some(dcs),
+        _ => None,
+    }
+}
+
+/// Returns the OSC string sequence carried by a passthrough syntax event, or `None`.
+///
+/// Only a [`Event::Syntax`] holding a [`SyntaxToken::Osc`] can be a colour report; every other
+/// token is never a match candidate for [`Expectation::OscColor`].
+fn osc_string(event: &Event) -> Option<&StringSequence> {
+    match event.syntax_token()? {
+        SyntaxToken::Osc(osc) => Some(osc),
         _ => None,
     }
 }

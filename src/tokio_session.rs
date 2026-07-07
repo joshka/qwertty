@@ -31,13 +31,54 @@ use tokio::io::unix::AsyncFd;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::time::{Instant, timeout_at};
 
+use crate::caps::Capabilities;
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
-use crate::report::{CursorPositionReport, TerminalStatusReport};
+use crate::report::{
+    CursorPositionReport, DecPrivateModeReport, OscColorKind, TerminalStatusReport,
+};
 use crate::{
-    Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, ResizeEvent,
+    Command, CommandBuffer, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, ResizeEvent,
     SemanticDecoder, Terminal, TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
+
+/// The DEC private modes the capability probe bundle queries, and the [`Capabilities`] field each
+/// answer sets. Kept as one table so the write side, the register side, and the collect side stay
+/// in agreement (design 03 probe bundle).
+const PROBE_MODES: [ProbeMode; 4] = [
+    ProbeMode {
+        mode: 2026,
+        field: CapabilityField::SynchronizedOutput,
+    },
+    ProbeMode {
+        mode: 2027,
+        field: CapabilityField::GraphemeClustering,
+    },
+    ProbeMode {
+        mode: 2048,
+        field: CapabilityField::InBandResize,
+    },
+    ProbeMode {
+        mode: 2004,
+        field: CapabilityField::BracketedPaste,
+    },
+];
+
+/// One DEC private mode the probe asks about, and which [`Capabilities`] boolean its answer sets.
+#[derive(Clone, Copy)]
+struct ProbeMode {
+    mode: u16,
+    field: CapabilityField,
+}
+
+/// Which [`Capabilities`] boolean a DECRQM answer populates.
+#[derive(Clone, Copy)]
+enum CapabilityField {
+    SynchronizedOutput,
+    GraphemeClustering,
+    InBandResize,
+    BracketedPaste,
+}
 
 const DEV_TTY: &str = "/dev/tty";
 const READ_BUFFER_LEN: usize = 1024;
@@ -121,6 +162,15 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// dropped/cancelled query's expectation is resolved as `Resolution::Cancelled` before a new
     /// one registers.
     active_query: Option<ExpectationId>,
+    /// The ids of a capability probe bundle's still-registered expectations, if a probe is (or
+    /// was) in flight.
+    ///
+    /// A probe registers several expectations at once (design 03 probe bundle) and records them
+    /// here for the same reason a single query records [`active_query`](Self::active_query): a
+    /// dropped probe future leaves its expectations registered, so they are swept as
+    /// `Resolution::Cancelled` before the next query registers. Cleared when a probe finishes
+    /// normally (its own fence resolves the set).
+    active_probe: Vec<ExpectationId>,
 }
 
 impl TokioTerminalSession<Terminal> {
@@ -251,6 +301,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             correlator: Correlator::new(),
             pending: VecDeque::new(),
             active_query: None,
+            active_probe: Vec::new(),
         })
     }
 
@@ -601,6 +652,260 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         }
     }
 
+    /// Probes the terminal's capabilities with one DA1-fenced query bundle (design 03/06).
+    ///
+    /// This is the batched capability probe every serious terminal consumer independently builds
+    /// (helix, zellij, notcurses, codex): a single write of a bundle of queries plus a trailing DA1
+    /// request as a fence, then **one** deadline. It never runs implicitly (FM-C7); a caller
+    /// invokes it explicitly and owns the `timeout` budget (design 03: ~150 ms locally is
+    /// typical; a longer budget is the caller's choice over ssh/mux, not a longer default —
+    /// FM-C6/Q9).
+    ///
+    /// # What it asks
+    ///
+    /// In one buffer, written in this order (DA1 **last**, as the fence):
+    ///
+    /// - XTVERSION (`CSI > q`) → [`terminal_version`](Capabilities::terminal_version);
+    /// - DECRQM for modes 2026, 2027, 2048, 2004 → the four booleans
+    ///   ([`synchronized_output`](Capabilities::synchronized_output),
+    ///   [`grapheme_clustering`](Capabilities::grapheme_clustering),
+    ///   [`in_band_resize`](Capabilities::in_band_resize),
+    ///   [`bracketed_paste`](Capabilities::bracketed_paste));
+    /// - kitty keyboard flags (`CSI ? u`) → [`kitty_keyboard`](Capabilities::kitty_keyboard);
+    /// - OSC 10 / OSC 11 → [`foreground_color`](Capabilities::foreground_color) /
+    ///   [`background_color`](Capabilities::background_color);
+    /// - DA1 (`CSI c`), the fence →
+    ///   [`primary_device_attributes`](Capabilities::primary_device_attributes).
+    ///
+    /// # The fence (FM-Q7, the drain-before-read rule)
+    ///
+    /// A terminal answers queries in order, so DA1's reply arriving means every earlier reply that
+    /// was coming has already arrived. When the DA1 expectation completes, this resolves every
+    /// other still-pending bundle expectation as `Resolution::NoReply` — **but only after the
+    /// entire current decode batch has been fed to the correlator**. A DA1 reply and a slower
+    /// reply landing in the *same* `read()` must both be matched before the fence acts, or the
+    /// slower reply would be lost (notcurses#2434). This method therefore feeds a whole read's
+    /// events, and only then checks whether DA1 completed in that batch.
+    ///
+    /// A fully silent terminal (no DA1 either) costs **one** `timeout` total, after which every
+    /// expectation resolves `NoReply` and an all-[`None`](Capabilities::is_all_unknown)
+    /// `Capabilities` is returned — never a per-query timeout (the FM-C6 anti-pattern).
+    ///
+    /// # Unknown is not unsupported (FM-C4)
+    ///
+    /// Every unanswered field is `None`, meaning *unknown*. DA1 is a fence, not a feature oracle:
+    /// its presence proves nothing about features, and its silence means the whole probe is
+    /// unknown, not that the terminal lacks everything. A DECRQM "mode not recognized" (value
+    /// 0) answer is also `None` for that field. This slice returns the minimal typed result;
+    /// M3-S2 adds evidence-provenance, terminal identity, and env inference on top of these
+    /// fields.
+    ///
+    /// # Typeahead survives
+    ///
+    /// Input that is not a bundle reply — typeahead, keystrokes, unrelated reports — passes through
+    /// as ordinary events buffered for later [`next_event`](Self::next_event) delivery, in arrival
+    /// order. A probe never eats a user's typeahead (FM-Q1).
+    ///
+    /// # Cancellation
+    ///
+    /// Cancel-safe like the other query helpers: the bundle's expectation ids live on the
+    /// correlator, and a dropped probe future's leftover expectations are swept as
+    /// `Resolution::Cancelled` before the next query registers (the same cancel-sweep the single
+    /// query helpers use, generalized to the bundle).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when writing or flushing the bundle fails, or a non-EOF read error
+    /// occurs. A silent terminal (timeout) or a closed terminal (EOF) is **not** an error: both
+    /// yield the `Capabilities` gathered so far, with the unanswered fields `None`.
+    pub async fn probe_capabilities(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<Capabilities> {
+        // Step 1: sweep a leftover single-query expectation from a dropped/cancelled prior query.
+        self.sweep_active_query();
+        // Also sweep any leftover bundle from a dropped prior probe (belt-and-suspenders: a probe
+        // stores its ids in `active_probe`, resolved on every exit path, so this is normally
+        // empty).
+        self.sweep_active_probe();
+
+        // Step 2: register the bundle. DA1 is registered like any other; the fence *semantics* is
+        // this method's, keyed on the DA1 id. The M3 vocabulary within one bundle never overlaps
+        // (distinct modes, distinct colours, distinct frames), so registration never conflicts.
+        let bundle = self.register_probe_bundle();
+
+        // Step 3: write the whole bundle in ONE buffer, DA1 last as the fence, then flush.
+        let mut buffer = CommandBuffer::new();
+        buffer
+            .command(commands::terminal::request_xtversion())
+            .command(commands::terminal::request_kitty_keyboard_flags())
+            .command(commands::osc::request_foreground_color())
+            .command(commands::osc::request_background_color());
+        for probe in PROBE_MODES {
+            buffer.command(commands::terminal::request_dec_private_mode(probe.mode));
+        }
+        // DA1 last: the fence.
+        buffer.command(commands::terminal::request_primary_device_attributes());
+        self.bytes(buffer.into_bytes()).await?;
+        self.flush().await?;
+
+        let mut capabilities = Capabilities::default();
+
+        // Step 4: drain already-buffered events through the correlator before any read (design 03's
+        // drain-before-read rule): a reply that arrived interleaved with earlier typeahead, already
+        // sitting in `pending`, must be able to complete a bundle query before a new read.
+        let buffered: Vec<Event> = self.pending.drain(..).collect();
+        if self.feed_batch_into_bundle(&bundle, buffered, &mut capabilities) {
+            self.finish_probe(&bundle);
+            return Ok(capabilities);
+        }
+
+        // Step 5: one deadline loop over the whole probe.
+        let deadline = Instant::now() + timeout;
+        loop {
+            let events = match timeout_at(deadline, self.read_events()).await {
+                Ok(Ok(events)) => events,
+                Ok(Err(err)) => {
+                    // EOF or a read error ends the probe. Both resolve the still-pending bundle as
+                    // NoReply and return what was gathered; a non-EOF error is still not fatal to
+                    // the caller's capability picture (unknown, not unsupported), but a genuine I/O
+                    // error is surfaced.
+                    if is_unexpected_eof(&err) {
+                        self.finish_probe(&bundle);
+                        return Ok(capabilities);
+                    }
+                    self.resolve_bundle(&bundle, Resolution::Cancelled);
+                    self.active_probe.clear();
+                    return Err(err);
+                }
+                Err(_elapsed) => {
+                    // The whole-probe deadline elapsed: a silent (or partially silent) terminal.
+                    // Resolve the still-pending bundle as NoReply — one timeout total, not one per
+                    // query (FM-C6) — and return the capabilities gathered so far.
+                    self.finish_probe(&bundle);
+                    return Ok(capabilities);
+                }
+            };
+
+            // Feed the WHOLE batch before acting on any DA1 completion (FM-Q7). If DA1 completed in
+            // this batch, the fence fires after the batch is fully matched.
+            if self.feed_batch_into_bundle(&bundle, events, &mut capabilities) {
+                self.finish_probe(&bundle);
+                return Ok(capabilities);
+            }
+        }
+    }
+
+    /// Registers the DA1-fenced probe bundle and records its ids for the fence and cancel-sweep.
+    ///
+    /// Returns the bundle: the DA1 fence id, and each other expectation id paired with the
+    /// [`Capabilities`] slot its reply populates. Every id is also recorded in `active_probe` so a
+    /// dropped probe future's expectations are swept before the next query (cancel-safety).
+    fn register_probe_bundle(&mut self) -> ProbeBundle {
+        // Register in a fixed order; DA1 is registered *last* so it is the fence (its id keys the
+        // whole fence semantics). Every field is set at construction so the struct never sits in a
+        // half-initialized state.
+        let xtversion = Some(self.register_probe(Expectation::XtVersion));
+        let kitty = Some(self.register_probe(Expectation::KittyKeyboardFlags));
+        let foreground = Some(self.register_probe(Expectation::OscColor {
+            which: OscColorKind::Foreground,
+        }));
+        let background = Some(self.register_probe(Expectation::OscColor {
+            which: OscColorKind::Background,
+        }));
+        let modes = PROBE_MODES
+            .iter()
+            .map(|probe| {
+                let id = self.register_probe(Expectation::DecPrivateMode { mode: probe.mode });
+                (id, probe.field)
+            })
+            .collect();
+        let fence = Some(self.register_probe(Expectation::PrimaryDeviceAttributes));
+
+        ProbeBundle {
+            fence,
+            xtversion,
+            kitty,
+            foreground,
+            background,
+            modes,
+        }
+    }
+
+    /// Registers one bundle expectation, recording its id in `active_probe` for the cancel-sweep.
+    fn register_probe(&mut self, expectation: Expectation) -> ExpectationId {
+        let id = self
+            .correlator
+            .register(expectation)
+            .expect("bundle expectations never overlap: distinct modes/colours/frames");
+        self.active_probe.push(id);
+        id
+    }
+
+    /// Feeds a whole decode batch through the correlator, collecting bundle replies into
+    /// `capabilities`, and returns `true` when the DA1 fence completed in this batch.
+    ///
+    /// This is the FM-Q7 primitive: it processes every event in the batch (buffering non-bundle
+    /// passthroughs into `pending` in arrival order) **before** returning, so a DA1 reply and a
+    /// slower reply arriving in one `read()` both land. The caller acts on the DA1 completion only
+    /// after this returns.
+    fn feed_batch_into_bundle(
+        &mut self,
+        bundle: &ProbeBundle,
+        events: Vec<Event>,
+        capabilities: &mut Capabilities,
+    ) -> bool {
+        let mut fenced = false;
+        for event in events {
+            match self.correlator.feed(event) {
+                Feed::Completed { id, .. } => {
+                    let reply = self
+                        .correlator
+                        .take_reply(id)
+                        .expect("a completion always has a reply to take");
+                    store_bundle_reply(bundle, id, reply, capabilities);
+                    if Some(id) == bundle.fence {
+                        // The fence completed — but keep feeding the rest of the batch first.
+                        fenced = true;
+                    }
+                }
+                Feed::Passthrough(event) => self.pending.push_back(event),
+            }
+        }
+        fenced
+    }
+
+    /// Fires the fence: resolves every still-pending bundle expectation as
+    /// `Resolution::NoReply` and clears the probe's id set.
+    ///
+    /// Called once the DA1 fence completes, or once the whole-probe deadline/EOF ends the probe. A
+    /// still-pending expectation is one whose reply never arrived; resolving it `NoReply` removes
+    /// it so a later matching reply passes through as an event (rule 4), and leaves its
+    /// [`Capabilities`] field `None` (unknown, FM-C4).
+    fn finish_probe(&mut self, bundle: &ProbeBundle) {
+        self.resolve_bundle(bundle, Resolution::NoReply);
+        self.active_probe.clear();
+    }
+
+    /// Resolves every still-registered bundle expectation with `resolution`.
+    fn resolve_bundle(&mut self, bundle: &ProbeBundle, resolution: Resolution) {
+        for id in bundle.ids() {
+            self.correlator.resolve(id, resolution);
+        }
+    }
+
+    /// Sweeps a leftover probe bundle from a dropped/cancelled prior probe as cancelled.
+    ///
+    /// Mirrors [`sweep_active_query`](Self::sweep_active_query) for the bundle: if a probe future
+    /// was dropped mid-await, its expectations are still registered, so resolving them
+    /// `Resolution::Cancelled` before a new query registers keeps a stale bundle reply from being
+    /// misdelivered (rule 4).
+    fn sweep_active_probe(&mut self) {
+        for id in std::mem::take(&mut self.active_probe) {
+            self.correlator.resolve(id, Resolution::Cancelled);
+        }
+    }
+
     /// Enables mouse reporting for the given tracking mode, paired with SGR coordinates (1006).
     ///
     /// This writes `CSI ? N h CSI ? 1006 h` through the readiness path, flushes, and records the
@@ -761,8 +1066,10 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         operation: &'static str,
         timeout: Duration,
     ) -> terminal::Result<Reply> {
-        // Step 1: sweep a leftover expectation from a dropped/cancelled prior query.
+        // Step 1: sweep a leftover expectation from a dropped/cancelled prior query, and a leftover
+        // probe bundle from a dropped/cancelled prior probe.
         self.sweep_active_query();
+        self.sweep_active_probe();
 
         // Step 2: register. The M2 vocabulary never overlaps, and only one query runs at a time
         // (single `active_query`), so registration cannot conflict; a conflict would be a bug.
@@ -1183,6 +1490,86 @@ fn take_coalesced_event(pending: &mut VecDeque<Event>) -> Option<Event> {
         return Some(event);
     }
     None
+}
+
+/// The registered expectation ids of one capability probe bundle (design 03).
+///
+/// Keyed for the fence and for reply collection: `fence` is the DA1 expectation whose completion
+/// resolves the rest as no-reply; the others are paired with the [`Capabilities`] field their reply
+/// fills. Every id is also mirrored in the session's `active_probe` for the cancel-sweep.
+#[derive(Default)]
+struct ProbeBundle {
+    fence: Option<ExpectationId>,
+    xtversion: Option<ExpectationId>,
+    kitty: Option<ExpectationId>,
+    foreground: Option<ExpectationId>,
+    background: Option<ExpectationId>,
+    modes: Vec<(ExpectationId, CapabilityField)>,
+}
+
+impl ProbeBundle {
+    /// Returns every registered id in the bundle (fence included), for whole-bundle resolution.
+    fn ids(&self) -> Vec<ExpectationId> {
+        let mut ids = Vec::new();
+        ids.extend(self.fence);
+        ids.extend(self.xtversion);
+        ids.extend(self.kitty);
+        ids.extend(self.foreground);
+        ids.extend(self.background);
+        ids.extend(self.modes.iter().map(|(id, _)| *id));
+        ids
+    }
+}
+
+/// Records one bundle reply into the matching [`Capabilities`] field.
+fn store_bundle_reply(
+    bundle: &ProbeBundle,
+    id: ExpectationId,
+    reply: Reply,
+    capabilities: &mut Capabilities,
+) {
+    match reply {
+        Reply::XtVersion(report) => {
+            capabilities.terminal_version = Some(report.version().to_owned());
+        }
+        Reply::KittyKeyboardFlags(bits) => {
+            capabilities.kitty_keyboard = Some(KittyKeyboardFlags::from_bits(bits));
+        }
+        Reply::OscColor(report) => match report.kind() {
+            OscColorKind::Foreground => capabilities.foreground_color = Some(report.rgb()),
+            OscColorKind::Background => capabilities.background_color = Some(report.rgb()),
+        },
+        Reply::DecPrivateMode(report) => store_mode_reply(bundle, id, report, capabilities),
+        Reply::PrimaryDeviceAttributes(attrs) => {
+            capabilities.primary_device_attributes = Some(attrs.into());
+        }
+        // The bundle never registers CursorPosition/TerminalStatus expectations, so those reply
+        // variants cannot appear here.
+        Reply::CursorPosition(_) | Reply::TerminalStatus(_) => {}
+    }
+}
+
+/// Stores a DECRQM answer into the [`Capabilities`] boolean its mode maps to (via the bundle).
+///
+/// The mode's enabled/reset/permanently-* state becomes `Some(true)`/`Some(false)`; a
+/// "not recognized" (value 0) answer leaves the field `None` (unknown, FM-C4). The bundle maps the
+/// completing expectation id back to which of the four fields it fills.
+fn store_mode_reply(
+    bundle: &ProbeBundle,
+    id: ExpectationId,
+    report: DecPrivateModeReport,
+    capabilities: &mut Capabilities,
+) {
+    let Some((_, field)) = bundle.modes.iter().find(|(mode_id, _)| *mode_id == id) else {
+        return;
+    };
+    let enabled = report.is_enabled();
+    match field {
+        CapabilityField::SynchronizedOutput => capabilities.synchronized_output = enabled,
+        CapabilityField::GraphemeClustering => capabilities.grapheme_clustering = enabled,
+        CapabilityField::InBandResize => capabilities.in_band_resize = enabled,
+        CapabilityField::BracketedPaste => capabilities.bracketed_paste = enabled,
+    }
 }
 
 /// Builds the error for the impossible "wrong reply type completed a typed query" case.

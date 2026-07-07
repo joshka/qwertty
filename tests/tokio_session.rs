@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use qwertty::report::TerminalStatus;
 use qwertty::{
     Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, PixelSize,
-    ProtocolPosition, SyntaxParser, SyntaxToken, TerminalSize, TokioTerminalSession, commands,
+    ProtocolPosition, Rgb, SyntaxParser, SyntaxToken, TerminalSize, TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
@@ -1292,6 +1292,172 @@ async fn tokio_session_kitty_keyboard_degrades_when_terminal_never_answers() {
         !teardown.windows(4).any(|w| w == b"\x1b[<u")
             && !teardown.windows(5).any(|w| w == b"\x1b[<1u"),
         "an unknown grant records no kitty entry, so leave emits no pop, got {teardown:?}",
+    );
+}
+
+// --- FakeDevice-driven capability probe tests (no PTY): the M3-S1 payoff -------------------------
+
+#[tokio::test]
+async fn tokio_probe_answers_a_subset_and_da1_fence_resolves_the_rest_fast() {
+    // The payoff: script the fake terminal to answer a SUBSET (DA1 + mode 2026 set + OSC 11
+    // background), silent on everything else. The probe must return with synchronized_output =
+    // Some(true), background_color = Some(...), and every unanswered field None — and it must
+    // return FAST because DA1 arrived, not after the (generous) timeout.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    // A deliberately generous budget: the DA1 fence, not the clock, must end the probe.
+    let generous = Duration::from_secs(30);
+    let probe = async move {
+        // tokio's Instant, not std's: the sans-io clock guard disallows `std::time::Instant::now`.
+        let started = tokio::time::Instant::now();
+        let caps = session
+            .probe_capabilities(generous)
+            .await
+            .expect("probe returns capabilities");
+        (session, caps, started.elapsed())
+    };
+    let peer = async {
+        // The session writes the whole bundle in one buffer; read it, then answer a subset.
+        let bundle = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read probe bundle");
+        // The whole bundle went out in one write (DA1 last as the fence).
+        assert!(
+            bundle.ends_with(b"\x1b[c"),
+            "DA1 is written last as the fence, got {bundle:?}"
+        );
+        assert!(
+            bundle.windows(4).any(|w| w == b"\x1b[>q"),
+            "XTVERSION queried"
+        );
+        assert!(
+            bundle.windows(9).any(|w| w == b"\x1b[?2026$p"),
+            "mode 2026 queried"
+        );
+
+        // Answer only: mode 2026 set, OSC 11 background, and DA1 (the fence). Everything else
+        // silent.
+        terminal
+            .feed_input(b"\x1b[?2026;1$y\x1b]11;rgb:1a1a/2b2b/3c3c\x1b\\\x1b[?1;2c")
+            .expect("feed subset answers + DA1 fence");
+    };
+
+    let ((_session, caps, elapsed), ()) = tokio::join!(probe, peer);
+
+    // The answered fields are set...
+    assert_eq!(
+        caps.synchronized_output,
+        Some(true),
+        "mode 2026 reported set"
+    );
+    assert_eq!(
+        caps.background_color,
+        Some(Rgb::new(0x1a, 0x2b, 0x3c)),
+        "OSC 11 background parsed"
+    );
+    assert!(
+        caps.primary_device_attributes.is_some(),
+        "DA1 fence arrived"
+    );
+    // ...and every unanswered field is None (unknown, not unsupported).
+    assert_eq!(
+        caps.grapheme_clustering, None,
+        "mode 2027 silent -> unknown"
+    );
+    assert_eq!(caps.in_band_resize, None, "mode 2048 silent -> unknown");
+    assert_eq!(caps.bracketed_paste, None, "mode 2004 silent -> unknown");
+    assert_eq!(caps.kitty_keyboard, None, "CSI ? u silent -> unknown");
+    assert_eq!(caps.terminal_version, None, "XTVERSION silent -> unknown");
+    assert_eq!(caps.foreground_color, None, "OSC 10 silent -> unknown");
+
+    // The DA1 fence, not the timeout, ended the probe: it returned well under the 30 s budget.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "the DA1 fence must end the probe fast, took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn tokio_probe_silent_terminal_returns_all_unknown_after_timeout_and_typeahead_survives() {
+    // A fully silent terminal: the fake answers no probe reply at all, but the user types ahead
+    // during the probe. The probe must return an all-None Capabilities after ONE timeout (no hang),
+    // and the typeahead must survive to next_event() — a probe never eats typeahead (FM-Q1).
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let probe = async move {
+        let caps = session
+            .probe_capabilities(Duration::from_millis(150))
+            .await
+            .expect("silent terminal is not an error");
+        (session, caps)
+    };
+    let peer = async {
+        // Drain the bundle the session wrote, then type ahead (no probe replies at all).
+        let _bundle = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read probe bundle");
+        terminal.feed_input(b"hi").expect("feed typeahead");
+    };
+
+    let ((mut session, caps), ()) = tokio::join!(probe, peer);
+
+    assert!(
+        caps.is_all_unknown(),
+        "a silent terminal answers nothing: every field is None, got {caps:?}"
+    );
+
+    // The typeahead typed during the probe survives to next_event, in order.
+    assert_eq!(
+        session.next_event().await.expect("first typeahead char"),
+        text_event('h')
+    );
+    assert_eq!(
+        session.next_event().await.expect("second typeahead char"),
+        text_event('i')
+    );
+
+    session.leave().await.expect("leave Tokio fake session");
+}
+
+#[tokio::test]
+async fn tokio_probe_two_decrqm_modes_do_not_cross_complete() {
+    // FM-Q10: the bundle carries concurrent DECRQM expectations for 2026 and 2027. The fake answers
+    // BOTH with their correct modes (2026 set, 2027 reset). Each field must be set from its own
+    // answer with no cross-completion.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let probe = async move {
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .await
+            .expect("probe returns capabilities");
+        (session, caps)
+    };
+    let peer = async {
+        let _bundle = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read probe bundle");
+        // Answer 2026 SET (value 1) and 2027 RESET (value 2), then the DA1 fence. If the correlator
+        // cross-completed, the fields would be swapped or one would be lost.
+        terminal
+            .feed_input(b"\x1b[?2026;1$y\x1b[?2027;2$y\x1b[?1;2c")
+            .expect("feed both DECRQM answers + fence");
+    };
+
+    let ((_session, caps), ()) = tokio::join!(probe, peer);
+
+    assert_eq!(
+        caps.synchronized_output,
+        Some(true),
+        "mode 2026 answered SET -> Some(true)"
+    );
+    assert_eq!(
+        caps.grapheme_clustering,
+        Some(false),
+        "mode 2027 answered RESET -> Some(false), not cross-completed with 2026's answer"
     );
 }
 

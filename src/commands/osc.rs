@@ -244,6 +244,58 @@ pub fn close_hyperlink() -> Command {
     escape::osc("8;;")
 }
 
+/// Requests the terminal's default foreground colour (OSC 10 query).
+///
+/// This encodes `OSC 10 ; ? ST`, emitted as `b"\x1b]10;?\x1b\\"`. Terminals answer with
+/// `OSC 10 ; rgb:… ST` (the terminator may be ST or BEL — FM-P9), which qwertty parses into an
+/// [`OscColorReport`](crate::report::OscColorReport). This is a foreground query in a capability
+/// probe (design 03).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a response,
+/// or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::osc;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(osc::request_foreground_color());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b]10;?\x1b\\");
+/// ```
+#[must_use]
+pub fn request_foreground_color() -> Command {
+    escape::osc("10;?")
+}
+
+/// Requests the terminal's default background colour (OSC 11 query).
+///
+/// This encodes `OSC 11 ; ? ST`, emitted as `b"\x1b]11;?\x1b\\"`. Terminals answer with
+/// `OSC 11 ; rgb:… ST` (the terminator may be ST or BEL — FM-P9), which qwertty parses into an
+/// [`OscColorReport`](crate::report::OscColorReport). A background-colour query is how an
+/// application detects a light or dark theme (design 06).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a response,
+/// or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::osc;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(osc::request_background_color());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b]11;?\x1b\\");
+/// ```
+#[must_use]
+pub fn request_background_color() -> Command {
+    escape::osc("11;?")
+}
+
 /// Which clipboard selection an OSC 52 command targets.
 ///
 /// This enum is `#[non_exhaustive]`: OSC 52 defines further single-letter selection targets (`s`

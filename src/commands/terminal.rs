@@ -69,6 +69,110 @@ pub fn request_status() -> Command {
     escape::csi("5", 'n')
 }
 
+/// Requests Primary Device Attributes (DA1).
+///
+/// This encodes the ECMA-48 request `CSI c`, emitted as `b"\x1b[c"`. Terminals answer with
+/// `CSI ? … c`. In a capability probe DA1 is written **last**, as a fence: because a terminal
+/// answers queries in order, DA1's reply arriving means every earlier reply that was coming has
+/// arrived (design 03, FM-Q7). DA1 is a fence, not a feature oracle — its presence proves nothing
+/// about features (FM-C4).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a response,
+/// route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_primary_device_attributes());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[c");
+/// ```
+#[must_use]
+pub fn request_primary_device_attributes() -> Command {
+    escape::csi("", 'c')
+}
+
+/// Requests the terminal name and version (XTVERSION).
+///
+/// This encodes `CSI > q`, emitted as `b"\x1b[>q"`. Terminals answer with a DCS string
+/// `DCS > | name version ST`, which qwertty parses into an
+/// [`XtVersionReport`](crate::report::XtVersionReport).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a response,
+/// route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_xtversion());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[>q");
+/// ```
+#[must_use]
+pub fn request_xtversion() -> Command {
+    escape::csi(">", 'q')
+}
+
+/// Requests the state of a DEC private mode (DECRQM).
+///
+/// This encodes the private-mode DECRQM request `CSI ? mode $ p`. For mode 2026 it emits
+/// `b"\x1b[?2026$p"`. Terminals answer with a DEC private mode report `CSI ? mode ; value $ y`,
+/// which qwertty parses into a [`DecPrivateModeReport`](crate::report::DecPrivateModeReport). The
+/// reply carries the same mode number as the query, which is the discriminator that keeps two
+/// concurrent DECRQM queries from cross-completing (FM-Q10).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a response,
+/// route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_dec_private_mode(2026));
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?2026$p");
+/// ```
+#[must_use]
+pub fn request_dec_private_mode(mode: u16) -> Command {
+    // `$` is the DECRQM intermediate byte, emitted between the parameters and the `p` final byte.
+    escape::csi(format!("?{mode}$"), 'p')
+}
+
+/// Requests the terminal's current kitty keyboard flags (`CSI ? u`).
+///
+/// This is a probe-oriented alias for [`query_kitty_keyboard_flags`]: it encodes the same `CSI ? u`
+/// query the terminal answers with `CSI ? flags u`, named consistently with the other
+/// `request_*` probe helpers. The verify-after-push handshake uses
+/// [`query_kitty_keyboard_flags`]; a capability probe that only reads the current flags without
+/// pushing uses this name.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_kitty_keyboard_flags());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?u");
+/// ```
+#[must_use]
+pub fn request_kitty_keyboard_flags() -> Command {
+    query_kitty_keyboard_flags()
+}
+
 /// Pushes kitty keyboard progressive-enhancement flags onto the terminal's flags stack.
 ///
 /// This encodes `CSI > flags u`, which asks the terminal to turn on the requested reporting

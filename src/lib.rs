@@ -65,6 +65,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod caps;
 mod command;
 pub mod commands;
 // The correlator is sans-io core, deliberately not feature-gated: design 04 keeps it
@@ -83,6 +84,7 @@ mod terminal;
 #[cfg(all(feature = "tokio", unix))]
 mod tokio_session;
 
+pub use caps::{Capabilities, DeviceAttributes, Rgb};
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use commands::terminal::MouseMode;
 pub use event::{
@@ -90,7 +92,10 @@ pub use event::{
     MouseEventKind, PasteEvent, ResizeEvent, ScrollDirection, SemanticDecoder, TextPayload,
 };
 pub use input::InputBytes;
-pub use report::{CursorPositionReport, TerminalStatus, TerminalStatusReport};
+pub use report::{
+    CursorPositionReport, DecPrivateModeReport, DecPrivateModeState, OscColorKind, OscColorReport,
+    TerminalStatus, TerminalStatusReport, XtVersionReport,
+};
 #[cfg(unix)]
 pub use session::RestoreHandle;
 pub use session::{KittyKeyboardFlags, KittyKeyboardGrant, TerminalSession};

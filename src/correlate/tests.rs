@@ -10,8 +10,53 @@
 use super::*;
 use crate::ProtocolPosition;
 use crate::event::{Key, KeyEvent, SemanticDecoder};
-use crate::report::TerminalStatus;
+use crate::report::{DecPrivateModeState, OscColorKind, TerminalStatus};
 use crate::syntax::SyntaxParser;
+
+/// A representative set of every expectation variant, using distinct discriminators, for the
+/// matrix tests. Two `DecPrivateMode` and two `OscColor` are included with *different*
+/// discriminators so the matrix exercises the FM-Q10 same-variant/different-discriminator case.
+fn all_variants() -> Vec<Expectation> {
+    vec![
+        Expectation::CursorPosition,
+        Expectation::TerminalStatus,
+        Expectation::PrimaryDeviceAttributes,
+        Expectation::KittyKeyboardFlags,
+        Expectation::XtVersion,
+        Expectation::DecPrivateMode { mode: 2026 },
+        Expectation::DecPrivateMode { mode: 2027 },
+        Expectation::OscColor {
+            which: OscColorKind::Foreground,
+        },
+        Expectation::OscColor {
+            which: OscColorKind::Background,
+        },
+    ]
+}
+
+/// Builds an `Event::Syntax` from the single OSC token `bytes` must encode.
+fn osc_event(bytes: &[u8]) -> Event {
+    let mut parser = SyntaxParser::new();
+    let mut tokens = parser.feed(bytes);
+    tokens.extend(parser.finish());
+    assert_eq!(tokens.len(), 1, "expected one token from {bytes:?}");
+    match tokens.into_iter().next().expect("one token") {
+        token @ SyntaxToken::Osc(_) => Event::Syntax(token),
+        other => panic!("expected an OSC token, got {other:?}"),
+    }
+}
+
+/// Builds an `Event::Syntax` from the single DCS token `bytes` must encode.
+fn dcs_event(bytes: &[u8]) -> Event {
+    let mut parser = SyntaxParser::new();
+    let mut tokens = parser.feed(bytes);
+    tokens.extend(parser.finish());
+    assert_eq!(tokens.len(), 1, "expected one token from {bytes:?}");
+    match tokens.into_iter().next().expect("one token") {
+        token @ SyntaxToken::Dcs(_) => Event::Syntax(token),
+        other => panic!("expected a DCS token, got {other:?}"),
+    }
+}
 
 /// Decodes `bytes` to exactly one semantic event, panicking if it is not exactly one.
 fn one_event(bytes: &[u8]) -> Event {
@@ -46,12 +91,7 @@ fn csi_event(bytes: &[u8]) -> Event {
 
 #[test]
 fn distinguishes_is_false_on_identical_pairs() {
-    for expectation in [
-        Expectation::CursorPosition,
-        Expectation::TerminalStatus,
-        Expectation::PrimaryDeviceAttributes,
-        Expectation::KittyKeyboardFlags,
-    ] {
+    for expectation in all_variants() {
         assert!(
             !distinguishes(&expectation, &expectation),
             "{expectation:?} must not distinguish from itself (that is the coalescing case)"
@@ -61,18 +101,13 @@ fn distinguishes_is_false_on_identical_pairs() {
 
 #[test]
 fn distinguishes_is_true_on_every_different_pair() {
-    let variants = [
-        Expectation::CursorPosition,
-        Expectation::TerminalStatus,
-        Expectation::PrimaryDeviceAttributes,
-        Expectation::KittyKeyboardFlags,
-    ];
+    let variants = all_variants();
     for (i, a) in variants.iter().enumerate() {
         for (j, b) in variants.iter().enumerate() {
             if i != j {
                 assert!(
                     distinguishes(a, b),
-                    "{a:?} and {b:?} have disjoint reply shapes and must distinguish"
+                    "{a:?} and {b:?} have disjoint reply shapes/discriminators and must distinguish"
                 );
             }
         }
@@ -80,13 +115,45 @@ fn distinguishes_is_true_on_every_different_pair() {
 }
 
 #[test]
+fn two_different_dec_private_modes_distinguish() {
+    // FM-Q10, the production test: two DECRQM expectations for different modes must distinguish, so
+    // both can be registered in one bundle and each completes only with its own mode's answer.
+    let a = Expectation::DecPrivateMode { mode: 2026 };
+    let b = Expectation::DecPrivateMode { mode: 2027 };
+    assert!(
+        distinguishes(&a, &b),
+        "DecPrivateMode(2026) and DecPrivateMode(2027) must distinguish (FM-Q10)"
+    );
+    // Same mode coalesces (does not distinguish).
+    assert!(!distinguishes(
+        &a,
+        &Expectation::DecPrivateMode { mode: 2026 }
+    ));
+}
+
+#[test]
+fn two_different_osc_colors_distinguish() {
+    let fg = Expectation::OscColor {
+        which: OscColorKind::Foreground,
+    };
+    let bg = Expectation::OscColor {
+        which: OscColorKind::Background,
+    };
+    assert!(
+        distinguishes(&fg, &bg),
+        "OscColor(Foreground) and OscColor(Background) must distinguish"
+    );
+    assert!(!distinguishes(
+        &fg,
+        &Expectation::OscColor {
+            which: OscColorKind::Foreground
+        }
+    ));
+}
+
+#[test]
 fn distinguishes_is_symmetric() {
-    let variants = [
-        Expectation::CursorPosition,
-        Expectation::TerminalStatus,
-        Expectation::PrimaryDeviceAttributes,
-        Expectation::KittyKeyboardFlags,
-    ];
+    let variants = all_variants();
     for a in &variants {
         for b in &variants {
             assert_eq!(
@@ -101,16 +168,10 @@ fn distinguishes_is_symmetric() {
 #[test]
 fn non_distinguishing_pairs_are_all_identical() {
     // The register-reject path (`RegisterError::Ambiguous`) fires only for a non-identical,
-    // non-distinguishing pair. For the current fieldless variants no such pair exists — every
-    // non-distinguishing pair is identical — so this invariant documents *why* register never
-    // rejects today, and why the reject branch first becomes reachable when M3 adds a
-    // discriminator-carrying variant.
-    let variants = [
-        Expectation::CursorPosition,
-        Expectation::TerminalStatus,
-        Expectation::PrimaryDeviceAttributes,
-        Expectation::KittyKeyboardFlags,
-    ];
+    // non-distinguishing pair. Because every matcher requires either a disjoint reply shape or its
+    // own discriminator, no such pair exists — every non-distinguishing pair is identical, and
+    // those coalesce. This documents why register never rejects for the current vocabulary.
+    let variants = all_variants();
     for a in &variants {
         for b in &variants {
             if !distinguishes(a, b) {
@@ -118,6 +179,96 @@ fn non_distinguishing_pairs_are_all_identical() {
             }
         }
     }
+}
+
+// --- FM-Q10: DECRQM discriminator matching --------------------------------------------------
+
+#[test]
+fn decrqm_reply_completes_only_the_matching_mode() {
+    // Two concurrent DECRQM expectations for modes 2026 and 2027. A `?2026;1$y` reply completes
+    // ONLY the 2026 expectation; the 2027 expectation stays pending. This is the exact
+    // cross-completion the prototype got wrong (FM-Q10).
+    let mut correlator = Correlator::new();
+    let m2026 = correlator
+        .register(Expectation::DecPrivateMode { mode: 2026 })
+        .expect("register 2026");
+    let m2027 = correlator
+        .register(Expectation::DecPrivateMode { mode: 2027 })
+        .expect("register 2027");
+
+    let feed = correlator.feed(csi_event(b"\x1b[?2026;1$y"));
+    let Feed::Completed { id, reply } = feed else {
+        panic!("expected the 2026 expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, m2026, "only the 2026 expectation completes");
+    let Reply::DecPrivateMode(report) = reply else {
+        panic!("expected a DecPrivateMode reply");
+    };
+    assert_eq!(report.mode(), 2026);
+    assert_eq!(report.state(), DecPrivateModeState::Set);
+    assert!(
+        correlator.contains(m2027),
+        "the 2027 expectation is untouched by the 2026 reply"
+    );
+
+    // The 2027 answer then completes only 2027.
+    let feed = correlator.feed(csi_event(b"\x1b[?2027;2$y"));
+    assert!(matches!(feed, Feed::Completed { id, .. } if id == m2027));
+}
+
+#[test]
+fn decrqm_reply_for_unregistered_mode_passes_through() {
+    // A DECRQM answer for a mode no expectation is waiting on is ordinary input.
+    let mut correlator = Correlator::new();
+    correlator
+        .register(Expectation::DecPrivateMode { mode: 2026 })
+        .expect("register 2026");
+    let event = csi_event(b"\x1b[?2048;1$y");
+    assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
+}
+
+// --- XTVERSION (DCS-framed) and OSC colour (OSC-framed) matching ----------------------------
+
+#[test]
+fn xtversion_dcs_reply_completes_xtversion_expectation() {
+    let mut correlator = Correlator::new();
+    let id = correlator
+        .register(Expectation::XtVersion)
+        .expect("register xtversion");
+    let feed = correlator.feed(dcs_event(b"\x1bP>|ghostty 1.0.0\x1b\\"));
+    assert!(matches!(feed, Feed::Completed { .. }));
+    let Some(Reply::XtVersion(report)) = correlator.take_reply(id) else {
+        panic!("expected an XtVersion reply");
+    };
+    assert_eq!(report.version(), "ghostty 1.0.0");
+}
+
+#[test]
+fn osc_color_reply_completes_only_the_matching_color() {
+    // An OSC 11 background reply completes only the background expectation, not the foreground one.
+    let mut correlator = Correlator::new();
+    let fg = correlator
+        .register(Expectation::OscColor {
+            which: OscColorKind::Foreground,
+        })
+        .expect("register fg");
+    let bg = correlator
+        .register(Expectation::OscColor {
+            which: OscColorKind::Background,
+        })
+        .expect("register bg");
+
+    // A background report (OSC 11), ST-terminated.
+    let feed = correlator.feed(osc_event(b"\x1b]11;rgb:1a1a/2b2b/3c3c\x1b\\"));
+    let Feed::Completed { id, .. } = feed else {
+        panic!("expected the background expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, bg, "only the background colour expectation completes");
+    assert!(correlator.contains(fg), "foreground stays pending");
+
+    // A foreground report (OSC 10), BEL-terminated (FM-P9: both terminators accepted).
+    let feed = correlator.feed(osc_event(b"\x1b]10;rgb:ffff/ffff/ffff\x07"));
+    assert!(matches!(feed, Feed::Completed { id, .. } if id == fg));
 }
 
 // --- basic matching -------------------------------------------------------------------------

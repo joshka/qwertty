@@ -47,6 +47,8 @@ That behavior applies to the current live query helpers:
   `CSI ? flags u` granted-flags report (verify-after-push). Unlike the other two, an unanswered
   query is reported as an *unknown* grant rather than a timeout error, and the granted flags are
   recorded in the session's mode ledger so `leave` pops them.
+- `probe_capabilities`, which sends a whole bundle of capability queries plus a trailing DA1 fence
+  in one write and waits one deadline (see the section below).
 
 This means an application loop can interleave ordinary event reads and narrow typed queries without
 having to rebuild routing state around each request:
@@ -71,8 +73,55 @@ session.leave().await
 # }
 ```
 
-qwertty still does not expose a generic public query router, concurrent live queries, or capability
-probing. Keep live query use narrow and session-owned.
+qwertty still does not expose a generic public query router or concurrent live queries. Keep live
+query use narrow and session-owned.
+
+## The Capability Probe Bundle (DA1 Fence)
+
+`probe_capabilities` is the batched capability probe every serious terminal consumer independently
+builds. It writes one buffer of queries — XTVERSION (`CSI > q`), DECRQM for modes 2026/2027/2048/2004
+(`CSI ? mode $ p`), kitty keyboard flags (`CSI ? u`), and OSC 10/11 colour queries — followed by a
+Primary Device Attributes request (`CSI c`) written **last** as a fence, then waits a single
+caller-owned deadline. It never runs implicitly.
+
+Two rules make it correct:
+
+- **The DA1 fence (FM-Q7).** Terminals answer queries in order, so DA1's reply arriving means every
+  earlier reply that was coming has arrived. When the DA1 expectation completes, the probe resolves
+  every other still-pending expectation as *no-reply* — but only *after the entire current decode
+  batch has been fed to the correlator*, so a DA1 reply and a slower reply landing in the same
+  `read()` both land before the fence acts. A fully silent terminal (no DA1 either) costs one
+  timeout total, not one per query.
+- **Unknown is not unsupported (FM-C4).** The returned `Capabilities` has an `Option<T>` per finding;
+  `None` means *unknown*, never *unsupported*. A silent terminal, or a multiplexer that swallowed
+  the queries, yields an all-`None` result. DA1 is a fence, not a feature oracle — its presence
+  proves nothing about features, and its silence means the whole probe is unknown. A DECRQM
+  "mode not recognized" answer is also `None` for that field.
+
+Typeahead typed during the probe is preserved: non-reply input passes through as ordinary events
+buffered for later `next_event` delivery, in arrival order. A probe never eats typeahead (FM-Q1).
+
+This slice returns the minimal typed `Capabilities`; a later slice adds per-finding evidence
+provenance, terminal identity, and environment-based inference. For a runnable example see
+`examples/probe_capabilities.rs` in the repository.
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::TokioTerminalSession;
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+
+// One write, one deadline; None fields are unknown, not unsupported.
+let caps = session.probe_capabilities(Duration::from_millis(150)).await?;
+if caps.synchronized_output == Some(true) {
+    // safe to emit mode-2026 framing
+}
+
+session.leave().await
+# }
+```
 
 See [Checked-In Examples](crate::docs#checked-in-examples) for a durable index of the runnable
 Tokio ownership and query-routing examples shipped with the crate.

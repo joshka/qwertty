@@ -216,6 +216,26 @@ fn enable_modes_write_in_order_and_leave_undoes_in_reverse() {
 }
 
 #[test]
+fn enable_in_band_resize_writes_2048_and_leave_undoes_it() {
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .enable_in_band_resize()
+        .expect("enable in-band resize")
+        .flush()
+        .expect("flush");
+
+    // The enable wrote CSI ? 2048 h immediately.
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?2048h",);
+
+    session.leave().expect("leave fake session");
+
+    // Leave undid the mode with CSI ? 2048 l.
+    assert_eq!(fake_terminal.output().expect("output"), b"\x1b[?2048l",);
+}
+
+#[test]
 fn re_entering_replays_enabled_modes() {
     use qwertty::commands::terminal::MouseMode;
 

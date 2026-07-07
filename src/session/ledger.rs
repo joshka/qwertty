@@ -54,6 +54,12 @@ pub(crate) enum ModeKind {
     Focus,
     /// Bracketed-paste mode (2004): apply sets `CSI ? 2004 h`, undo resets `CSI ? 2004 l`.
     BracketedPaste,
+    /// In-band resize mode (2048): apply sets `CSI ? 2048 h`, undo resets `CSI ? 2048 l`.
+    ///
+    /// With it on, the terminal reports every size change in band as `CSI 48 ; … t`, decoded to
+    /// [`ResizeEvent`](crate::ResizeEvent), so an app can avoid `SIGWINCH` entirely (design 01,
+    /// R-IN-8). Like the other byte-based mode entries, its reset flows into the emergency blob.
+    InBandResize,
 }
 
 #[derive(Debug)]

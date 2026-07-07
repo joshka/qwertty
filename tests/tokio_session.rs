@@ -16,8 +16,8 @@ use std::path::PathBuf;
 
 use qwertty::report::TerminalStatus;
 use qwertty::{
-    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, ProtocolPosition,
-    SyntaxParser, SyntaxToken, TokioTerminalSession, commands,
+    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, PixelSize,
+    ProtocolPosition, SyntaxParser, SyntaxToken, TerminalSize, TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
@@ -178,6 +178,198 @@ async fn tokio_session_enables_modes_and_decodes_their_events() {
     // The reverse-order reset on leave and the emergency blob are covered by the sync session PTY
     // tests, which do not race the session-fd close the way a post-leave master read would here.
     session.leave().await.expect("leave Tokio session");
+}
+
+/// Builds an in-band resize report `CSI 48 ; rows ; cols ; hp ; wp t` (mode 2048).
+fn resize_report(rows: u16, cols: u16, height_px: u16, width_px: u16) -> Vec<u8> {
+    format!("\x1b[48;{rows};{cols};{height_px};{width_px}t").into_bytes()
+}
+
+/// A resize storm — several in-band resize reports back to back with no other input — collapses to
+/// exactly one `Event::Resize` carrying the final geometry (design 01 §resize, R-IN-8, FM-G2).
+#[tokio::test]
+async fn tokio_session_coalesces_a_resize_storm_to_the_final_geometry() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    // A burst of four resize reports; only the last geometry (100x40) should survive, and its
+    // report carries pixel geometry so the surviving event keeps it.
+    let mut burst = Vec::new();
+    burst.extend(resize_report(30, 80, 0, 0));
+    burst.extend(resize_report(31, 82, 0, 0));
+    burst.extend(resize_report(35, 90, 0, 0));
+    burst.extend(resize_report(40, 100, 400, 800));
+    master.write_all(&burst).expect("write resize burst");
+
+    // Let the whole burst settle into one read so all reports buffer before delivery.
+    sleep(Duration::from_millis(150)).await;
+
+    // A terminating keystroke lets us assert the queue held nothing but the one coalesced resize.
+    master.write_all(b"x").expect("write sentinel key");
+    sleep(Duration::from_millis(50)).await;
+
+    let first = timeout(Duration::from_secs(1), session.next_event())
+        .await
+        .expect("next_event did not hang")
+        .expect("first event");
+    let resize = first.resize_event().expect("first event is a resize");
+    assert_eq!(resize.cells(), TerminalSize::new(100, 40));
+    assert_eq!(resize.pixels(), Some(PixelSize::new(800, 400)));
+
+    // The very next event is the sentinel key: every earlier resize was dropped, none duplicated.
+    let second = timeout(Duration::from_secs(1), session.next_event())
+        .await
+        .expect("next_event did not hang")
+        .expect("second event");
+    assert_eq!(second, text_event('x'));
+
+    session.leave().await.expect("leave Tokio session");
+}
+
+/// A resize storm interleaved with keystrokes delivers every keystroke in original order and
+/// exactly one resize reflecting the final geometry, positioned where the last resize sat.
+///
+/// Input `R1 a R2 b R3` must deliver `a b R3` — the ordering invariant (design 01 §resize).
+#[tokio::test]
+async fn tokio_session_coalescing_preserves_interleaved_keys_in_order() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    let mut burst = Vec::new();
+    burst.extend(resize_report(30, 80, 0, 0)); // R1
+    burst.extend(b"a"); // key a
+    burst.extend(resize_report(31, 85, 0, 0)); // R2
+    burst.extend(b"b"); // key b
+    burst.extend(resize_report(32, 90, 0, 0)); // R3 (final geometry)
+    master.write_all(&burst).expect("write interleaved burst");
+
+    sleep(Duration::from_millis(150)).await;
+    // A trailing sentinel proves the resize sits before it, in R3's position.
+    master.write_all(b"c").expect("write sentinel key");
+    sleep(Duration::from_millis(50)).await;
+
+    let mut delivered = Vec::new();
+    for _ in 0..4 {
+        let event = timeout(Duration::from_secs(1), session.next_event())
+            .await
+            .expect("next_event did not hang")
+            .expect("event");
+        delivered.push(event);
+    }
+
+    // Keys a and b keep their order; exactly one resize survives, carrying R3's geometry, in R3's
+    // position (after b, before the sentinel c). R1 and R2 are dropped.
+    assert_eq!(delivered[0], text_event('a'));
+    assert_eq!(delivered[1], text_event('b'));
+    let resize = delivered[2]
+        .resize_event()
+        .expect("third event is the resize");
+    assert_eq!(resize.cells(), TerminalSize::new(90, 32));
+    assert_eq!(delivered[3], text_event('c'));
+
+    session.leave().await.expect("leave Tokio session");
+}
+
+/// A single resize with no other resize behind it passes through unchanged — coalescing never
+/// drops the only resize.
+#[tokio::test]
+async fn tokio_session_delivers_a_lone_resize_unchanged() {
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    master
+        .write_all(&resize_report(24, 80, 480, 640))
+        .expect("write single resize");
+
+    let event = timeout(Duration::from_secs(1), session.next_event())
+        .await
+        .expect("next_event did not hang")
+        .expect("resize event");
+    let resize = event.resize_event().expect("a resize event");
+    assert_eq!(resize.cells(), TerminalSize::new(80, 24));
+    assert_eq!(resize.pixels(), Some(PixelSize::new(640, 480)));
+
+    session.leave().await.expect("leave Tokio session");
+}
+
+/// A mouse-scroll burst is NEVER coalesced (FM-V6): every wheel tick is delivered, deliberately
+/// opposite to the resize policy. This is the guard against accidentally coalescing the wrong kind.
+#[tokio::test]
+async fn tokio_session_never_coalesces_a_scroll_burst() {
+    use qwertty::event::{MouseEventKind, ScrollDirection};
+
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    // Five identical scroll-up ticks (`CSI < 64 ; 5 ; 5 M`). All five must arrive.
+    let mut burst = Vec::new();
+    for _ in 0..5 {
+        burst.extend_from_slice(b"\x1b[<64;5;5M");
+    }
+    master.write_all(&burst).expect("write scroll burst");
+    sleep(Duration::from_millis(150)).await;
+    master.write_all(b"z").expect("write sentinel key");
+    sleep(Duration::from_millis(50)).await;
+
+    for _ in 0..5 {
+        let event = timeout(Duration::from_secs(1), session.next_event())
+            .await
+            .expect("next_event did not hang")
+            .expect("scroll event");
+        let mouse = event.mouse_event().expect("a mouse event");
+        assert_eq!(mouse.kind(), MouseEventKind::Scroll(ScrollDirection::Up));
+    }
+    // The sentinel follows the fifth tick: no scroll tick was dropped or merged.
+    let sentinel = timeout(Duration::from_secs(1), session.next_event())
+        .await
+        .expect("next_event did not hang")
+        .expect("sentinel event");
+    assert_eq!(sentinel, text_event('z'));
+
+    session.leave().await.expect("leave Tokio session");
+}
+
+/// Enabling in-band resize over a headless `FakeDevice` writes the enable bytes, records the ledger
+/// entry, and leaving undoes it (`CSI ? 2048 h` on enable, `CSI ? 2048 l` on leave).
+#[tokio::test]
+async fn tokio_session_in_band_resize_lifecycle_over_fake_device() {
+    let (device, mut peer) = FakeDevice::open().expect("open fake device");
+    let mut session =
+        TokioTerminalSession::from_device(device).expect("open Tokio session over fake device");
+
+    session
+        .enable_in_band_resize()
+        .await
+        .expect("enable in-band resize");
+    session.flush().await.expect("flush");
+
+    // The enable bytes reached the device.
+    let enable = peer.output().expect("read enable output");
+    assert!(
+        enable.windows(8).any(|w| w == b"\x1b[?2048h"),
+        "enable wrote CSI ? 2048 h, got {enable:?}",
+    );
+
+    session.leave().await.expect("leave Tokio session");
+
+    // Leave undid the mode with CSI ? 2048 l.
+    let undo = peer.output().expect("read undo output");
+    assert!(
+        undo.windows(8).any(|w| w == b"\x1b[?2048l"),
+        "leave wrote CSI ? 2048 l, got {undo:?}",
+    );
 }
 
 #[tokio::test]

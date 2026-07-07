@@ -42,6 +42,8 @@ const SGR_MOUSE: u16 = 1006;
 const FOCUS: u16 = 1004;
 /// The bracketed-paste DEC private mode (2004).
 const BRACKETED_PASTE: u16 = 2004;
+/// The in-band resize DEC private mode (2048).
+const IN_BAND_RESIZE: u16 = 2048;
 
 /// Requests terminal status.
 ///
@@ -281,4 +283,45 @@ pub fn enable_bracketed_paste() -> Command {
 #[must_use]
 pub fn disable_bracketed_paste() -> Command {
     Command::raw(dec_reset(BRACKETED_PASTE))
+}
+
+/// Enables in-band resize reporting (DEC 2048): `CSI ? 2048 h`.
+///
+/// With it on, the terminal reports every size change in band as `CSI 48 ; height ; width ;
+/// height_px ; width_px t`, which qwertty decodes to [`ResizeEvent`](crate::ResizeEvent). This is
+/// the preferred resize source where available, letting an application avoid the out-of-band
+/// `SIGWINCH` signal entirely (R-IN-8, design 01).
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::enable_in_band_resize());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?2048h");
+/// ```
+#[must_use]
+pub fn enable_in_band_resize() -> Command {
+    Command::raw(dec_set(IN_BAND_RESIZE))
+}
+
+/// Disables in-band resize reporting (DEC 2048): `CSI ? 2048 l`.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::disable_in_band_resize());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[?2048l");
+/// ```
+#[must_use]
+pub fn disable_in_band_resize() -> Command {
+    Command::raw(dec_reset(IN_BAND_RESIZE))
 }

@@ -60,6 +60,40 @@ impl TerminalSize {
     }
 }
 
+/// Terminal dimensions measured in pixels.
+///
+/// This is the optional pixel geometry an in-band resize report (DEC mode 2048) can carry
+/// alongside the cell dimensions: a report whose pixel fields are nonzero decodes to a
+/// [`ResizeEvent`](crate::event::ResizeEvent) with `Some(PixelSize)`, and one whose pixel fields
+/// are zero (or absent) decodes with `None`. The syntax mirrors the wire order width-then-height
+/// is *not* used here — the accessors name the axis so callers never have to remember the report's
+/// field order.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PixelSize {
+    width: u16,
+    height: u16,
+}
+
+impl PixelSize {
+    /// Creates a pixel size from width and height in pixels.
+    #[must_use]
+    pub const fn new(width: u16, height: u16) -> Self {
+        Self { width, height }
+    }
+
+    /// Returns the terminal width in pixels.
+    #[must_use]
+    pub const fn width(self) -> u16 {
+        self.width
+    }
+
+    /// Returns the terminal height in pixels.
+    #[must_use]
+    pub const fn height(self) -> u16 {
+        self.height
+    }
+}
+
 /// Error returned by terminal device operations.
 #[derive(Debug)]
 #[non_exhaustive]

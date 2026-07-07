@@ -102,6 +102,34 @@ For a small checked-in example centered on decoded event delivery through `next_
 For a small checked-in example that matches live query success, `Error::QueryTimeout`, and
 `Error::ReadTerminal` explicitly, see `examples/tokio_query_error_handling.rs` in the repository.
 
+## Resize Delivery: In-Band (2048) Versus SIGWINCH
+
+There are two resize sources, and in-band is preferred wherever the terminal supports it.
+
+- **In-band resize (mode 2048), preferred.** `TokioTerminalSession::enable_in_band_resize` turns on
+  DEC mode 2048; the terminal then reports every size change *in the input stream* as
+  `CSI 48 ; … t`, decoded to `Event::Resize` and delivered through `next_event`. This needs no
+  signal handler, carries pixel geometry when the terminal reports it, and orders correctly relative
+  to keystrokes. The session resets mode 2048 on `leave`, drop, and the emergency path like any other
+  ledger mode.
+- **SIGWINCH stream, the fallback.** For terminals without mode 2048, `resize_stream` returns a
+  `ResizeStream` — an awaitable helper with an `async fn next_resize()` that yields a cell-only
+  `Event::Resize` on each `SIGWINCH`. qwertty installs no signal handler of its own (that is the
+  application's business); the stream just owns a Tokio `SIGWINCH` listener and reads the new size.
+  Because it does not borrow the session, it can sit in a `tokio::select!` alongside `next_event`.
+  Prefer in-band resize where available and treat this as the fallback.
+
+**Resize events coalesce, deliberately opposite to scroll.** When several resize events are pending
+in the delivery queue, `next_event` collapses them to one `Event::Resize` carrying the final
+geometry: a front resize is dropped whenever a later resize is still queued behind it, so a resize
+storm delivers exactly one event (the last, in its position) while every non-resize event keeps its
+order and identity (`R1 K1 R2 K2 R3` delivers `K1 K2 R3`). Mouse and scroll events are **never**
+coalesced (FM-V6): a burst of wheel ticks delivers every tick, because per-terminal tick ratios
+carry information the application must see. Only resize collapses.
+
+For a checked-in example that enables in-band resize and selects it against the `SIGWINCH` fallback,
+see `examples/resize_events.rs` in the repository.
+
 ## Cancellation And Timeouts
 
 Cancellation is defined at the session boundary.
@@ -235,8 +263,7 @@ qwertty does not yet provide:
 
 - multiple simultaneous live queries;
 - a public generic query registry;
-- paste parsing or Escape-timeout policy;
-- resize event delivery;
+- Escape-timeout policy;
 - subprocess helpers that reopen sessions automatically;
 - non-Tokio async runtime support.
 

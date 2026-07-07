@@ -28,14 +28,15 @@ use std::time::Duration;
 
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use tokio::io::unix::AsyncFd;
+use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::time::{Instant, timeout_at};
 
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::{
-    Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, SemanticDecoder, Terminal,
-    TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
+    Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, ResizeEvent,
+    SemanticDecoder, Terminal, TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
 
 const DEV_TTY: &str = "/dev/tty";
@@ -374,6 +375,21 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// With no query registered the correlator passes everything through, so this is an
     /// ordinary decoded event stream.
     ///
+    /// # Resize coalescing (design 01 §resize, R-IN-8, FM-G2)
+    ///
+    /// A resize storm collapses to a single [`Event::Resize`] carrying the **final** geometry,
+    /// while every non-resize event keeps its order and identity. Precisely: when the event at
+    /// the front of the queue is a resize and a *later* resize is still buffered behind it, the
+    /// front resize is superseded and dropped; the surviving resize is the last one in the
+    /// burst, delivered in its own position relative to the surrounding input. A queue of `R1
+    /// K1 R2 K2 R3` therefore delivers `K1 K2 R3` — every keystroke in order, exactly one
+    /// resize reflecting the final geometry.
+    ///
+    /// This is deliberately the opposite of the mouse and scroll policy, which never coalesces
+    /// (FM-V6): a burst of scroll ticks delivers every tick, because per-terminal tick ratios carry
+    /// information an application must be able to see. Only resize collapses, and only here in
+    /// delivery — the decoder itself emits one event per report.
+    ///
     /// # Cancellation
     ///
     /// Cancel-safe. The decoder state, the correlator, and the pending-event queue all live on the
@@ -386,13 +402,27 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// another event is available.
     pub async fn next_event(&mut self) -> terminal::Result<Event> {
         loop {
-            if let Some(event) = self.pending.pop_front() {
+            if let Some(event) = self.take_coalesced_event() {
                 return Ok(event);
             }
 
             let events = self.read_events().await?;
             self.buffer_events(events);
         }
+    }
+
+    /// Pops the next event from the pending queue, applying resize coalescing.
+    ///
+    /// Resize events coalesce to the burst's last one (design 01 §resize, FM-G2): a front resize is
+    /// dropped whenever a later resize is still buffered behind it, so a resize storm collapses to
+    /// one `Resize` with the final geometry without reordering or dropping any non-resize event.
+    /// Non-resize events (keys, mouse, scroll, focus, paste, syntax) are returned unchanged and in
+    /// order — the never-coalesce policy for mouse and scroll (FM-V6) falls out of this: they are
+    /// simply never the event the resize rule drops.
+    ///
+    /// Returns `None` only when the queue is empty.
+    fn take_coalesced_event(&mut self) -> Option<Event> {
+        take_coalesced_event(&mut self.pending)
     }
 
     /// Requests and reads the current terminal cursor position.
@@ -618,6 +648,30 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             .await?;
         self.flush().await?;
         self.session.record_bracketed_paste_enabled();
+        Ok(())
+    }
+
+    /// Enables in-band resize reporting (mode 2048).
+    ///
+    /// Writes `CSI ? 2048 h`, flushes, and records the change so teardown resets it. Size changes
+    /// then arrive as [`Event::Resize`] through [`next_event`](Self::next_event), which
+    /// **coalesces** a resize storm to one event carrying the final geometry (design 01
+    /// §resize, FM-G2).
+    ///
+    /// In-band resize is the preferred resize source: prefer it to the [`resize_stream`] `SIGWINCH`
+    /// fallback wherever the terminal supports mode 2048, because it delivers geometry in the input
+    /// stream with no signal handler and no `size()` round-trip (R-IN-8, design 01).
+    ///
+    /// [`resize_stream`]: Self::resize_stream
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the enable bytes.
+    pub async fn enable_in_band_resize(&mut self) -> terminal::Result<()> {
+        self.command(commands::terminal::enable_in_band_resize())
+            .await?;
+        self.flush().await?;
+        self.session.record_in_band_resize_enabled();
         Ok(())
     }
 
@@ -885,6 +939,58 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         self.session.leave()
     }
 
+    /// Returns an awaitable [`ResizeStream`] that yields a synthetic resize on every `SIGWINCH`.
+    ///
+    /// This is the **fallback** resize source, for terminals that do not support in-band resize
+    /// (mode 2048). Prefer [`enable_in_band_resize`](Self::enable_in_band_resize) wherever it is
+    /// available: in-band resize delivers geometry (including pixels) in the input stream through
+    /// [`next_event`](Self::next_event) with no signal handling at all, and it coalesces storms.
+    ///
+    /// The stream is deliberately **thin and independent**: qwertty installs no signal handler of
+    /// its own (design 01). It owns a Tokio [`SignalKind::window_change`] listener and a private
+    /// duplicate of the terminal descriptor; on each `SIGWINCH` it reads the current size with an
+    /// `ioctl` and yields a cell-only [`ResizeEvent`] (a `SIGWINCH` carries no pixel geometry, so
+    /// [`ResizeEvent::pixels`] is `None`). Because it does not borrow the session, an application
+    /// can `select!` it alongside [`next_event`](Self::next_event):
+    ///
+    /// ```no_run
+    /// # async fn run() -> qwertty::Result<()> {
+    /// use qwertty::{Event, TokioTerminalSession};
+    ///
+    /// let mut session = TokioTerminalSession::open()?;
+    /// let mut resizes = session.resize_stream()?;
+    /// loop {
+    ///     tokio::select! {
+    ///         event = session.next_event() => { let _event: Event = event?; }
+    ///         resize = resizes.next_resize() => {
+    ///             let resize = resize?;
+    ///             let _ = resize.cells();
+    ///         }
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// Coalescing note: unlike the in-band path, the `SIGWINCH` fallback relies on `SIGWINCH`'s own
+    /// signal coalescing plus the application's read cadence; a burst of size changes between two
+    /// `next_resize()` awaits collapses to one signal delivery reporting the final size, so the
+    /// stream naturally yields the latest geometry rather than every intermediate one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the `SIGWINCH` listener cannot be installed or the descriptor cannot
+    /// be duplicated for size reads.
+    pub fn resize_stream(&self) -> terminal::Result<ResizeStream> {
+        let borrowed = self.session.device().as_fd().ok_or_else(|| {
+            terminal::Error::unsupported("SIGWINCH resize stream", "device without a fd")
+        })?;
+        let size_fd = rustix::io::dup(borrowed)
+            .map_err(io::Error::from)
+            .map_err(terminal::Error::open_terminal)?;
+        let signal = signal(SignalKind::window_change()).map_err(terminal::Error::read_terminal)?;
+        Ok(ResizeStream { signal, size_fd })
+    }
+
     /// Restores the device status flags captured before this session set the descriptor
     /// non-blocking.
     ///
@@ -914,6 +1020,65 @@ impl<D: TerminalDevice> Drop for TokioTerminalSession<D> {
     }
 }
 
+/// An awaitable `SIGWINCH`-driven resize source — the fallback for terminals without mode 2048.
+///
+/// Obtain one from [`TokioTerminalSession::resize_stream`]. It is an independent value that does
+/// not borrow the session (design 01: qwertty installs no handler itself, only exposes a stream the
+/// app selects on), so it can sit in a `tokio::select!` alongside
+/// [`next_event`](TokioTerminalSession::next_event). It holds a Tokio `SIGWINCH` listener and a
+/// private duplicate of the terminal descriptor used to read the new size.
+///
+/// # Shape choice
+///
+/// This is a small helper type with an `async fn` [`next_resize`](Self::next_resize) rather than a
+/// full `futures::Stream` implementation. The awaitable-method shape keeps the type dependency-free
+/// (no `futures`/`Stream` in the public API before the vocabulary freeze) and is all a `select!`
+/// loop needs; a `Stream` impl can be added later without changing this method (design 04). Prefer
+/// in-band resize (mode 2048) where the terminal supports it — this is the fallback.
+#[derive(Debug)]
+pub struct ResizeStream {
+    /// The Tokio `SIGWINCH` (`SIGWINCH` = window change) listener. Tokio owns the actual signal
+    /// registration; qwertty installs no handler of its own.
+    signal: Signal,
+    /// A private duplicate of the terminal descriptor, used only for the `tcgetwinsize` size read.
+    ///
+    /// A dup shares the open file description, so the size it measures is the session's terminal
+    /// size; keeping a separate owned fd is what lets this stream avoid borrowing the session.
+    size_fd: OwnedFd,
+}
+
+impl ResizeStream {
+    /// Awaits the next `SIGWINCH` and yields the terminal's new size as a [`ResizeEvent`].
+    ///
+    /// On each `SIGWINCH` this reads the current size with a `tcgetwinsize` `ioctl` on its private
+    /// descriptor and returns a **cell-only** resize event: a `SIGWINCH` carries no pixel geometry,
+    /// so [`ResizeEvent::pixels`] is `None`. Because Tokio coalesces pending `SIGWINCH` deliveries,
+    /// a burst of size changes between two awaits yields one event reporting the final size.
+    ///
+    /// Cancel-safe: dropping the future mid-await abandons only the wait; the listener and
+    /// descriptor live on this value, so the next call resumes cleanly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::GetTerminalSize`] when the size `ioctl` fails, or a read error if
+    /// the signal stream closes (which does not happen for `SIGWINCH` in normal operation).
+    pub async fn next_resize(&mut self) -> terminal::Result<ResizeEvent> {
+        match self.signal.recv().await {
+            Some(()) => {
+                let size = rustix::termios::tcgetwinsize(&self.size_fd)
+                    .map_err(io::Error::from)
+                    .map_err(terminal::Error::get_terminal_size)?;
+                let cells = TerminalSize::new(size.ws_col, size.ws_row);
+                Ok(ResizeEvent::new(cells, None))
+            }
+            None => Err(terminal::Error::read_terminal(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "SIGWINCH signal stream closed",
+            ))),
+        }
+    }
+}
+
 /// Writes bytes to the readiness-registered descriptor with one `write(2)`, returning the count.
 ///
 /// I/O runs on the fd Tokio registered — the dup that shares the device's open file description —
@@ -940,6 +1105,28 @@ fn is_unexpected_eof(error: &terminal::Error) -> bool {
         error,
         terminal::Error::ReadTerminal { source } if source.kind() == ErrorKind::UnexpectedEof
     )
+}
+
+/// Returns whether an event is a resize (the only coalesced event kind — design 01 §resize).
+fn is_resize(event: &Event) -> bool {
+    matches!(event, Event::Resize(_))
+}
+
+/// Pops the next event from a pending queue, applying resize coalescing (design 01 §resize, FM-G2).
+///
+/// A front resize is dropped whenever a later resize is still queued behind it, so a resize storm
+/// collapses to the burst's last resize — carrying the final geometry, in that resize's position —
+/// while every non-resize event keeps its order and identity. This is the ordering invariant, and
+/// the never-coalesce mouse/scroll policy (FM-V6) falls out of it: only resize events are ever the
+/// event this rule drops. Returns `None` only when the queue is empty.
+fn take_coalesced_event(pending: &mut VecDeque<Event>) -> Option<Event> {
+    while let Some(event) = pending.pop_front() {
+        if is_resize(&event) && pending.iter().any(is_resize) {
+            continue;
+        }
+        return Some(event);
+    }
+    None
 }
 
 /// Builds the error for the impossible "wrong reply type completed a typed query" case.
@@ -1012,4 +1199,68 @@ fn controlling_terminal_via_stdin() -> Option<(File, PathBuf)> {
         );
     let device = File::from(rustix::io::dup(stdin).ok()?);
     Some((device, path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::ResizeEvent;
+    use crate::{Key, KeyEvent, TerminalSize};
+
+    /// A resize event with the given column geometry (rows fixed), for ordering assertions.
+    fn resize(cols: u16) -> Event {
+        Event::Resize(ResizeEvent::new(TerminalSize::new(cols, 24), None))
+    }
+
+    /// A key event carrying a single character, for ordering assertions.
+    fn key(character: char) -> Event {
+        Event::Key(KeyEvent::new(Key::Char(character)))
+    }
+
+    /// Drains a queue through the coalescing rule into the delivered sequence.
+    fn drain(mut queue: VecDeque<Event>) -> Vec<Event> {
+        let mut delivered = Vec::new();
+        while let Some(event) = take_coalesced_event(&mut queue) {
+            delivered.push(event);
+        }
+        delivered
+    }
+
+    #[test]
+    fn a_resize_storm_collapses_to_the_last_geometry() {
+        let queue = VecDeque::from(vec![resize(80), resize(85), resize(90), resize(100)]);
+        assert_eq!(drain(queue), vec![resize(100)]);
+    }
+
+    #[test]
+    fn interleaved_keys_keep_order_and_the_last_resize_survives_in_place() {
+        // R1 a R2 b R3 -> a b R3: keys in order, one resize (final geometry) in R3's position.
+        let queue = VecDeque::from(vec![resize(80), key('a'), resize(85), key('b'), resize(90)]);
+        assert_eq!(drain(queue), vec![key('a'), key('b'), resize(90)]);
+    }
+
+    #[test]
+    fn a_lone_resize_passes_through_unchanged() {
+        let queue = VecDeque::from(vec![key('a'), resize(80), key('b')]);
+        assert_eq!(drain(queue), vec![key('a'), resize(80), key('b')]);
+    }
+
+    #[test]
+    fn a_trailing_resize_after_keys_survives() {
+        // The surviving resize can be the last event overall; nothing after it forces its position.
+        let queue = VecDeque::from(vec![key('a'), resize(70), resize(80)]);
+        assert_eq!(drain(queue), vec![key('a'), resize(80)]);
+    }
+
+    #[test]
+    fn non_resize_events_are_never_coalesced() {
+        // A run of identical key events (stand-ins for scroll ticks) is delivered whole (FM-V6).
+        let queue = VecDeque::from(vec![key('x'), key('x'), key('x')]);
+        assert_eq!(drain(queue), vec![key('x'), key('x'), key('x')]);
+    }
+
+    #[test]
+    fn an_empty_queue_yields_nothing() {
+        assert_eq!(drain(VecDeque::new()), Vec::<Event>::new());
+    }
 }

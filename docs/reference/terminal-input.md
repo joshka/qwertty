@@ -268,6 +268,15 @@ modified-key CSI forms over the syntax layer, and passes everything else through
   the SGR decoder and passes through as lossless syntax rather than panicking or misdecoding.
 - **Focus events.** `CSI I` and `CSI O` (DEC 1004) decode to `Event::Focus(FocusEvent)` with
   `FocusState::Gained` / `FocusState::Lost`.
+- **In-band resize events.** An in-band resize report `CSI 48 ; rows ; cols ; height_px ; width_px t`
+  (DEC 2048) decodes to `Event::Resize(ResizeEvent)`: the cell geometry as a `TerminalSize`, and the
+  pixel geometry as `Some(PixelSize)` when the pixel fields are nonzero (`None` otherwise). The
+  leading `48` is the discriminator — every other XTWINOPS `t` final (window operations qwertty does
+  not decode) passes through as lossless `Event::Syntax` rather than a fake resize. **Resize events
+  coalesce in the async session's delivery**, deliberately opposite to the never-coalesce scroll
+  policy: a resize storm collapses to one `Event::Resize` carrying the final geometry while every
+  non-resize event keeps its order and identity (see
+  [tokio-input-ownership](tokio-input-ownership.md)).
 - **Bracketed paste.** A `ESC [ 200 ~ … ESC [ 201 ~` span (DEC 2004) is captured **at the syntax
   layer** as opaque payload — the bytes between the brackets are *data*, so embedded escape
   sequences are kept verbatim and never tokenized — and decodes to `Event::Paste(PasteEvent)`. Line

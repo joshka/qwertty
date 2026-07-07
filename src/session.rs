@@ -436,6 +436,25 @@ impl<D: TerminalDevice> TerminalSession<D> {
         )
     }
 
+    /// Enables in-band resize reporting (mode 2048).
+    ///
+    /// This writes `CSI ? 2048 h` now and records the change so the session re-applies it on
+    /// `enter` and resets it (`CSI ? 2048 l`) on `leave`/drop/emergency. With it on, the terminal
+    /// reports every size change in band as `CSI 48 ; … t`, decoded to
+    /// [`ResizeEvent`](crate::ResizeEvent) — the preferred resize source where available, letting
+    /// the application avoid `SIGWINCH` (R-IN-8, design 01).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the enable bytes.
+    pub fn enable_in_band_resize(&mut self) -> terminal::Result<&mut Self> {
+        self.record_mode(
+            ModeKind::InBandResize,
+            &commands::terminal::enable_in_band_resize(),
+            &commands::terminal::disable_in_band_resize(),
+        )
+    }
+
     /// Records a byte-based mode entry, writing its enable bytes now and refreshing the emergency
     /// blob so its reset bytes are covered even before the next `enter`.
     fn record_mode(
@@ -515,6 +534,18 @@ impl<D: TerminalDevice> TerminalSession<D> {
             ModeKind::BracketedPaste,
             apply,
             &commands::terminal::disable_bracketed_paste(),
+        );
+    }
+
+    /// Records an already-written in-band resize enable in the ledger (Tokio driver path).
+    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    pub(crate) fn record_in_band_resize_enabled(&mut self) {
+        let mut apply = Vec::new();
+        commands::terminal::enable_in_band_resize().encode(&mut apply);
+        self.record_mode_entry(
+            ModeKind::InBandResize,
+            apply,
+            &commands::terminal::disable_in_band_resize(),
         );
     }
 

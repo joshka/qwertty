@@ -87,7 +87,7 @@ pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use commands::terminal::MouseMode;
 pub use event::{
     Event, FocusEvent, FocusState, Key, KeyEvent, KeyEventKind, Modifiers, MouseButton, MouseEvent,
-    MouseEventKind, PasteEvent, ScrollDirection, SemanticDecoder, TextPayload,
+    MouseEventKind, PasteEvent, ResizeEvent, ScrollDirection, SemanticDecoder, TextPayload,
 };
 pub use input::InputBytes;
 pub use report::{CursorPositionReport, TerminalStatus, TerminalStatusReport};
@@ -98,8 +98,8 @@ pub use syntax::{
     ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
     PasteSequence, StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
 };
-pub use terminal::{DeviceMode, Error, Result, Terminal, TerminalDevice, TerminalSize};
+pub use terminal::{DeviceMode, Error, PixelSize, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};
 #[cfg(all(feature = "tokio", unix))]
-pub use tokio_session::TokioTerminalSession;
+pub use tokio_session::{ResizeStream, TokioTerminalSession};

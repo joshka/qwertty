@@ -26,6 +26,9 @@
 //! - SGR (1006) mouse reports (`CSI < b ; x ; y M/m`) to [`MouseEvent`] values — one event per
 //!   report with no scroll coalescing (FM-V6);
 //! - focus reports (`CSI I` / `CSI O`, mode 1004) to [`FocusEvent`] values;
+//! - in-band resize reports (`CSI 48 ; h ; w ; hp ; wp t`, mode 2048) to [`ResizeEvent`] values,
+//!   distinguished from other XTWINOPS `t` finals by the leading `48` (those pass through as
+//!   [`Event::Syntax`]);
 //! - bracketed-paste spans (mode 2004) to [`PasteEvent`] segments with `\r`/`\n` normalization and
 //!   control-byte inspection ([`PasteEvent::contains_control`]);
 //! - a standalone Escape (flushed by the layer above and seen here as a bare [`SyntaxToken::Esc`])
@@ -34,8 +37,7 @@
 //!   sequences, and [`SyntaxToken::Malformed`] — losslessly to [`Event::Syntax`], never a fake
 //!   keypress (design 02's forward-compatibility contract).
 //!
-//! The in-band resize event arrives in a later milestone-M4 slice. The [`Event`] enum is
-//! `#[non_exhaustive]` so it adds without churning existing code.
+//! The [`Event`] enum is `#[non_exhaustive]` so future variants add without churning existing code.
 //!
 //! # Text asymmetry
 //!
@@ -73,12 +75,14 @@ mod key;
 mod kitty;
 mod mouse;
 mod paste;
+mod resize;
 
 pub use focus::{FocusEvent, FocusState};
 pub use key::{Key, KeyEvent, KeyEventKind, Modifiers, TextPayload};
 pub(crate) use kitty::decode_flags_report as decode_kitty_flags_report;
 pub use mouse::{MouseButton, MouseEvent, MouseEventKind, ScrollDirection};
 pub use paste::PasteEvent;
+pub use resize::ResizeEvent;
 
 use crate::syntax::{EscapeSequence, SyntaxParser, SyntaxToken};
 
@@ -91,11 +95,11 @@ const DEL: u8 = 0x7f;
 ///
 /// `Event` is the typed vocabulary above the lossless syntax layer. It produces [`Event::Key`] for
 /// keys, [`Event::Mouse`] for SGR mouse reports, [`Event::Focus`] for focus reports,
-/// [`Event::Paste`] for bracketed-paste segments, and [`Event::Syntax`] for every other complete
-/// token, preserving its bytes for a later layer or the application.
+/// [`Event::Resize`] for in-band resize reports, [`Event::Paste`] for bracketed-paste segments, and
+/// [`Event::Syntax`] for every other complete token, preserving its bytes for a later layer or the
+/// application.
 ///
-/// The enum is `#[non_exhaustive]`. The resize variant arrives in a later milestone-M4 slice; the
-/// vocabulary is pre-freeze until M4 exit (design 08).
+/// The enum is `#[non_exhaustive]`; the vocabulary is pre-freeze until M4 exit (design 08).
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Event {
@@ -105,6 +109,14 @@ pub enum Event {
     Mouse(MouseEvent),
     /// A decoded focus event (mode 1004): the terminal gained or lost focus.
     Focus(FocusEvent),
+    /// A decoded resize event: the terminal's new cell (and optional pixel) geometry.
+    ///
+    /// This arrives from an in-band resize report (mode 2048, `CSI 48 ; … t`) decoded here, or from
+    /// a `SIGWINCH`-driven `size()` read the async session synthesizes — the same event shape from
+    /// both sources (design 01, R-IN-8). Unlike mouse and scroll events, resize events **coalesce**
+    /// in the async session's delivery queue: a storm collapses to one `Resize` with the final
+    /// geometry (FM-G2), deliberately opposite to the never-coalesce mouse policy (FM-V6).
+    Resize(ResizeEvent),
     /// One bounded segment of a decoded bracketed paste (mode 2004).
     ///
     /// A small paste is a single `Paste` event; a large one arrives as several segments with the
@@ -144,6 +156,15 @@ impl Event {
     pub fn focus_event(&self) -> Option<&FocusEvent> {
         match self {
             Self::Focus(focus) => Some(focus),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`ResizeEvent`] when this is an [`Event::Resize`], or `None` otherwise.
+    #[must_use]
+    pub fn resize_event(&self) -> Option<&ResizeEvent> {
+        match self {
+            Self::Resize(resize) => Some(resize),
             _ => None,
         }
     }
@@ -314,8 +335,9 @@ impl SemanticDecoder {
 ///
 /// The decoders are tried in a fixed order because their recognized shapes are disjoint: a kitty
 /// key ends in `u` or a functional final; an SGR mouse report carries the `<` private marker; focus
-/// is a bare `CSI I`/`CSI O`; and an unmodified arrow is `CSI A`-`D`. The first match wins; if none
-/// matches, the sequence is preserved as syntax (design 02 forward-compatibility).
+/// is a bare `CSI I`/`CSI O`; an in-band resize report is a `CSI 48 ; … t`; and an unmodified arrow
+/// is `CSI A`-`D`. The first match wins; if none matches, the sequence is preserved as syntax
+/// (design 02 forward-compatibility).
 fn map_csi(csi: crate::syntax::ControlSequence, events: &mut Vec<Event>) {
     if let Some(event) = kitty::decode_key(&csi) {
         events.push(Event::Key(event));
@@ -323,6 +345,8 @@ fn map_csi(csi: crate::syntax::ControlSequence, events: &mut Vec<Event>) {
         events.push(Event::Mouse(event));
     } else if let Some(event) = focus::decode(&csi) {
         events.push(Event::Focus(event));
+    } else if let Some(event) = resize::decode(&csi) {
+        events.push(Event::Resize(event));
     } else if let Some(key) = arrow_key(&csi) {
         events.push(Event::Key(KeyEvent::new(key)));
     } else {

@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use qwertty::event::{FocusState, MouseButton, MouseEventKind, ScrollDirection};
 use qwertty::{
-    Event, Key, KeyEvent, KeyEventKind, Modifiers, SemanticDecoder, SyntaxToken, TextPayload,
+    Event, Key, KeyEvent, KeyEventKind, Modifiers, PixelSize, SemanticDecoder, SyntaxToken,
+    TerminalSize, TextPayload,
 };
 
 /// Decodes an input whole (feed then finish), returning every event.
@@ -320,6 +321,14 @@ fn split_corpus() -> Vec<(&'static str, Vec<u8>)> {
         ("mouse_wheel", b"\x1b[<64;5;5M".to_vec()),
         ("mouse_drag", b"\x1b[<32;3;4M".to_vec()),
         ("focus", b"\x1b[I\x1b[O".to_vec()),
+        // In-band resize (mode 2048): cell-only, cell+pixel, and a report interleaved with an
+        // XTWINOPS passthrough — split-equivalence must hold at the event level for these too.
+        ("resize_cells_only", b"\x1b[48;24;80;0;0t".to_vec()),
+        ("resize_with_pixels", b"\x1b[48;40;100;480;800t".to_vec()),
+        (
+            "resize_and_other_t_final",
+            b"\x1b[48;24;80;0;0t\x1b[18t".to_vec(),
+        ),
         ("paste_small", b"\x1b[200~hello\x1b[201~".to_vec()),
         ("paste_crlf", b"\x1b[200~a\r\nb\rc\x1b[201~".to_vec()),
         (
@@ -754,6 +763,62 @@ fn focus_reports_decode_through_decoder() {
     assert_eq!(
         events[1].focus_event().map(qwertty::FocusEvent::state),
         Some(FocusState::Lost)
+    );
+}
+
+#[test]
+fn in_band_resize_cell_only_decodes_through_decoder() {
+    // `CSI 48 ; 24 ; 80 ; 0 ; 0 t` — 24 rows, 80 columns, no pixel geometry.
+    let events = decode_whole(b"\x1b[48;24;80;0;0t");
+    assert_eq!(events.len(), 1);
+    let resize = events[0].resize_event().expect("a resize event");
+    assert_eq!(resize.cells(), TerminalSize::new(80, 24));
+    assert_eq!(resize.pixels(), None);
+}
+
+#[test]
+fn in_band_resize_with_pixels_decodes_through_decoder() {
+    // `CSI 48 ; 40 ; 100 ; 480 ; 800 t` — 40x100 cells, 800x480 pixels.
+    let events = decode_whole(b"\x1b[48;40;100;480;800t");
+    assert_eq!(events.len(), 1);
+    let resize = events[0].resize_event().expect("a resize event");
+    assert_eq!(resize.cells(), TerminalSize::new(100, 40));
+    assert_eq!(resize.pixels(), Some(PixelSize::new(800, 480)));
+}
+
+#[test]
+fn other_t_finals_pass_through_as_syntax_not_resize() {
+    // Only the leading `48` marks an in-band resize; other XTWINOPS `t` sequences pass through as
+    // lossless syntax, never a fake resize (design 02 forward-compatibility).
+    for bytes in [
+        b"\x1b[18t".as_slice(),   // report text-area size
+        b"\x1b[22;0t".as_slice(), // push window title
+        b"\x1b[8;24;80t".as_slice(),
+    ] {
+        let events = decode_whole(bytes);
+        assert_eq!(events.len(), 1, "{bytes:?} did not decode to one event");
+        assert!(
+            events[0].resize_event().is_none(),
+            "{bytes:?} must not decode to a resize",
+        );
+        assert!(
+            matches!(&events[0], Event::Syntax(SyntaxToken::Csi(_))),
+            "{bytes:?} must pass through as CSI syntax",
+        );
+    }
+}
+
+#[test]
+fn in_band_resize_split_across_chunks_decodes_identically() {
+    // Split-equivalence at the event level: the resize report decodes the same fed whole or
+    // byte-at-a-time.
+    let input = b"\x1b[48;40;100;480;800t";
+    let whole = decode_whole(input);
+    let split = decode_chunks(input, 1);
+    assert_eq!(whole, split);
+    assert_eq!(
+        whole[0].resize_event().map(qwertty::ResizeEvent::cells),
+        Some(TerminalSize::new(100, 40))
     );
 }
 

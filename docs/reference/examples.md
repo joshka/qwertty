@@ -44,6 +44,10 @@ point without scanning the repository tree.
   bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
   and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control
   bytes flagged; the session resets all three modes on `leave`.
+- `resize_events.rs`: enable in-band resize (`enable_in_band_resize`, mode 2048) and `select!` its
+  coalesced `Event::Resize` delivery against the `SIGWINCH` fallback stream (`resize_stream`) — a
+  resize storm collapses to one event carrying the final geometry, while scroll and mouse events
+  never coalesce; the session resets mode 2048 on `leave`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to
@@ -81,6 +85,8 @@ point without scanning the repository tree.
 - Start with `tokio_terminal_queries.rs` when you want the smallest end-to-end Tokio ownership
   example.
 - Start with `tokio_input_events.rs` when you need decoded event delivery.
+- Start with `resize_events.rs` when you need resize handling — in-band (mode 2048) with the
+  `SIGWINCH` fallback.
 - Start with `tokio_query_error_handling.rs` when the main question is timeout or read-failure
   handling.
 - Start with the cancellation, late-reply, wrong-report, unmatched-input, and preserved-input

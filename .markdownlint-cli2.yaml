@@ -3,10 +3,14 @@ config:
     line_length: 100
     code_blocks: false
     tables: false
+  table-pipe-style:
+    style: leading_and_trailing
   table-column-style:
     style: aligned
+    aligned_delimiter: true
 globs:
   - "**/*.md"
 ignores:
   - "target"
   - "spikes"
+  - "work"

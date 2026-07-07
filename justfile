@@ -18,6 +18,11 @@ test:
 
 clippy:
     cargo clippy --workspace --all-features --all-targets -- -D warnings
+    # The all-targets, all-features pass above compiles the library with Tokio and with test cfg,
+    # which hides dead code that only a default-feature, non-test build would surface (for example
+    # the Tokio-only consumers of the sans-io correlator). This lints the library exactly as a
+    # default-feature dependency sees it.
+    cargo clippy -p qwertty -- -D warnings
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps

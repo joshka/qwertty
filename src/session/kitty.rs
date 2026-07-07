@@ -106,6 +106,7 @@ impl KittyKeyboardGrant {
     /// Builds a grant from the requested flags and the terminal's answer (`None` when it did not
     /// answer within the caller's budget).
     #[must_use]
+    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
     pub(crate) const fn new(
         requested: KittyKeyboardFlags,
         granted: Option<KittyKeyboardFlags>,

@@ -3,8 +3,9 @@
 //! This is the second of the two decoder layers described in design 02. Where [`SyntaxParser`]
 //! classifies every input byte into a lossless [`SyntaxToken`] by ECMA-48 family,
 //! [`SemanticDecoder`] turns those tokens into the typed [`Event`] vocabulary applications consume:
-//! [`KeyEvent`] values for keys, and lossless [`Event::Syntax`] passthrough for
-//! complete-but-unmapped tokens.
+//! [`KeyEvent`] values for keys, [`MouseEvent`] for SGR mouse reports, [`FocusEvent`] for focus
+//! reports, [`PasteEvent`] for bracketed-paste segments, and lossless [`Event::Syntax`] passthrough
+//! for complete-but-unmapped tokens.
 //!
 //! ```text
 //! bytes -> SyntaxParser -> SyntaxToken -> SemanticDecoder -> Event
@@ -13,24 +14,28 @@
 //! # Scope
 //!
 //! The vocabulary is **pre-freeze until milestone M4 exit** (design 08: `event::` types change
-//! freely before publish and calcify at 0.1). This slice reaches parity with the retired basic
-//! input-decoder path only, mapping:
+//! freely before publish and calcify at 0.1). The decoder maps:
 //!
 //! - printable UTF-8 text to one [`KeyEvent`] per character, with the decoded character carried in
 //!   the event's [`TextPayload`];
 //! - the C0 controls the old decoder named to [`KeyEvent`] values with the mapped [`Key`]
 //!   ([`Key::Enter`], [`Key::Tab`], [`Key::Backspace`], and [`Key::Control`] for the rest);
-//! - the four arrow-key CSI sequences to [`Key::Up`], [`Key::Down`], [`Key::Left`], and
-//!   [`Key::Right`];
+//! - kitty `CSI u` and the legacy modified-key CSI forms to rich [`KeyEvent`] values (functional
+//!   keys, modifiers, press/repeat/release kinds, alternate keys, associated text), and the four
+//!   bare arrow-key CSI sequences to [`Key::Up`]/[`Key::Down`]/[`Key::Left`]/[`Key::Right`];
+//! - SGR (1006) mouse reports (`CSI < b ; x ; y M/m`) to [`MouseEvent`] values — one event per
+//!   report with no scroll coalescing (FM-V6);
+//! - focus reports (`CSI I` / `CSI O`, mode 1004) to [`FocusEvent`] values;
+//! - bracketed-paste spans (mode 2004) to [`PasteEvent`] segments with `\r`/`\n` normalization and
+//!   control-byte inspection ([`PasteEvent::contains_control`]);
 //! - a standalone Escape (flushed by the layer above and seen here as a bare [`SyntaxToken::Esc`])
 //!   to [`Key::Escape`];
-//! - every other complete token — CSI qwertty does not decode yet, OSC/DCS/APC/PM/SOS, other escape
+//! - every other complete token — CSI qwertty does not decode, OSC/DCS/APC/PM/SOS, other escape
 //!   sequences, and [`SyntaxToken::Malformed`] — losslessly to [`Event::Syntax`], never a fake
 //!   keypress (design 02's forward-compatibility contract).
 //!
-//! Kitty `CSI u` key decoding (functional keys, modifiers, event kinds, associated text), mouse,
-//! focus, paste, and resize events arrive in milestone M4. The [`Event`] enum is
-//! `#[non_exhaustive]` so those variants add without churning existing code.
+//! The in-band resize event arrives in a later milestone-M4 slice. The [`Event`] enum is
+//! `#[non_exhaustive]` so it adds without churning existing code.
 //!
 //! # Text asymmetry
 //!
@@ -63,11 +68,17 @@
 //! assert!(decoder.finish().is_empty());
 //! ```
 
+mod focus;
 mod key;
 mod kitty;
+mod mouse;
+mod paste;
 
+pub use focus::{FocusEvent, FocusState};
 pub use key::{Key, KeyEvent, KeyEventKind, Modifiers, TextPayload};
 pub(crate) use kitty::decode_flags_report as decode_kitty_flags_report;
+pub use mouse::{MouseButton, MouseEvent, MouseEventKind, ScrollDirection};
+pub use paste::PasteEvent;
 
 use crate::syntax::{EscapeSequence, SyntaxParser, SyntaxToken};
 
@@ -78,20 +89,31 @@ const DEL: u8 = 0x7f;
 
 /// A decoded semantic input event.
 ///
-/// `Event` is the typed vocabulary above the lossless syntax layer. This slice produces
-/// [`Event::Key`] for the keys the parity scope covers and [`Event::Syntax`] for every other
-/// complete token, preserving its bytes for a later layer or the application.
+/// `Event` is the typed vocabulary above the lossless syntax layer. It produces [`Event::Key`] for
+/// keys, [`Event::Mouse`] for SGR mouse reports, [`Event::Focus`] for focus reports,
+/// [`Event::Paste`] for bracketed-paste segments, and [`Event::Syntax`] for every other complete
+/// token, preserving its bytes for a later layer or the application.
 ///
-/// The enum is `#[non_exhaustive]`. Paste, mouse, focus, and resize variants arrive in milestone
-/// M4; the vocabulary is pre-freeze until then (design 08).
+/// The enum is `#[non_exhaustive]`. The resize variant arrives in a later milestone-M4 slice; the
+/// vocabulary is pre-freeze until M4 exit (design 08).
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Event {
     /// A decoded key event.
     Key(KeyEvent),
+    /// A decoded mouse event (SGR 1006 encoding).
+    Mouse(MouseEvent),
+    /// A decoded focus event (mode 1004): the terminal gained or lost focus.
+    Focus(FocusEvent),
+    /// One bounded segment of a decoded bracketed paste (mode 2004).
+    ///
+    /// A small paste is a single `Paste` event; a large one arrives as several segments with the
+    /// last flagged final (design 02's two-mechanism rule). Line endings are normalized and control
+    /// bytes are inspectable — see [`PasteEvent`].
+    Paste(PasteEvent),
     /// A complete syntax token qwertty does not map to a typed event yet.
     ///
-    /// This is the forward-compatibility passthrough: CSI sequences beyond the arrow keys,
+    /// This is the forward-compatibility passthrough: CSI sequences beyond the ones decoded here,
     /// OSC/DCS/APC/PM/SOS control strings, non-arrow escape sequences, and
     /// [`SyntaxToken::Malformed`] runs all arrive here with their bytes intact, so new protocols
     /// degrade to visible, lossless syntax rather than fake keypresses (design 02).
@@ -104,7 +126,34 @@ impl Event {
     pub fn key_event(&self) -> Option<&KeyEvent> {
         match self {
             Self::Key(key) => Some(key),
-            Self::Syntax(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Returns the [`MouseEvent`] when this is an [`Event::Mouse`], or `None` otherwise.
+    #[must_use]
+    pub fn mouse_event(&self) -> Option<&MouseEvent> {
+        match self {
+            Self::Mouse(mouse) => Some(mouse),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`FocusEvent`] when this is an [`Event::Focus`], or `None` otherwise.
+    #[must_use]
+    pub fn focus_event(&self) -> Option<&FocusEvent> {
+        match self {
+            Self::Focus(focus) => Some(focus),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`PasteEvent`] when this is an [`Event::Paste`], or `None` otherwise.
+    #[must_use]
+    pub fn paste_event(&self) -> Option<&PasteEvent> {
+        match self {
+            Self::Paste(paste) => Some(paste),
+            _ => None,
         }
     }
 
@@ -113,7 +162,7 @@ impl Event {
     pub fn syntax_token(&self) -> Option<&SyntaxToken> {
         match self {
             Self::Syntax(token) => Some(token),
-            Self::Key(_) => None,
+            _ => None,
         }
     }
 }
@@ -143,6 +192,10 @@ impl Event {
 #[derive(Clone, Debug)]
 pub struct SemanticDecoder {
     parser: SyntaxParser,
+    /// Whether the previous bracketed-paste segment ended with an unresolved trailing carriage
+    /// return, so a CRLF split across paste segments still normalizes to a single newline. Only
+    /// ever `true` between segments of the same paste (design 02 paste normalization).
+    paste_pending_cr: bool,
 }
 
 impl Default for SemanticDecoder {
@@ -157,18 +210,21 @@ impl SemanticDecoder {
     pub fn new() -> Self {
         Self {
             parser: SyntaxParser::new(),
+            paste_pending_cr: false,
         }
     }
 
     /// Creates a decoder over a [`SyntaxParser`] with a custom string-payload byte bound.
     ///
     /// The bound is passed straight through to [`SyntaxParser::with_payload_limit`]; it caps how
-    /// many bytes an over-long control-string payload buffers before the token is truncated. It
-    /// does not affect key decoding.
+    /// many bytes an over-long control-string payload buffers before the token is truncated, and
+    /// how many bytes a bracketed paste buffers before it segments (design 02). It does not
+    /// affect key decoding.
     #[must_use]
     pub fn with_payload_limit(payload_limit: usize) -> Self {
         Self {
             parser: SyntaxParser::with_payload_limit(payload_limit),
+            paste_pending_cr: false,
         }
     }
 
@@ -180,7 +236,7 @@ impl SemanticDecoder {
     #[must_use]
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Event> {
         let tokens = self.parser.feed(bytes);
-        map_tokens(tokens)
+        self.map_tokens(tokens)
     }
 
     /// Flushes any pending partial sequence and returns its semantic events.
@@ -192,7 +248,7 @@ impl SemanticDecoder {
     #[must_use]
     pub fn finish(&mut self) -> Vec<Event> {
         let tokens = self.parser.finish();
-        map_tokens(tokens)
+        self.map_tokens(tokens)
     }
 
     /// Returns whether the decoder is holding a **settled** trailing text run.
@@ -217,38 +273,60 @@ impl SemanticDecoder {
             && pending[0] != DEL
             && std::str::from_utf8(pending).is_ok()
     }
-}
 
-/// Maps a batch of syntax tokens to semantic events.
-fn map_tokens(tokens: Vec<SyntaxToken>) -> Vec<Event> {
-    let mut events = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        map_token(token, &mut events);
+    /// Maps a batch of syntax tokens to semantic events.
+    fn map_tokens(&mut self, tokens: Vec<SyntaxToken>) -> Vec<Event> {
+        let mut events = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            self.map_token(token, &mut events);
+        }
+        events
     }
-    events
+
+    /// Maps one syntax token to zero or more semantic events, appending them to `events`.
+    fn map_token(&mut self, token: SyntaxToken, events: &mut Vec<Event>) {
+        match token {
+            // A text run decodes to one key event per character, each carrying that character as
+            // text.
+            SyntaxToken::Text(bytes) => push_text_events(&bytes, events),
+            // A C0 control maps to its named key, or a lossless catch-all key.
+            SyntaxToken::Control(byte) => events.push(Event::Key(control_key_event(byte))),
+            // A CSI is tried against the typed decoders in order: kitty key, SGR mouse, focus, then
+            // the unmodified-arrow parity path; anything unrecognized passes through as syntax.
+            SyntaxToken::Csi(csi) => map_csi(csi, events),
+            // A bracketed-paste segment becomes a paste event, threading the CR-normalization
+            // carry.
+            SyntaxToken::Paste(paste) => {
+                let (event, carry) = paste::decode(&paste, self.paste_pending_cr);
+                self.paste_pending_cr = carry;
+                events.push(Event::Paste(event));
+            }
+            // A bare trailing Escape (no final byte) is the standalone Escape key; a complete
+            // escape sequence passes through as syntax.
+            SyntaxToken::Esc(escape) => events.push(escape_event(escape)),
+            // Every remaining complete token is lossless syntax passthrough.
+            other => events.push(Event::Syntax(other)),
+        }
+    }
 }
 
-/// Maps one syntax token to zero or more semantic events, appending them to `events`.
-fn map_token(token: SyntaxToken, events: &mut Vec<Event>) {
-    match token {
-        // A text run decodes to one key event per character, each carrying that character as text.
-        SyntaxToken::Text(bytes) => push_text_events(&bytes, events),
-        // A C0 control maps to its named key, or a lossless catch-all key.
-        SyntaxToken::Control(byte) => events.push(Event::Key(control_key_event(byte))),
-        // A kitty `CSI u` (or legacy modified functional) sequence decodes to a rich key event; an
-        // unmodified arrow decodes to its bare key; every other CSI passes through as syntax.
-        SyntaxToken::Csi(csi) => match kitty::decode_key(&csi) {
-            Some(event) => events.push(Event::Key(event)),
-            None => match arrow_key(&csi) {
-                Some(key) => events.push(Event::Key(KeyEvent::new(key))),
-                None => events.push(Event::Syntax(SyntaxToken::Csi(csi))),
-            },
-        },
-        // A bare trailing Escape (no final byte) is the standalone Escape key; a complete escape
-        // sequence passes through as syntax.
-        SyntaxToken::Esc(escape) => events.push(escape_event(escape)),
-        // Every remaining complete token is lossless syntax passthrough.
-        other => events.push(Event::Syntax(other)),
+/// Maps a CSI token to a typed event or lossless syntax passthrough.
+///
+/// The decoders are tried in a fixed order because their recognized shapes are disjoint: a kitty
+/// key ends in `u` or a functional final; an SGR mouse report carries the `<` private marker; focus
+/// is a bare `CSI I`/`CSI O`; and an unmodified arrow is `CSI A`-`D`. The first match wins; if none
+/// matches, the sequence is preserved as syntax (design 02 forward-compatibility).
+fn map_csi(csi: crate::syntax::ControlSequence, events: &mut Vec<Event>) {
+    if let Some(event) = kitty::decode_key(&csi) {
+        events.push(Event::Key(event));
+    } else if let Some(event) = mouse::decode_sgr(&csi) {
+        events.push(Event::Mouse(event));
+    } else if let Some(event) = focus::decode(&csi) {
+        events.push(Event::Focus(event));
+    } else if let Some(key) = arrow_key(&csi) {
+        events.push(Event::Key(KeyEvent::new(key)));
+    } else {
+        events.push(Event::Syntax(SyntaxToken::Csi(csi)));
     }
 }
 

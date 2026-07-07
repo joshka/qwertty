@@ -125,6 +125,62 @@ async fn tokio_session_delivers_decoded_events() {
 }
 
 #[tokio::test]
+async fn tokio_session_enables_modes_and_decodes_their_events() {
+    use qwertty::commands::terminal::MouseMode;
+    use qwertty::event::{FocusState, MouseButton, MouseEventKind};
+
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+
+    let mut session =
+        TokioTerminalSession::open_path(slave_path).expect("open Tokio pty-backed session");
+
+    session
+        .enable_mouse(MouseMode::ButtonEvent)
+        .await
+        .expect("enable mouse");
+    session.enable_focus_events().await.expect("enable focus");
+    session
+        .enable_bracketed_paste()
+        .await
+        .expect("enable paste");
+
+    // The enable bytes reached the terminal in enablement order.
+    let enables = read_available_after_quiet(&mut master)
+        .await
+        .expect("read enable bytes");
+    assert_eq!(enables, b"\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h");
+
+    // A mouse report, a focus report, and a paste all decode to their typed events.
+    master
+        .write_all(b"\x1b[<0;10;20M\x1b[I\x1b[200~hi\x1b[201~")
+        .expect("write input");
+
+    let mouse = session.next_event().await.expect("mouse event");
+    let mouse = mouse.mouse_event().expect("a mouse event");
+    assert_eq!(mouse.kind(), MouseEventKind::Press);
+    assert_eq!(mouse.button(), MouseButton::Left);
+    assert_eq!((mouse.column(), mouse.row()), (10, 20));
+
+    let focus = session.next_event().await.expect("focus event");
+    assert_eq!(
+        focus.focus_event().map(qwertty::FocusEvent::state),
+        Some(FocusState::Gained)
+    );
+
+    let paste = session.next_event().await.expect("paste event");
+    let paste = paste.paste_event().expect("a paste event");
+    assert_eq!(paste.data(), b"hi");
+    assert!(paste.is_final() && paste.terminated());
+
+    // The reverse-order reset on leave and the emergency blob are covered by the sync session PTY
+    // tests, which do not race the session-fd close the way a post-leave master read would here.
+    session.leave().await.expect("leave Tokio session");
+}
+
+#[tokio::test]
 async fn tokio_session_requests_cursor_position() {
     let Some((mut master, slave_path)) = open_test_pty() else {
         return;

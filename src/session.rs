@@ -18,6 +18,7 @@ pub use kitty::{KittyKeyboardFlags, KittyKeyboardGrant};
 #[cfg(unix)]
 pub use restore::RestoreHandle;
 
+use crate::commands::terminal::MouseMode;
 use crate::session::ledger::{ModeKind, ModeLedger, StateAction};
 use crate::{
     Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, commands, terminal,
@@ -375,6 +376,141 @@ impl<D: TerminalDevice> TerminalSession<D> {
         if let Some(restore) = &self.restore {
             restore.publish_blob(&self.ledger.protocol_undo_bytes());
         }
+    }
+
+    /// Enables mouse reporting for the given tracking mode, paired with SGR coordinates (1006).
+    ///
+    /// This writes the enable bytes (`CSI ? N h CSI ? 1006 h`) to the terminal now and records the
+    /// change in the mode ledger so `enter` re-applies it and `leave`/drop/the emergency path reset
+    /// it (`CSI ? 1006 l CSI ? N l`). Because it is a byte-based ledger entry, the reset bytes flow
+    /// into the emergency blob automatically, so a panic teardown turns mouse reporting back off.
+    ///
+    /// Calling it again with a different [`MouseMode`] replaces the entry in place, so switching
+    /// tracking modes never leaves a stale mode enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the enable bytes.
+    pub fn enable_mouse(&mut self, mode: MouseMode) -> terminal::Result<&mut Self> {
+        self.record_mode(
+            ModeKind::Mouse,
+            &commands::terminal::enable_mouse(mode),
+            &commands::terminal::disable_mouse(mode),
+        )
+    }
+
+    /// Enables focus reporting (mode 1004).
+    ///
+    /// This writes `CSI ? 1004 h` now and records the change so the session re-applies it on
+    /// `enter` and resets it (`CSI ? 1004 l`) on `leave`/drop/emergency. With focus reporting
+    /// on, the terminal sends `CSI I`/`CSI O`, decoded to [`FocusEvent`](crate::FocusEvent).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the enable bytes.
+    pub fn enable_focus_events(&mut self) -> terminal::Result<&mut Self> {
+        self.record_mode(
+            ModeKind::Focus,
+            &commands::terminal::enable_focus_events(),
+            &commands::terminal::disable_focus_events(),
+        )
+    }
+
+    /// Enables bracketed paste (mode 2004).
+    ///
+    /// This writes `CSI ? 2004 h` now and records the change so the session re-applies it on
+    /// `enter` and resets it (`CSI ? 2004 l`) on `leave`/drop/emergency. With bracketed paste
+    /// on, pasted text arrives wrapped in `ESC [ 200 ~ … ESC [ 201 ~` and decodes to
+    /// [`PasteEvent`](crate::PasteEvent) segments — delivered as data, never as typed keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the enable bytes.
+    pub fn enable_bracketed_paste(&mut self) -> terminal::Result<&mut Self> {
+        self.record_mode(
+            ModeKind::BracketedPaste,
+            &commands::terminal::enable_bracketed_paste(),
+            &commands::terminal::disable_bracketed_paste(),
+        )
+    }
+
+    /// Records a byte-based mode entry, writing its enable bytes now and refreshing the emergency
+    /// blob so its reset bytes are covered even before the next `enter`.
+    fn record_mode(
+        &mut self,
+        kind: ModeKind,
+        enable: &Command,
+        disable: &Command,
+    ) -> terminal::Result<&mut Self> {
+        let mut apply = Vec::new();
+        enable.encode(&mut apply);
+
+        // Apply now so the mode is active for the caller's next read.
+        self.device.write_all(&apply)?;
+        self.record_mode_entry(kind, apply, disable);
+        Ok(self)
+    }
+
+    /// Records a byte-based mode entry in the ledger and refreshes the emergency blob, **without**
+    /// writing the enable bytes.
+    ///
+    /// The sync path writes through the device before calling this; the Tokio driver writes the
+    /// enable bytes through its own readiness path and then calls this so the ledger and emergency
+    /// blob learn the entry without a second, unordered write. `apply` is the already-encoded
+    /// enable bytes (replayed by a later `enter`); `disable` is encoded here for the undo
+    /// action.
+    fn record_mode_entry(&mut self, kind: ModeKind, apply: Vec<u8>, disable: &Command) {
+        let mut undo = Vec::new();
+        disable.encode(&mut undo);
+        self.ledger.record(
+            kind,
+            StateAction::WriteBytes(apply),
+            StateAction::WriteBytes(undo),
+        );
+
+        // Refresh the emergency blob so a panic between now and the next `enter` still resets this
+        // mode from the ledger's byte-based undo.
+        #[cfg(unix)]
+        if let Some(restore) = &self.restore {
+            restore.publish_blob(&self.ledger.protocol_undo_bytes());
+        }
+    }
+
+    /// Records an already-written mouse enable in the ledger (Tokio driver path).
+    ///
+    /// The driver has written `CSI ? N h CSI ? 1006 h` through its own readiness path; this records
+    /// the ledger entry and refreshes the emergency blob without a second write, keeping the
+    /// private [`ModeKind`] out of the driver.
+    pub(crate) fn record_mouse_enabled(&mut self, mode: MouseMode) {
+        let mut apply = Vec::new();
+        commands::terminal::enable_mouse(mode).encode(&mut apply);
+        self.record_mode_entry(
+            ModeKind::Mouse,
+            apply,
+            &commands::terminal::disable_mouse(mode),
+        );
+    }
+
+    /// Records an already-written focus-events enable in the ledger (Tokio driver path).
+    pub(crate) fn record_focus_events_enabled(&mut self) {
+        let mut apply = Vec::new();
+        commands::terminal::enable_focus_events().encode(&mut apply);
+        self.record_mode_entry(
+            ModeKind::Focus,
+            apply,
+            &commands::terminal::disable_focus_events(),
+        );
+    }
+
+    /// Records an already-written bracketed-paste enable in the ledger (Tokio driver path).
+    pub(crate) fn record_bracketed_paste_enabled(&mut self) {
+        let mut apply = Vec::new();
+        commands::terminal::enable_bracketed_paste().encode(&mut apply);
+        self.record_mode_entry(
+            ModeKind::BracketedPaste,
+            apply,
+            &commands::terminal::disable_bracketed_paste(),
+        );
     }
 
     /// Undoes the mode ledger in reverse enablement order, reporting the first error.

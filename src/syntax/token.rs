@@ -380,6 +380,109 @@ impl EscapeSequence {
     }
 }
 
+/// One bounded segment of a bracketed-paste span: `ESC [ 200 ~ … ESC [ 201 ~`.
+///
+/// Bracketed paste is captured **at the syntax layer** as opaque payload rather than being left to
+/// the semantic layer to reassemble from between-bracket tokens. The reason is byte fidelity: a
+/// paste payload is *data*, not syntax. Reassembling it from ordinary tokens would run every
+/// embedded byte through control-string tokenization, and an embedded over-long OSC/DCS would hit
+/// the string payload bound and drop bytes the paste must keep (design 02's truncation waiver is
+/// for syntax payloads, never for paste data). Treating everything between the brackets as opaque
+/// bytes keeps the payload lossless regardless of content — see [the paste capture
+/// rules](crate::SyntaxParser#bracketed-paste).
+///
+/// The end bracket is recognized only in its exact `ESC [ 201 ~` (or 8-bit `0x9b 201 ~`) form; any
+/// other bytes, including embedded escape sequences that merely *look* like control data, are
+/// payload.
+///
+/// # Lossless segmentation, not truncation
+///
+/// A paste is delivered losslessly regardless of size (R-IN-7). To keep parser memory bounded while
+/// staying lossless, a paste larger than the configured byte bound is emitted as **several
+/// segments** rather than one buffered blob or a dropped tail: each segment carries up to the bound
+/// of payload, and [`is_final`](Self::is_final) marks the last one. The first segment carries the
+/// `ESC [ 200 ~` start bracket ([`is_first`](Self::is_first)); the final segment carries the
+/// `ESC [ 201 ~` end bracket when the paste closed normally. This is the two-mechanism rule (design
+/// 02): a *terminated* paste is lossless (all its segments arrive, the last flagged final); an
+/// *unterminated* paste flushed by [`SyntaxParser::finish`](crate::SyntaxParser::finish), or one
+/// whose terminator never comes, still yields its bytes in bounded segments — the last flagged
+/// final but carrying no end bracket — so it degrades visibly instead of hanging (FM-A8/FM-P12). No
+/// paste byte is ever dropped; the bound caps *per-segment memory*, and the missing-terminator cost
+/// is one segment of memory, not an unbounded buffer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PasteSequence {
+    bytes: Vec<u8>,
+    payload: Vec<u8>,
+    is_first: bool,
+    is_final: bool,
+    terminated: bool,
+}
+
+impl PasteSequence {
+    pub(crate) fn new(
+        bytes: Vec<u8>,
+        payload: Vec<u8>,
+        is_first: bool,
+        is_final: bool,
+        terminated: bool,
+    ) -> Self {
+        Self {
+            bytes,
+            payload,
+            is_first,
+            is_final,
+            terminated,
+        }
+    }
+
+    /// Returns the raw bytes retained for this paste segment.
+    ///
+    /// These are the exact input span this segment covers: the `ESC [ 200 ~` start bracket on the
+    /// first segment, the payload bytes it carries, and the `ESC [ 201 ~` end bracket on a final
+    /// segment of a terminated paste. Concatenating [`as_bytes`](Self::as_bytes) over every segment
+    /// of a paste reproduces its input bytes exactly (design 02 invariant 1); paste has no
+    /// truncation waiver.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Returns this segment's slice of the paste payload (the bytes between the brackets).
+    ///
+    /// These are the raw pasted bytes with no normalization. Line-ending normalization and control
+    /// inspection happen in the semantic layer's paste event, not here.
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    /// Returns `true` when this is the first segment of its paste (the one carrying `ESC [ 200 ~`).
+    #[must_use]
+    pub fn is_first(&self) -> bool {
+        self.is_first
+    }
+
+    /// Returns `true` when this is the last segment of its paste.
+    ///
+    /// A single-segment paste is both [`is_first`](Self::is_first) and `is_final`. The final
+    /// segment carries the `ESC [ 201 ~` end bracket exactly when
+    /// [`terminated`](Self::terminated) is `true`.
+    #[must_use]
+    pub fn is_final(&self) -> bool {
+        self.is_final
+    }
+
+    /// Returns `true` when the paste closed with its `ESC [ 201 ~` end bracket.
+    ///
+    /// Only meaningful on the final segment. A paste flushed unterminated (input ended, or the
+    /// terminator never arrived) reports `false`: the payload is still delivered, but the closing
+    /// bracket is absent, so consumers know the paste degraded rather than closed (FM-A8).
+    #[must_use]
+    pub fn terminated(&self) -> bool {
+        self.terminated
+    }
+}
+
 /// One token in the total, lossless syntax layer.
 ///
 /// Every input byte belongs to exactly one token. Concatenating [`SyntaxToken::as_bytes`] over the
@@ -412,6 +515,13 @@ pub enum SyntaxToken {
     Pm(StringSequence),
     /// A complete SOS (Start of String) sequence.
     Sos(StringSequence),
+    /// A bracketed-paste span (`ESC [ 200 ~ … ESC [ 201 ~`), captured opaquely.
+    ///
+    /// The bytes between the brackets are the paste payload, kept verbatim without being tokenized
+    /// as syntax (see [`PasteSequence`] for why capture lives at this layer). The semantic layer
+    /// turns this into a paste event with line-ending normalization; the syntax layer only draws
+    /// the opaque, bounded span.
+    Paste(PasteSequence),
     /// A complete non-CSI, non-string escape sequence, or a bare trailing `ESC`.
     Esc(EscapeSequence),
     /// A byte run that cannot be valid syntax, carrying its exact bytes.
@@ -441,6 +551,7 @@ impl SyntaxToken {
             | Self::Apc(string)
             | Self::Pm(string)
             | Self::Sos(string) => string.as_bytes(),
+            Self::Paste(paste) => paste.as_bytes(),
             Self::Esc(escape) => escape.as_bytes(),
         }
     }

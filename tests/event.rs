@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use qwertty::event::{FocusState, MouseButton, MouseEventKind, ScrollDirection};
 use qwertty::{
     Event, Key, KeyEvent, KeyEventKind, Modifiers, SemanticDecoder, SyntaxToken, TextPayload,
 };
@@ -312,6 +313,22 @@ fn split_corpus() -> Vec<(&'static str, Vec<u8>)> {
         (
             "kitty_mixed_with_text",
             b"hi\x1b[97:65;2;65uok\x1b[57357u".to_vec(),
+        ),
+        // Mouse, focus, and paste: split-equivalence must hold at the event level for these too.
+        ("mouse_press", b"\x1b[<0;10;20M".to_vec()),
+        ("mouse_release", b"\x1b[<0;10;20m".to_vec()),
+        ("mouse_wheel", b"\x1b[<64;5;5M".to_vec()),
+        ("mouse_drag", b"\x1b[<32;3;4M".to_vec()),
+        ("focus", b"\x1b[I\x1b[O".to_vec()),
+        ("paste_small", b"\x1b[200~hello\x1b[201~".to_vec()),
+        ("paste_crlf", b"\x1b[200~a\r\nb\rc\x1b[201~".to_vec()),
+        (
+            "paste_embedded_esc",
+            b"\x1b[200~text\x1b[31mmore\x1b[201~".to_vec(),
+        ),
+        (
+            "mixed_mouse_focus_paste_keys",
+            b"hi\x1b[<0;1;1M\x1b[Ipaste:\x1b[200~x\x1b[201~\x1b[O".to_vec(),
         ),
         ("non_csi_escape", b"a\x1bcb".to_vec()),
         ("osc", b"\x1b]0;title\x07after".to_vec()),
@@ -681,4 +698,148 @@ fn has_settled_text_false_when_nothing_pending() {
         !decoder.has_settled_text(),
         "no pending run after a complete token"
     );
+}
+
+// --- mouse, focus, paste through the full SemanticDecoder --------------------------------------
+
+#[test]
+fn sgr_mouse_press_decodes_through_decoder() {
+    let mouse = *decode_one(b"\x1b[<0;10;20M")
+        .mouse_event()
+        .expect("a mouse event");
+    assert_eq!(mouse.kind(), MouseEventKind::Press);
+    assert_eq!(mouse.button(), MouseButton::Left);
+    assert_eq!(mouse.column(), 10);
+    assert_eq!(mouse.row(), 20);
+}
+
+#[test]
+fn sgr_mouse_scroll_never_coalesces() {
+    // FM-V6: three wheel ticks fed together decode to three distinct events, never merged.
+    let events = decode_whole(b"\x1b[<64;5;5M\x1b[<64;5;5M\x1b[<64;5;5M");
+    assert_eq!(events.len(), 3, "each wheel tick is its own event");
+    for event in &events {
+        let mouse = event.mouse_event().expect("a mouse event");
+        assert_eq!(mouse.kind(), MouseEventKind::Scroll(ScrollDirection::Up));
+    }
+}
+
+#[test]
+fn sgr_mouse_release_and_drag_and_modifiers() {
+    assert_eq!(
+        decode_one(b"\x1b[<0;1;1m").mouse_event().unwrap().kind(),
+        MouseEventKind::Release
+    );
+    assert_eq!(
+        decode_one(b"\x1b[<32;1;1M").mouse_event().unwrap().kind(),
+        MouseEventKind::Moved
+    );
+    // Ctrl+wheel (16 + 64 = 80): a modified scroll, one event, modifiers preserved.
+    let ctrl_wheel = *decode_one(b"\x1b[<80;5;5M").mouse_event().unwrap();
+    assert_eq!(
+        ctrl_wheel.kind(),
+        MouseEventKind::Scroll(ScrollDirection::Up)
+    );
+    assert_eq!(ctrl_wheel.modifiers(), Modifiers::CTRL);
+}
+
+#[test]
+fn focus_reports_decode_through_decoder() {
+    let events = decode_whole(b"\x1b[I\x1b[O");
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[0].focus_event().map(qwertty::FocusEvent::state),
+        Some(FocusState::Gained)
+    );
+    assert_eq!(
+        events[1].focus_event().map(qwertty::FocusEvent::state),
+        Some(FocusState::Lost)
+    );
+}
+
+#[test]
+fn small_paste_is_one_event_with_normalized_newlines() {
+    let paste = decode_one(b"\x1b[200~line one\r\nline two\r\x1b[201~");
+    let paste = paste.paste_event().expect("a paste event");
+    assert_eq!(paste.data(), b"line one\nline two\n");
+    assert!(paste.is_first() && paste.is_final() && paste.terminated());
+    assert!(!paste.contains_control());
+}
+
+#[test]
+fn paste_payload_keeps_embedded_sequences_as_data() {
+    // The embedded ESC/CSI/OSC bytes are DATA inside the paste, delivered byte-exact and never
+    // interpreted as syntax. This is the layering guarantee: paste capture at the syntax layer.
+    let paste = decode_one(b"\x1b[200~\x1b[31mred\x1b]0;t\x07\x1b[201~");
+    let paste = paste.paste_event().expect("a paste event");
+    assert_eq!(paste.data(), b"\x1b[31mred\x1b]0;t\x07");
+    assert!(
+        paste.contains_control(),
+        "embedded escapes are surfaced for paste hygiene (R-SEC-3)"
+    );
+}
+
+#[test]
+fn large_paste_arrives_in_final_flagged_segments_losslessly() {
+    // A paste larger than the bound arrives as several segments; concatenating their data restores
+    // the whole (normalized) paste, and exactly the last segment is final and terminated.
+    let mut decoder = SemanticDecoder::with_payload_limit(4);
+    let payload: Vec<u8> = (b'a'..=b'z').collect();
+    let mut input = Vec::from(*b"\x1b[200~");
+    input.extend_from_slice(&payload);
+    input.extend_from_slice(b"\x1b[201~");
+
+    let events = {
+        let mut events = decoder.feed(&input);
+        events.extend(decoder.finish());
+        events
+    };
+    let pastes: Vec<_> = events
+        .iter()
+        .map(|e| e.paste_event().expect("all paste events"))
+        .collect();
+    assert!(pastes.len() > 1, "a large paste segments");
+
+    let mut joined = Vec::new();
+    for (i, paste) in pastes.iter().enumerate() {
+        assert_eq!(paste.is_first(), i == 0);
+        assert_eq!(paste.is_final(), i == pastes.len() - 1);
+        joined.extend_from_slice(paste.data());
+    }
+    assert_eq!(joined, payload, "no paste byte is lost across segments");
+    assert!(pastes.last().unwrap().terminated());
+}
+
+#[test]
+fn unterminated_paste_degrades_without_hanging() {
+    // FM-A8: a missing end bracket flushes at finish as a final, unterminated paste event — the
+    // payload is delivered, and nothing hangs.
+    let mut decoder = SemanticDecoder::new();
+    assert!(
+        decoder.feed(b"\x1b[200~partial paste").is_empty(),
+        "an open paste stays buffered until an end bracket or finish"
+    );
+    let events = decoder.finish();
+    assert_eq!(events.len(), 1);
+    let paste = events[0].paste_event().expect("a paste event");
+    assert_eq!(paste.data(), b"partial paste");
+    assert!(paste.is_final());
+    assert!(!paste.terminated());
+}
+
+#[test]
+fn crlf_split_across_paste_segments_normalizes_to_one_newline() {
+    // With a small bound, a CRLF can straddle a segment boundary; the decoder's carry collapses it
+    // to a single newline, so segmenting never changes the normalized text.
+    let mut decoder = SemanticDecoder::with_payload_limit(3);
+    let events = {
+        let mut events = decoder.feed(b"\x1b[200~ab\r\ncd\x1b[201~");
+        events.extend(decoder.finish());
+        events
+    };
+    let joined: Vec<u8> = events
+        .iter()
+        .flat_map(|e| e.paste_event().expect("paste").data().to_vec())
+        .collect();
+    assert_eq!(joined, b"ab\ncd");
 }

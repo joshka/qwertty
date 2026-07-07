@@ -65,8 +65,23 @@ before later application work continues.
 `TerminalSession::leave` replays the session's mode ledger: every reversible state change the
 session made is undone in reverse enablement order, every step is attempted even after a failure,
 and the first error is reported. The replay ends with a flush so restoration bytes never sit in a
-buffer. Today the ledger holds raw-mode restoration; alternate screen, cursor visibility, mouse
-mode, and paste mode join it in later slices.
+buffer. The ledger holds raw-mode restoration and the input-mode enables described in [Input
+Modes](#input-modes); alternate screen, cursor visibility, and vendor protocol cleanup join it in
+later slices.
+
+## Input Modes
+
+`enable_mouse(MouseMode)`, `enable_focus_events()`, and `enable_bracketed_paste()` turn on the
+terminal reporting modes whose events the decoder produces (`Event::Mouse`, `Event::Focus`,
+`Event::Paste`). Each writes its DEC private-mode set (`CSI ? N h`) to the terminal now and records
+a byte-based ledger entry whose apply re-emits the set on a later `enter` and whose undo emits the
+reset (`CSI ? N l`). Because these are byte-based entries, `leave` writes the resets in reverse
+enablement order, and the reset bytes flow into the panic-safe emergency blob automatically — a
+panic teardown turns the modes back off, not just an orderly `leave`. `enable_mouse` always pairs
+the chosen tracking mode (1000/1002/1003) with SGR extended coordinates (1006), and re-recording a
+different `MouseMode` replaces the entry in place so switching tracking modes never leaves a stale
+one enabled. The same methods are available on the Tokio session (`TokioTerminalSession`), which
+writes the enable bytes through its readiness path before recording the ledger entry.
 
 The lifecycle is re-entrant: `leave` does not consume the session, and
 `TerminalSession::enter` re-applies the recorded state afterwards. A line-editor-shaped caller
@@ -170,8 +185,9 @@ session.leave().await
 ```
 
 If a task waiting in `next_event` is canceled before another terminal read completes, the session
-remains usable. Events already decoded from earlier reads stay queued for later calls. This
-boundary does not add alternate screen cleanup, mouse mode, paste mode, graphics, clipboard, or
+remains usable. Events already decoded from earlier reads stay queued for later calls. The Tokio
+session enables and tears down mouse, focus, and bracketed-paste modes (see
+[Input Modes](#input-modes)); it does not yet add alternate screen cleanup, graphics, clipboard, or
 vendor protocol policy.
 
 ## Live Cursor Position Query

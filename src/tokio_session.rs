@@ -30,6 +30,7 @@ use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use tokio::io::unix::AsyncFd;
 use tokio::time::{Instant, timeout_at};
 
+use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::{
@@ -568,6 +569,56 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             Err(err) if is_unexpected_eof(&err) => Ok(KittyKeyboardGrant::new(requested, None)),
             Err(err) => Err(err),
         }
+    }
+
+    /// Enables mouse reporting for the given tracking mode, paired with SGR coordinates (1006).
+    ///
+    /// This writes `CSI ? N h CSI ? 1006 h` through the readiness path, flushes, and records the
+    /// change in the composed session's mode ledger so `enter` re-applies it and teardown (leave,
+    /// drop, or the panic-safe emergency path) resets both modes. Mouse reports then decode to
+    /// [`Event::Mouse`] through [`next_event`](Self::next_event) with no scroll coalescing (FM-V6).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the enable bytes.
+    pub async fn enable_mouse(&mut self, mode: MouseMode) -> terminal::Result<()> {
+        self.command(commands::terminal::enable_mouse(mode)).await?;
+        self.flush().await?;
+        self.session.record_mouse_enabled(mode);
+        Ok(())
+    }
+
+    /// Enables focus reporting (mode 1004).
+    ///
+    /// Writes `CSI ? 1004 h`, flushes, and records the change so teardown resets it. Focus reports
+    /// then decode to [`Event::Focus`] through [`next_event`](Self::next_event).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the enable bytes.
+    pub async fn enable_focus_events(&mut self) -> terminal::Result<()> {
+        self.command(commands::terminal::enable_focus_events())
+            .await?;
+        self.flush().await?;
+        self.session.record_focus_events_enabled();
+        Ok(())
+    }
+
+    /// Enables bracketed paste (mode 2004).
+    ///
+    /// Writes `CSI ? 2004 h`, flushes, and records the change so teardown resets it. Pasted text
+    /// then arrives as [`Event::Paste`] segments through [`next_event`](Self::next_event),
+    /// normalized and delivered as data rather than typed keys (R-IN-7, FM-P12).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write or flush the enable bytes.
+    pub async fn enable_bracketed_paste(&mut self) -> terminal::Result<()> {
+        self.command(commands::terminal::enable_bracketed_paste())
+            .await?;
+        self.flush().await?;
+        self.session.record_bracketed_paste_enabled();
+        Ok(())
     }
 
     /// Runs one typed query end to end against the correlator.

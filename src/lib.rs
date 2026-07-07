@@ -70,7 +70,7 @@ pub mod commands;
 pub(crate) mod correlate;
 pub mod docs;
 mod escape;
-mod event;
+pub mod event;
 mod input;
 pub mod report;
 mod session;
@@ -80,7 +80,11 @@ mod terminal;
 mod tokio_session;
 
 pub use command::{Command, CommandBuffer, ProtocolPosition};
-pub use event::{Event, Key, KeyEvent, KeyEventKind, Modifiers, SemanticDecoder, TextPayload};
+pub use commands::terminal::MouseMode;
+pub use event::{
+    Event, FocusEvent, FocusState, Key, KeyEvent, KeyEventKind, Modifiers, MouseButton, MouseEvent,
+    MouseEventKind, PasteEvent, ScrollDirection, SemanticDecoder, TextPayload,
+};
 pub use input::InputBytes;
 pub use report::{CursorPositionReport, TerminalStatus, TerminalStatusReport};
 #[cfg(unix)]
@@ -88,7 +92,7 @@ pub use session::RestoreHandle;
 pub use session::{KittyKeyboardFlags, KittyKeyboardGrant, TerminalSession};
 pub use syntax::{
     ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
-    StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
+    PasteSequence, StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
 };
 pub use terminal::{DeviceMode, Error, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]

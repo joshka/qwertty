@@ -76,8 +76,8 @@ The raw bytes above are decoded by two layers, documented in full below:
   malformed), carrying partial sequences across `read_input` chunks so split input tokenizes
   identically to feeding it whole.
 - [Key Events](#key-events) — `SemanticDecoder` maps those tokens to the typed `Event` vocabulary:
-  `KeyEvent` values for keys and lossless `Event::Syntax` passthrough for complete-but-unmapped
-  tokens.
+  `KeyEvent` values for keys, `MouseEvent`/`FocusEvent`/`PasteEvent` for mouse, focus, and paste, and
+  lossless `Event::Syntax` passthrough for complete-but-unmapped tokens.
 
 Typed terminal reports (cursor position and terminal status) parse from the same CSI syntax tokens;
 see [Typed Reports](#typed-reports).
@@ -192,9 +192,10 @@ syntax parser; the owned parser carries partial sequences across chunks, so spli
 identically to feeding it whole.
 
 The `Event` vocabulary is **pre-freeze until milestone M4 exit**. These `event::` types (`Event`,
-`KeyEvent`, `Key`, `Modifiers`, `KeyEventKind`, `TextPayload`) change freely before the first
-published version and calcify at that release. Every enum is non-exhaustive, so later M4 variants
-(mouse, paste, focus, resize) add without breaking existing code.
+`KeyEvent`, `Key`, `Modifiers`, `KeyEventKind`, `TextPayload`, `MouseEvent`, `FocusEvent`,
+`PasteEvent`, and their parts) change freely before the first published version and calcify at that
+release. Every enum is non-exhaustive, so the remaining M4 variant (resize) adds without breaking
+existing code.
 
 ```rust
 use qwertty::{Event, Key, SemanticDecoder};
@@ -256,6 +257,26 @@ modified-key CSI forms over the syntax layer, and passes everything else through
   host-to-terminal push/pop/query forms (`CSI > flags u`, `CSI < u`, `CSI < 1 u`, `CSI ? u`) are
   never key events. The report feeds the query correlator (see below); the rest pass through as
   lossless syntax.
+- **SGR mouse events.** An SGR (DEC 1006) mouse report `CSI < b ; x ; y M/m` decodes to an
+  `Event::Mouse(MouseEvent)`: the button-code bits select the `MouseEventKind` (press, release, a
+  `Moved` drag/motion, or a `Scroll` with its `ScrollDirection`), the `MouseButton`, and the
+  Shift/Alt/Ctrl `Modifiers`; the 1-based `(column, row)` is the wire position, unchanged. **Scroll
+  events are never coalesced** — every wheel tick the terminal sends is one event, because
+  physical-tick-to-event ratios vary per terminal with no protocol signal, so an application builds
+  its own normalization from the raw stream (FM-V6). The legacy X10 (`CSI M` + three bytes) and
+  urxvt (`CSI b;x;y M`) encodings are tolerated without decoding: their non-SGR shape does not match
+  the SGR decoder and passes through as lossless syntax rather than panicking or misdecoding.
+- **Focus events.** `CSI I` and `CSI O` (DEC 1004) decode to `Event::Focus(FocusEvent)` with
+  `FocusState::Gained` / `FocusState::Lost`.
+- **Bracketed paste.** A `ESC [ 200 ~ … ESC [ 201 ~` span (DEC 2004) is captured **at the syntax
+  layer** as opaque payload — the bytes between the brackets are *data*, so embedded escape
+  sequences are kept verbatim and never tokenized — and decodes to `Event::Paste(PasteEvent)`. Line
+  endings normalize to LF (CRLF and lone CR both become `\n`, across segment boundaries), and
+  `PasteEvent::contains_control` flags a payload carrying control bytes for paste hygiene (R-SEC-3).
+  A paste is delivered losslessly regardless of size: a large one arrives as several bounded
+  segments with the last flagged `is_final`, and a missing end bracket flushes a final,
+  non-`terminated` segment rather than hanging (FM-A8/FM-P12). See [Bracketed Paste
+  Capture](#bracketed-paste-capture).
 - **Standalone Escape.** A bare Escape, flushed by the layer above and surfaced by the parser as a
   lone `SyntaxToken::Esc`, maps to `Key::Escape`. The Escape-versus-sequence timing policy stays in
   the layer above this decoder; the decoder only ever sees a bare Escape once that layer has
@@ -281,17 +302,31 @@ emergency restore blob resets the whole keyboard-flags stack (`CSI < u`). A term
 answers leaves the grant *unknown* (`KittyKeyboardGrant::is_unknown`) rather than erroring, and no
 enhancement is assumed — unknown is not unsupported.
 
+### Bracketed Paste Capture
+
+Bracketed paste is captured at the **syntax layer**, not reassembled from between-bracket tokens at
+the semantic layer. The reason is byte fidelity. A paste payload is data: if it were left to the
+syntax parser's ordinary tokenization, an embedded escape sequence would be split into control
+tokens, and an embedded over-long OSC/DCS would hit the string-payload byte bound and *drop* bytes
+the paste must keep (that truncation waiver is for syntax payloads, never for paste data). So on
+`ESC [ 200 ~` the parser enters an opaque paste-capture state: every byte until the exact
+`ESC [ 201 ~` (or 8-bit `0x9b 201 ~`) end bracket is payload, including bytes that merely *look* like
+control sequences. The end bracket is recognized only in its exact form, with a streaming matcher
+that keeps a false-start (for example `ESC [ 201 x ~`) as payload and finds the real terminator
+after it.
+
+Large pastes stay lossless *and* memory-bounded through **segmentation**: when a segment's payload
+reaches the parser's byte bound while the paste is still open, the parser emits a bounded, non-final
+`SyntaxToken::Paste` segment and continues. A terminated paste therefore delivers all its segments
+with the last flagged final; an unterminated one streams bounded segments and flushes a final,
+non-`terminated` segment at end of input — never an unbounded buffer, never a hang, and never a
+dropped paste byte.
+
 ### What Arrives Later In Milestone M4
 
-The remaining M4 input work adds:
-
-- **mouse** events (SGR and legacy);
-- **paste** as a dedicated aggregated event, not keyless text;
-- **focus** in and out events;
-- **resize** events.
-
-Until then `Event` carries `Key` and `Syntax`; the enum is non-exhaustive so those variants add
-without a vocabulary change.
+The remaining M4 input work adds **resize** events (in-band mode 2048 and the SIGWINCH fallback,
+coalesced in the session). Until then `Event` carries `Key`, `Mouse`, `Focus`, `Paste`, and
+`Syntax`; the enum is non-exhaustive so the resize variant adds without a vocabulary change.
 
 ## Typed Reports
 

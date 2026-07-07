@@ -15,10 +15,11 @@ pub(crate) const KITTY_KEYBOARD_EMERGENCY_RESET: &[u8] = b"\x1b[<u";
 pub(crate) enum StateAction {
     /// Write protocol bytes to the terminal.
     ///
-    /// No production entry constructs this yet: the first byte-based ledger entries arrive with
-    /// the alternate-screen and protocol-mode slices. Replay and the emergency blob already
-    /// handle it so those slices only add `record` calls.
-    #[allow(dead_code)]
+    /// The mouse, focus, and bracketed-paste mode entries are the first production byte-based
+    /// entries: their apply action writes the DEC private-mode set (`CSI ? N h`) and their undo
+    /// action writes the reset (`CSI ? N l`). Replay writes the apply bytes on `enter`, orderly
+    /// leave writes the undo bytes in reverse, and the undo bytes flow into the emergency blob
+    /// through [`ModeLedger::protocol_undo_bytes`].
     WriteBytes(Vec<u8>),
     /// Apply a device mode.
     SetMode(DeviceMode),
@@ -42,6 +43,17 @@ pub(crate) enum ModeKind {
     /// the stronger `CSI < u` full pop-all as belt-and-braces, but the ordinary ledger undo is the
     /// exact one-entry pop.
     KittyKeyboard,
+    /// Mouse reporting mode: a tracking mode (1000/1002/1003) always paired with SGR extended
+    /// coordinates (1006).
+    ///
+    /// The apply action sets the chosen tracking mode and 1006 (`CSI ? N h CSI ? 1006 h`); the undo
+    /// resets both (`CSI ? 1006 l CSI ? N l`). Re-recording replaces the whole entry, so switching
+    /// tracking modes never leaves a stale one enabled.
+    Mouse,
+    /// Focus reporting mode (1004): apply sets `CSI ? 1004 h`, undo resets `CSI ? 1004 l`.
+    Focus,
+    /// Bracketed-paste mode (2004): apply sets `CSI ? 2004 h`, undo resets `CSI ? 2004 l`.
+    BracketedPaste,
 }
 
 #[derive(Debug)]
@@ -198,6 +210,70 @@ mod tests {
             ledger.protocol_undo_bytes(),
             b"\x1b[<u",
             "emergency blob is the pop-all reset, not the one-entry pop",
+        );
+    }
+
+    #[test]
+    fn mode_undo_bytes_run_in_reverse_and_feed_the_emergency_blob() {
+        // Raw first, then mouse, focus, paste — the production byte-based entries.
+        let mut ledger = ModeLedger::new();
+        let (apply, undo) = raw_entry();
+        ledger.record(ModeKind::Raw, apply, undo);
+        ledger.record(
+            ModeKind::Mouse,
+            StateAction::WriteBytes(b"\x1b[?1000h\x1b[?1006h".to_vec()),
+            StateAction::WriteBytes(b"\x1b[?1006l\x1b[?1000l".to_vec()),
+        );
+        ledger.record(
+            ModeKind::Focus,
+            StateAction::WriteBytes(b"\x1b[?1004h".to_vec()),
+            StateAction::WriteBytes(b"\x1b[?1004l".to_vec()),
+        );
+        ledger.record(
+            ModeKind::BracketedPaste,
+            StateAction::WriteBytes(b"\x1b[?2004h".to_vec()),
+            StateAction::WriteBytes(b"\x1b[?2004l".to_vec()),
+        );
+
+        // Undo runs in reverse enablement order: paste, focus, mouse, then raw (cooked).
+        assert_eq!(
+            ledger.undo_actions().collect::<Vec<_>>(),
+            [
+                &StateAction::WriteBytes(b"\x1b[?2004l".to_vec()),
+                &StateAction::WriteBytes(b"\x1b[?1004l".to_vec()),
+                &StateAction::WriteBytes(b"\x1b[?1006l\x1b[?1000l".to_vec()),
+                &StateAction::SetMode(DeviceMode::Cooked),
+            ],
+        );
+
+        // The emergency blob concatenates the byte-based undos in the same reverse order (the raw
+        // SetMode entry is skipped — the emergency path restores the mode from captured termios).
+        assert_eq!(
+            ledger.protocol_undo_bytes(),
+            b"\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1000l",
+        );
+    }
+
+    #[test]
+    fn re_recording_mouse_replaces_the_tracking_mode_in_place() {
+        // Switching from button-event (1002) to any-event (1003) mouse must not leave 1002 enabled;
+        // the single-instance ModeKind replaces the whole entry, keeping cleanup exact.
+        let mut ledger = ModeLedger::new();
+        ledger.record(
+            ModeKind::Mouse,
+            StateAction::WriteBytes(b"\x1b[?1002h\x1b[?1006h".to_vec()),
+            StateAction::WriteBytes(b"\x1b[?1006l\x1b[?1002l".to_vec()),
+        );
+        ledger.record(
+            ModeKind::Mouse,
+            StateAction::WriteBytes(b"\x1b[?1003h\x1b[?1006h".to_vec()),
+            StateAction::WriteBytes(b"\x1b[?1006l\x1b[?1003l".to_vec()),
+        );
+
+        assert_eq!(
+            ledger.protocol_undo_bytes(),
+            b"\x1b[?1006l\x1b[?1003l",
+            "only the latest tracking mode is undone",
         );
     }
 }

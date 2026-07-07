@@ -226,3 +226,102 @@ fn bounded_osc_truncates_and_counts_dropped() {
 fn no_panic_on_malformed_corpus_case() {
     let _ = tokens(b"\x1b[?bad\x1b]unterminated");
 }
+
+#[test]
+fn bracketed_paste_is_one_opaque_token() {
+    let toks = tokens(b"\x1b[200~hello\x1b[201~");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"hello");
+    assert!(paste.is_first());
+    assert!(paste.is_final());
+    assert!(paste.terminated());
+    assert_eq!(paste.as_bytes(), b"\x1b[200~hello\x1b[201~");
+}
+
+#[test]
+fn paste_payload_keeps_embedded_sequences_as_data() {
+    // The payload is opaque: an embedded SGR and an embedded OSC are kept verbatim, not tokenized.
+    // This is the whole reason paste capture lives at the syntax layer.
+    let toks = tokens(b"\x1b[200~\x1b[31mred\x1b]0;t\x07\x1b[201~");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"\x1b[31mred\x1b]0;t\x07");
+}
+
+#[test]
+fn paste_false_end_bracket_is_payload() {
+    // `ESC [ 201 x ~` is not the end bracket (extra `x`), so it stays payload; the real end bracket
+    // that follows closes the paste. A lone ESC before the real end bracket is payload too.
+    let toks = tokens(b"\x1b[200~a\x1b[201x~b\x1b\x1b[201~");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"a\x1b[201x~b\x1b");
+    assert!(paste.terminated());
+}
+
+#[test]
+fn paste_recognizes_8bit_end_bracket() {
+    let toks = tokens(b"\x1b[200~hi\x9b201~");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"hi");
+    assert!(paste.terminated());
+}
+
+#[test]
+fn unterminated_paste_flushes_as_final_unterminated_segment() {
+    // FM-A8: no hang. `finish` flushes the held bytes as a final segment marked unterminated.
+    let toks = tokens(b"\x1b[200~no end here");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"no end here");
+    assert!(paste.is_final());
+    assert!(!paste.terminated(), "no end bracket was seen");
+}
+
+#[test]
+fn large_paste_segments_losslessly_at_the_bound() {
+    // R-IN-7: a terminated paste larger than the bound is segmented, not truncated. Every byte is
+    // preserved across the segments, the first carries the start bracket, the last is terminated.
+    let mut parser = SyntaxParser::with_payload_limit(4);
+    let mut toks = parser.feed(b"\x1b[200~abcdefghij\x1b[201~");
+    toks.extend(parser.finish());
+
+    assert!(toks.len() > 1, "a paste past the bound segments");
+    let mut payload = Vec::new();
+    for (i, token) in toks.iter().enumerate() {
+        let SyntaxToken::Paste(paste) = token else {
+            panic!("expected Paste, got {token:?}");
+        };
+        assert_eq!(paste.is_first(), i == 0);
+        assert_eq!(paste.is_final(), i == toks.len() - 1);
+        payload.extend_from_slice(paste.payload());
+    }
+    assert_eq!(payload, b"abcdefghij", "no paste byte is dropped");
+    let SyntaxToken::Paste(last) = toks.last().expect("segments") else {
+        unreachable!()
+    };
+    assert!(last.terminated());
+}
+
+#[test]
+fn empty_paste_is_a_single_terminated_segment() {
+    let toks = tokens(b"\x1b[200~\x1b[201~");
+    assert_eq!(toks.len(), 1);
+    let SyntaxToken::Paste(paste) = &toks[0] else {
+        panic!("expected Paste, got {:?}", toks[0]);
+    };
+    assert_eq!(paste.payload(), b"");
+    assert!(paste.is_first() && paste.is_final() && paste.terminated());
+}

@@ -40,6 +40,10 @@ point without scanning the repository tree.
 - `kitty_keyboard.rs`: request kitty keyboard progressive-enhancement flags with verify-after-push
   (`TokioTerminalSession::request_kitty_keyboard`), inspect the granted subset, and decode rich key
   events including releases and modifiers; the session pops the granted flags on `leave`.
+- `mouse_and_paste.rs`: enable SGR mouse (`enable_mouse`), focus (`enable_focus_events`), and
+  bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
+  and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control
+  bytes flagged; the session resets all three modes on `leave`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to

@@ -95,6 +95,21 @@ fn adversarial_corpus() -> Vec<(&'static str, Vec<u8>)> {
         ("charset_escape", b"\x1b(B".to_vec()),
         ("bare_esc_then_can", b"\x1b\x18".to_vec()),
         ("control_run", b"a\x00\x01\x7fb".to_vec()),
+        // Bracketed-paste captured opaquely at the syntax layer: embedded escape sequences are
+        // payload data, an embedded false-start end bracket is payload, and an unterminated paste
+        // flushes bounded rather than hanging. These exercise reconstruction and split-equivalence
+        // over the paste state exactly as strings do.
+        (
+            "paste_embedded_sequences",
+            b"\x1b[200~\x1b[31mred\x1b]0;t\x07\x1b[201~".to_vec(),
+        ),
+        (
+            "paste_false_end_then_real",
+            b"\x1b[200~x\x1b[201x~\x1b\x1b[201~".to_vec(),
+        ),
+        ("paste_8bit_end", b"\x1b[200~hi\x9b201~".to_vec()),
+        ("paste_unterminated", b"\x1b[200~never ends here".to_vec()),
+        ("paste_empty", b"\x1b[200~\x1b[201~".to_vec()),
         ("all_bytes", (0u8..=255).collect()),
     ]
 }
@@ -127,6 +142,9 @@ fn reconstruct(tokens: &[SyntaxToken], filler: &[u8]) -> Vec<u8> {
 }
 
 /// Returns the dropped-byte count for a truncated string token, or `None`.
+///
+/// Paste tokens never truncate — a large paste is segmented losslessly (design 02), so every paste
+/// segment reconstructs byte-exact and reports no drops.
 fn dropped_bytes(token: &SyntaxToken) -> Option<usize> {
     let (SyntaxToken::Osc(string)
     | SyntaxToken::Dcs(string)
@@ -296,6 +314,122 @@ fn bounds_hold_parser_memory_for_unterminated_osc_stream() {
     assert_eq!(osc.payload().len(), limit);
     assert_eq!(osc.dropped_bytes(), 256 * 4096 - limit);
     assert_eq!(osc.terminator(), qwertty::StringTerminator::None);
+}
+
+#[test]
+fn bounds_hold_for_unterminated_paste_stream() {
+    // FM-A8/FM-P12: a bracketed paste whose `ESC [ 201 ~` terminator never arrives must not grow
+    // parser memory without limit. A 1 MiB unterminated paste fed in 4 KiB chunks streams as
+    // bounded segments — parser memory stays within the bound plus a small constant — then flushes
+    // a final, unterminated segment rather than hanging. No paste byte is dropped.
+    let limit = qwertty::DEFAULT_PAYLOAD_LIMIT;
+    let mut parser = SyntaxParser::new();
+    let mut segments = parser.feed(b"\x1b[200~");
+
+    let chunk = vec![b'A'; 4096];
+    for _ in 0..256 {
+        segments.extend(parser.feed(&chunk));
+        assert!(
+            parser.pending_bytes().len() <= limit + 16,
+            "paste pending grew past the bound: {}",
+            parser.pending_bytes().len()
+        );
+    }
+    segments.extend(parser.finish());
+
+    // Every segment is a paste token; exactly one is first, exactly one is final and unterminated.
+    let mut payload_total = 0usize;
+    let mut firsts = 0;
+    let mut finals = 0;
+    for token in &segments {
+        let SyntaxToken::Paste(paste) = token else {
+            panic!("expected Paste segment, got {token:?}");
+        };
+        payload_total += paste.payload().len();
+        firsts += usize::from(paste.is_first());
+        if paste.is_final() {
+            finals += 1;
+            assert!(!paste.terminated(), "no end bracket ever arrived");
+        }
+    }
+    assert_eq!(firsts, 1);
+    assert_eq!(finals, 1);
+    // Lossless: every pasted byte is accounted for across the segments (no drops).
+    assert_eq!(payload_total, 256 * 4096);
+}
+
+#[test]
+fn bounds_hold_for_paste_payload_that_keeps_an_end_bracket_candidate_alive() {
+    // Fuzz regression (syntax_no_panic_bounded): a paste payload of ESC bytes keeps a one-byte
+    // end-bracket candidate (`ESC` is a prefix of `ESC [ 201 ~`) alive on every byte. Segmenting
+    // must still fire on the committed payload — the held candidate lives outside `retained` — so
+    // parser memory never grows past the bound, and the ESC run is preserved losslessly.
+    let limit = 8;
+    let mut input = Vec::from(*b"\x1b[200~");
+    input.extend(std::iter::repeat_n(0x1b, 100)); // 100 ESC bytes, each a live candidate
+    input.extend_from_slice(b"\x1b[201~");
+
+    let mut parser = SyntaxParser::with_payload_limit(limit);
+    let mut segments = Vec::new();
+    for chunk in input.chunks(3) {
+        segments.extend(parser.feed(chunk));
+        assert!(
+            parser.pending_bytes().len() <= limit + 16,
+            "paste pending grew past the bound: {}",
+            parser.pending_bytes().len()
+        );
+    }
+    segments.extend(parser.finish());
+
+    // The 100 ESC payload bytes are all preserved across the bounded segments (none dropped).
+    let payload_total: usize = segments
+        .iter()
+        .map(|token| match token {
+            SyntaxToken::Paste(paste) => paste.payload().len(),
+            other => panic!("expected Paste, got {other:?}"),
+        })
+        .sum();
+    assert_eq!(payload_total, 100);
+    // Reconstruction stays byte-exact.
+    let rebuilt: Vec<u8> = segments
+        .iter()
+        .flat_map(|t| t.as_bytes().to_vec())
+        .collect();
+    assert_eq!(rebuilt, input);
+}
+
+#[test]
+fn terminated_paste_is_lossless_regardless_of_size() {
+    // R-IN-7: a *terminated* paste is delivered losslessly no matter how large. A 256 KiB paste
+    // that closes normally keeps its whole payload even at the default 64 KiB bound, delivered as
+    // several bounded segments whose payloads concatenate to the whole paste.
+    let mut input = Vec::from(*b"\x1b[200~");
+    let payload_len = 256 * 1024;
+    input.extend(std::iter::repeat_n(b'x', payload_len));
+    input.extend_from_slice(b"\x1b[201~");
+
+    let tokens = tokenize_whole(&input, qwertty::DEFAULT_PAYLOAD_LIMIT);
+    assert!(tokens.len() > 1, "a large paste segments");
+
+    let mut payload_total = 0usize;
+    for (i, token) in tokens.iter().enumerate() {
+        let SyntaxToken::Paste(paste) = token else {
+            panic!("expected Paste segment, got {token:?}");
+        };
+        assert_eq!(paste.is_first(), i == 0);
+        assert_eq!(paste.is_final(), i == tokens.len() - 1);
+        payload_total += paste.payload().len();
+    }
+    payload_total += 0; // no drops
+    assert_eq!(payload_total, payload_len, "no paste byte is lost");
+    let SyntaxToken::Paste(last) = tokens.last().expect("at least one segment") else {
+        unreachable!()
+    };
+    assert!(last.terminated(), "the closing bracket was seen");
+
+    // Reconstruction stays byte-exact across all segments.
+    let rebuilt: Vec<u8> = tokens.iter().flat_map(|t| t.as_bytes().to_vec()).collect();
+    assert_eq!(rebuilt, input);
 }
 
 #[test]

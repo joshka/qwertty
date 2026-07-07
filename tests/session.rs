@@ -110,6 +110,47 @@ fn pty_restore_handle_restores_from_another_thread_once() {
 }
 
 #[test]
+fn emergency_blob_resets_enabled_modes_on_a_panic_teardown() {
+    use qwertty::commands::terminal::MouseMode;
+
+    let Some((mut master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    set_nonblocking(&master).expect("set pty master nonblocking");
+
+    let terminal = Terminal::open_path(&slave_path).expect("open pty-backed terminal");
+    let mut session = TerminalSession::from_terminal(terminal).expect("start terminal session");
+    let restore = session.restore_handle();
+
+    // Enable the three modes; each records a byte-based ledger entry whose undo joins the emergency
+    // blob published to the restore handle.
+    session
+        .enable_mouse(MouseMode::ButtonEvent)
+        .expect("enable mouse")
+        .enable_focus_events()
+        .expect("enable focus")
+        .enable_bracketed_paste()
+        .expect("enable paste")
+        .flush()
+        .expect("flush");
+    // Drain the enable bytes so the next read sees only the emergency output.
+    let _ = read_available_after_quiet(&mut master).expect("drain enable bytes");
+
+    // The emergency path (as a panic hook would) writes the precomposed reset blob directly.
+    let restored = thread::spawn(move || restore.restore())
+        .join()
+        .expect("join restore thread");
+    assert!(restored, "the emergency path should perform restoration");
+
+    let blob = read_available_after_quiet(&mut master).expect("read emergency blob");
+    // The blob resets the enabled modes in reverse enablement order: paste, focus, mouse.
+    assert_eq!(blob, b"\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l");
+
+    // Orderly leave after an emergency restoration is a clean no-op (idempotent).
+    session.leave().expect("leave after emergency restoration");
+}
+
+#[test]
 fn fake_device_session_round_trips_headless() {
     let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
     let mut session = TerminalSession::from_device(device).expect("start fake session");
@@ -132,6 +173,100 @@ fn fake_device_session_round_trips_headless() {
 
     session.leave().expect("leave fake session");
     assert_eq!(fake_terminal.modes(), [DeviceMode::Raw, DeviceMode::Cooked]);
+}
+
+#[test]
+fn enable_modes_write_in_order_and_leave_undoes_in_reverse() {
+    use qwertty::commands::terminal::MouseMode;
+
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    // Enable mouse (button-event tracking + SGR), focus, then bracketed paste, in that order.
+    session
+        .enable_mouse(MouseMode::ButtonEvent)
+        .expect("enable mouse")
+        .enable_focus_events()
+        .expect("enable focus")
+        .enable_bracketed_paste()
+        .expect("enable paste")
+        .flush()
+        .expect("flush");
+
+    // The enable bytes were written immediately, in enablement order. `output` drains, so this is
+    // exactly what was written since construction (raw mode is a device mode, not bytes).
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h",
+    );
+
+    session.leave().expect("leave fake session");
+
+    // Leave writes the undo bytes in reverse enablement order: paste, focus, then mouse (SGR reset
+    // before the tracking-mode reset).
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l",
+    );
+    assert_eq!(
+        fake_terminal.modes(),
+        [DeviceMode::Raw, DeviceMode::Cooked],
+        "raw mode is restored through the device, not written bytes",
+    );
+}
+
+#[test]
+fn re_entering_replays_enabled_modes() {
+    use qwertty::commands::terminal::MouseMode;
+
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .enable_mouse(MouseMode::AnyEvent)
+        .expect("enable mouse")
+        .enable_bracketed_paste()
+        .expect("enable paste")
+        .flush()
+        .expect("flush");
+    session.leave().expect("leave");
+    let _ = fake_terminal.output().expect("drain enables and undos");
+
+    // Re-entering replays the enable bytes in enablement order.
+    session.enter().expect("re-enter");
+    session.flush().expect("flush");
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?1003h\x1b[?1006h\x1b[?2004h",
+        "re-enter replays the enabled modes in enablement order",
+    );
+    session.leave().expect("final leave");
+}
+
+#[test]
+fn switching_mouse_mode_replaces_the_tracking_mode() {
+    use qwertty::commands::terminal::MouseMode;
+
+    let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+    session
+        .enable_mouse(MouseMode::Normal)
+        .expect("enable normal mouse")
+        .enable_mouse(MouseMode::AnyEvent)
+        .expect("switch to any-event mouse")
+        .flush()
+        .expect("flush");
+    let _ = fake_terminal.output().expect("drain both enables");
+    session.leave().expect("leave");
+
+    // Both enables were written, but the single-instance ledger entry means leave undoes only the
+    // latest tracking mode (1003), never the superseded 1000.
+    assert_eq!(
+        fake_terminal.output().expect("output"),
+        b"\x1b[?1006l\x1b[?1003l",
+        "only the latest mouse mode is undone",
+    );
 }
 
 #[test]

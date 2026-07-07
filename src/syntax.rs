@@ -74,8 +74,8 @@
 mod token;
 
 pub use token::{
-    ControlParams, ControlSequence, EscapeSequence, Param, ParamSeparator, StringKind,
-    StringSequence, StringTerminator, SyntaxToken,
+    ControlParams, ControlSequence, EscapeSequence, Param, ParamSeparator, PasteSequence,
+    StringKind, StringSequence, StringTerminator, SyntaxToken,
 };
 
 const ESC: u8 = 0x1b;
@@ -85,6 +85,15 @@ const SUB: u8 = 0x1a;
 const DELETE: u8 = 0x7f;
 
 const C1_ST: u8 = 0x9c;
+
+/// The parameter bytes of a bracketed-paste start bracket (`ESC [ 200 ~`).
+const PASTE_START_PARAM: &[u8] = b"200";
+/// The final byte of both bracketed-paste brackets.
+const PASTE_FINAL: u8 = b'~';
+/// The exact 7-bit paste end bracket, `ESC [ 201 ~`.
+const PASTE_END_7BIT: &[u8] = b"\x1b[201~";
+/// The exact 8-bit paste end bracket, `0x9b 201 ~` (C1 CSI introducer).
+const PASTE_END_8BIT: &[u8] = b"\x9b201~";
 
 /// Default string-payload byte bound (64 KiB), chosen to clear known-large legitimate payloads.
 pub const DEFAULT_PAYLOAD_LIMIT: usize = 64 * 1024;
@@ -97,6 +106,24 @@ pub const DEFAULT_PAYLOAD_LIMIT: usize = 64 * 1024;
 ///
 /// Parser memory is bounded: no input, terminated or not, grows internal buffering past the
 /// configured payload limit plus a small constant (see [`SyntaxParser::with_payload_limit`]).
+///
+/// # Bracketed paste
+///
+/// A bracketed paste (`ESC [ 200 ~ … ESC [ 201 ~`) is captured as opaque [`SyntaxToken::Paste`]
+/// payload rather than tokenized as syntax: the bytes between the brackets are *data*, so an
+/// embedded escape sequence is kept verbatim as paste payload, never split into control tokens (see
+/// [`PasteSequence`] for why this layering is correct). On the `ESC [ 200 ~` start bracket the
+/// parser enters a paste-capture state and treats every byte until the exact `ESC [ 201 ~` (or
+/// 8-bit `0x9b 201 ~`) end bracket as payload, recognizing the end bracket with a streaming matcher
+/// that keeps a false start (`ESC [ 201 x ~`) as payload.
+///
+/// A paste stays lossless *and* memory-bounded through segmentation: when a segment's kept payload
+/// reaches the payload limit while the paste is still open, the parser emits a bounded, non-final
+/// [`SyntaxToken::Paste`] segment and continues. A terminated paste delivers all its segments with
+/// the last flagged final; an unterminated one streams bounded segments and, at
+/// [`finish`](SyntaxParser::finish), flushes a final segment marked not
+/// [`terminated`](PasteSequence::terminated) — never an unbounded buffer, never a hang, and never a
+/// dropped paste byte (FM-A8/FM-P12).
 ///
 /// # Example
 ///
@@ -143,7 +170,10 @@ impl SyntaxParser {
     ///
     /// The same bound caps CSI/DCS parameter prefixes, escape-intermediate runs, and the size of
     /// individual [`SyntaxToken::Text`] slices; those paths re-classify over-limit bytes instead
-    /// of dropping them, so they stay reconstruction-exact.
+    /// of dropping them, so they stay reconstruction-exact. It also caps a bracketed paste's
+    /// per-segment payload: an over-limit paste is emitted in bounded [`SyntaxToken::Paste`]
+    /// segments rather than truncated, so paste stays lossless (see [the paste
+    /// rules](#bracketed-paste)).
     #[must_use]
     pub fn with_payload_limit(payload_limit: usize) -> Self {
         Self {
@@ -171,6 +201,7 @@ impl SyntaxParser {
             State::Ground => &[],
             State::Partial(pending) => pending,
             State::InString(accum) => &accum.retained,
+            State::InPaste(accum) => &accum.retained,
         }
     }
 
@@ -195,6 +226,15 @@ impl SyntaxParser {
                     }
                     StringOutcome::Done(next) => bytes[next..].to_vec(),
                     StringOutcome::DoneWithHeldEsc(next) => held_esc_buffer(&bytes[next..]),
+                }
+            }
+            State::InPaste(mut accum) => {
+                match consume_paste(&mut accum, bytes, 0, self.payload_limit, &mut tokens) {
+                    PasteOutcome::Exhausted => {
+                        self.state = State::InPaste(accum);
+                        return tokens;
+                    }
+                    PasteOutcome::Done(next) => bytes[next..].to_vec(),
                 }
             }
         };
@@ -222,6 +262,16 @@ impl SyntaxParser {
                             buffer = held_esc_buffer(&buffer[next..]);
                             index = 0;
                         }
+                    }
+                }
+                Step::EnterPaste(mut accum, next) => {
+                    match consume_paste(&mut accum, &buffer, next, self.payload_limit, &mut tokens)
+                    {
+                        PasteOutcome::Exhausted => {
+                            self.state = State::InPaste(accum);
+                            return tokens;
+                        }
+                        PasteOutcome::Done(next) => index = next,
                     }
                 }
             }
@@ -253,6 +303,13 @@ impl SyntaxParser {
                 }
                 emit_string_token(&mut accum, StringTerminator::None, &mut tokens);
             }
+            State::InPaste(mut accum) => {
+                // Input ended before the end bracket: any bytes held as a possible end-bracket
+                // prefix are payload after all, and the paste flushes as a final, unterminated
+                // segment.
+                accum.flush_pending_match();
+                tokens.push(accum.into_final_token(false));
+            }
         }
         tokens
     }
@@ -270,6 +327,9 @@ enum State {
     /// Inside a string sequence's payload, scanning incrementally for its terminator. Payload
     /// accumulation is bounded; chunk bytes are consumed directly and never re-scanned.
     InString(StringAccum),
+    /// Inside a bracketed-paste payload, scanning incrementally for the `ESC [ 201 ~` end bracket.
+    /// Payload accumulation is bounded exactly like a string; chunk bytes are consumed directly.
+    InPaste(PasteAccum),
 }
 
 /// Accumulator for an in-progress string sequence (OSC/DCS/APC/PM/SOS).
@@ -451,6 +511,185 @@ fn string_token(kind: StringKind, sequence: StringSequence) -> SyntaxToken {
     }
 }
 
+/// Accumulator for an in-progress bracketed-paste span.
+///
+/// The payload between the brackets is opaque: bytes are consumed directly with no syntactic
+/// interpretation. The only thing scanned for is the exact `ESC [ 201 ~` (or `0x9b 201 ~`) end
+/// bracket. Bytes that begin a candidate end bracket are held in `pending_match` — not yet
+/// committed as payload — until the candidate either completes (the paste terminates) or breaks
+/// (the held bytes flush to payload and matching re-attempts from a shift).
+///
+/// A paste larger than the bound is emitted losslessly as bounded segments: when the retained
+/// payload reaches `limit`, [`consume_paste`] flushes a non-final segment and resets the buffer. No
+/// paste byte is ever dropped; the bound caps per-segment memory only.
+#[derive(Clone, Debug)]
+struct PasteAccum {
+    /// Retained raw bytes of the current segment: the start bracket (first segment only) and the
+    /// kept payload for this segment. Bounded by the payload limit.
+    retained: Vec<u8>,
+    /// Offset in `retained` where this segment's payload begins (start bracket length, else `0`).
+    payload_start: usize,
+    /// Whether the *next* segment emitted is the paste's first (carries the start bracket flag).
+    is_first: bool,
+    /// Bytes of an in-progress end-bracket candidate, not yet committed as payload.
+    pending_match: Vec<u8>,
+}
+
+impl PasteAccum {
+    fn new(start_bracket: Vec<u8>) -> Self {
+        let payload_start = start_bracket.len();
+        Self {
+            retained: start_bracket,
+            payload_start,
+            is_first: true,
+            pending_match: Vec::new(),
+        }
+    }
+
+    /// Number of payload bytes kept in the current segment.
+    fn segment_payload_len(&self) -> usize {
+        self.retained.len() - self.payload_start
+    }
+
+    /// Commits one payload byte to the current segment's retained bytes.
+    fn push_payload(&mut self, byte: u8) {
+        self.retained.push(byte);
+    }
+
+    /// Feeds a byte that broke the current end-bracket candidate: flush the first held byte to
+    /// payload and re-test the remaining held bytes (plus the new byte) for a fresh candidate.
+    ///
+    /// This is the shift step that keeps matching correct across overlapping candidate starts (for
+    /// example a payload `ESC ESC [ 2 0 1 ~`, where the first ESC is payload and the second begins
+    /// the real end bracket). It always makes progress: at least one held byte is committed.
+    fn advance_after_break(&mut self, byte: u8) {
+        let mut candidate = std::mem::take(&mut self.pending_match);
+        candidate.push(byte);
+        let mut start = 1;
+        loop {
+            self.push_payload(candidate[start - 1]);
+            let suffix = &candidate[start..];
+            if is_paste_end_prefix(suffix) {
+                self.pending_match = suffix.to_vec();
+                return;
+            }
+            if start == candidate.len() {
+                self.pending_match.clear();
+                return;
+            }
+            start += 1;
+        }
+    }
+
+    /// At end of input, any held candidate bytes are ordinary payload after all.
+    fn flush_pending_match(&mut self) {
+        let held = std::mem::take(&mut self.pending_match);
+        for byte in held {
+            self.push_payload(byte);
+        }
+    }
+
+    /// Emits a non-final segment (payload only, no end bracket) and resets for the next segment.
+    ///
+    /// Called when the current segment's payload reaches the bound while the paste is still open,
+    /// so a large paste streams losslessly rather than buffering unbounded or dropping bytes.
+    fn emit_segment(&mut self, tokens: &mut Vec<SyntaxToken>) {
+        let payload = self.retained[self.payload_start..].to_vec();
+        let raw = std::mem::take(&mut self.retained);
+        tokens.push(SyntaxToken::Paste(PasteSequence::new(
+            raw,
+            payload,
+            self.is_first,
+            false,
+            false,
+        )));
+        self.is_first = false;
+        self.payload_start = 0;
+    }
+
+    /// Builds the final segment, appending the end bracket when `terminated`.
+    fn into_final_token(mut self, terminated: bool) -> SyntaxToken {
+        let payload = self.retained[self.payload_start..].to_vec();
+        if terminated {
+            // The end bracket matched; its exact 7- or 8-bit bytes live in `pending_match`.
+            self.retained.extend_from_slice(&self.pending_match);
+        }
+        SyntaxToken::Paste(PasteSequence::new(
+            self.retained,
+            payload,
+            self.is_first,
+            true,
+            terminated,
+        ))
+    }
+}
+
+/// Returns whether `bytes` is a (possibly empty, possibly complete) prefix of an end bracket.
+fn is_paste_end_prefix(bytes: &[u8]) -> bool {
+    PASTE_END_7BIT.starts_with(bytes) || PASTE_END_8BIT.starts_with(bytes)
+}
+
+/// Returns whether `bytes` is a complete end bracket (7-bit or 8-bit form).
+fn is_paste_end(bytes: &[u8]) -> bool {
+    bytes == PASTE_END_7BIT || bytes == PASTE_END_8BIT
+}
+
+/// Result of consuming chunk bytes while inside a bracketed-paste payload.
+enum PasteOutcome {
+    /// The chunk ended with the paste still open.
+    Exhausted,
+    /// The end bracket completed; continue parsing at this index.
+    Done(usize),
+}
+
+/// Consumes bytes for an in-progress paste, segmenting at the bound and scanning for the end
+/// bracket. Emits the final (and any bounded intermediate) paste segment tokens into `tokens`.
+fn consume_paste(
+    accum: &mut PasteAccum,
+    bytes: &[u8],
+    start: usize,
+    limit: usize,
+    tokens: &mut Vec<SyntaxToken>,
+) -> PasteOutcome {
+    let mut index = start;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let mut candidate = accum.pending_match.clone();
+        candidate.push(byte);
+
+        if is_paste_end(&candidate) {
+            // The end bracket completed. `pending_match` holds the exact terminator bytes.
+            accum.pending_match = candidate;
+            let token =
+                std::mem::replace(accum, PasteAccum::new(Vec::new())).into_final_token(true);
+            tokens.push(token);
+            return PasteOutcome::Done(index + 1);
+        }
+
+        if is_paste_end_prefix(&candidate) {
+            // Still a live candidate: hold the byte without committing it as payload yet.
+            accum.pending_match = candidate;
+        } else {
+            // The candidate broke: flush the earliest held byte to payload and re-test.
+            accum.advance_after_break(byte);
+        }
+
+        // Segment losslessly at the bound so a large open paste stays memory-bounded. The held
+        // end-bracket candidate (`pending_match`) lives outside `retained`, so a segment can be cut
+        // even while a candidate is held: the candidate carries into the next segment untouched,
+        // and if it later completes the terminator falls on that final segment. Without
+        // this, a payload that keeps a one-byte candidate alive forever (a run of ESC
+        // bytes, each a prefix of `ESC [ 201 ~`) would grow `retained` without bound — the
+        // fuzz-found regression.
+        if accum.segment_payload_len() >= limit {
+            accum.emit_segment(tokens);
+        }
+        index += 1;
+    }
+
+    PasteOutcome::Exhausted
+}
+
 /// One parsing step at a token boundary.
 enum Step {
     /// A complete token; continue at the index.
@@ -460,6 +699,9 @@ enum Step {
     /// A string sequence's introducer (and DCS prefix) completed; consume its payload from the
     /// index onward through the bounded string accumulator.
     EnterString(StringAccum, usize),
+    /// A bracketed-paste start bracket (`ESC [ 200 ~` or `0x9b 200 ~`) completed; consume the
+    /// opaque payload from the index onward, scanning for the `ESC [ 201 ~` end bracket.
+    EnterPaste(PasteAccum, usize),
 }
 
 /// Classifies the byte at `index`, which is always a token boundary.
@@ -509,6 +751,19 @@ fn parse_csi(bytes: &[u8], start: usize, prefix_len: usize, cap: usize) -> Step 
             final_byte,
             end,
         } => {
+            // A bracketed-paste start bracket (`ESC [ 200 ~` / `0x9b 200 ~`) begins opaque paste
+            // capture instead of surfacing as an ordinary CSI: the payload that follows is data,
+            // not syntax, and must not be tokenized (see `PasteSequence`). The match is
+            // exact — no private markers, no intermediates, param bytes `200`, final
+            // `~`.
+            if private_markers.is_empty()
+                && intermediates.is_empty()
+                && param_bytes == PASTE_START_PARAM
+                && final_byte == PASTE_FINAL
+            {
+                let accum = PasteAccum::new(bytes[start..end].to_vec());
+                return Step::EnterPaste(accum, end);
+            }
             let params =
                 ControlParams::new(private_markers, param_bytes, intermediates, final_byte);
             let token = SyntaxToken::Csi(ControlSequence::new(bytes[start..end].to_vec(), params));

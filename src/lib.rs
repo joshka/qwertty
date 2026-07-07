@@ -21,6 +21,8 @@
 //! - `FakeDevice` and `FakeTerminal`, an in-process device pair for headless tests on Unix.
 //! - [`TerminalSession`], an application-facing owner for raw mode, ordered output, flushing, and
 //!   explicit leave cleanup.
+//! - [`KittyKeyboardFlags`] and [`KittyKeyboardGrant`], the caller-chosen kitty keyboard
+//!   progressive-enhancement request set and the granted result of the verify-after-push handshake.
 //! - `RestoreHandle`, a panic-safe emergency terminal-restore handle on Unix.
 //! - [`InputBytes`], raw terminal input bytes read through a session.
 //! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
@@ -83,7 +85,7 @@ pub use input::InputBytes;
 pub use report::{CursorPositionReport, TerminalStatus, TerminalStatusReport};
 #[cfg(unix)]
 pub use session::RestoreHandle;
-pub use session::TerminalSession;
+pub use session::{KittyKeyboardFlags, KittyKeyboardGrant, TerminalSession};
 pub use syntax::{
     ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
     StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,

@@ -132,6 +132,15 @@ pub enum Expectation {
         allow(dead_code, reason = "M3 fence; test-exercised, unwired until then")
     )]
     PrimaryDeviceAttributes,
+    /// The kitty keyboard flags report, answering a `CSI ? u` query.
+    ///
+    /// Matches the `CSI ? flags u` report the terminal sends for the current progressive
+    /// enhancement flags (the *granted* set). This is the verify-after-push oracle (design 06): a
+    /// session pushes `CSI > flags u`, queries `CSI ? u`, and this expectation completes with the
+    /// flags the terminal actually granted, which the session records in its ledger. Its reply
+    /// shape (`CSI ? … u`) is disjoint from the M2 variants by final byte and from DA1 by final
+    /// byte, so it distinguishes from all of them.
+    KittyKeyboardFlags,
 }
 
 impl Expectation {
@@ -151,6 +160,9 @@ impl Expectation {
             Self::PrimaryDeviceAttributes => {
                 match_primary_device_attributes(csi).map(Reply::PrimaryDeviceAttributes)
             }
+            Self::KittyKeyboardFlags => {
+                crate::event::decode_kitty_flags_report(csi).map(Reply::KittyKeyboardFlags)
+            }
         }
     }
 }
@@ -165,11 +177,11 @@ impl Expectation {
 /// never distinguishes from itself — that is the coalescing case), symmetric, and enumerable per
 /// pair.
 ///
-/// For the M2 variants the reply shapes are disjoint by final byte — CPR ends in `R`, DSR in `n`,
-/// DA1 in `c` — so every pair of *different* variants distinguishes. The only non-distinguishing
-/// pairs are the identical ones. M3's discriminator-carrying variants (DECRQM by mode, OSC colour
-/// by index) refine this: same variant, different discriminator distinguishes; same discriminator
-/// does not.
+/// For the current variants the reply shapes are disjoint by final byte — CPR ends in `R`, DSR in
+/// `n`, DA1 in `c`, and the kitty flags report in `u` (with a `?` marker DA1 lacks) — so every pair
+/// of *different* variants distinguishes. The only non-distinguishing pairs are the identical ones.
+/// M3's discriminator-carrying variants (DECRQM by mode, OSC colour by index) refine this: same
+/// variant, different discriminator distinguishes; same discriminator does not.
 ///
 /// # Example
 ///
@@ -226,6 +238,13 @@ pub enum Reply {
     /// probe layer can inspect them if it wants; the correlator itself treats DA1 only as a
     /// fence.
     PrimaryDeviceAttributes(DeviceAttributes),
+    /// A kitty keyboard flags report completed an [`Expectation::KittyKeyboardFlags`].
+    ///
+    /// Carries the *granted* progressive enhancement flag bitset the terminal reported for
+    /// `CSI ? u`. The session compares this against the flags it pushed (verify-after-push, design
+    /// 06): the granted set can be a subset of the requested set, and the ledger records the
+    /// granted reality.
+    KittyKeyboardFlags(u8),
 }
 
 /// The parameters of a Primary Device Attributes (DA1) fence reply.

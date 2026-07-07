@@ -33,8 +33,8 @@ use tokio::time::{Instant, timeout_at};
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::{
-    Command, Event, InputBytes, SemanticDecoder, Terminal, TerminalDevice, TerminalSession,
-    TerminalSize, commands, terminal,
+    Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, SemanticDecoder, Terminal,
+    TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
 
 const DEV_TTY: &str = "/dev/tty";
@@ -503,6 +503,70 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         match reply {
             Reply::TerminalStatus(report) => Ok(report),
             other => Err(unexpected_reply(other)),
+        }
+    }
+
+    /// Requests kitty keyboard progressive-enhancement flags and verifies what was granted.
+    ///
+    /// This is the verify-after-push handshake (design 06). It:
+    ///
+    /// 1. writes `CSI > flags u` to push the caller-chosen `requested` flags (rabbitui P0-4);
+    /// 2. queries `CSI ? u` and reads decoded input until the `CSI ? flags u` reply completes,
+    ///    exactly like the cursor-position and terminal-status helpers — unrelated events read
+    ///    before the reply stay queued for later [`next_event`](Self::next_event) calls;
+    /// 3. records the **granted** flags in the session mode ledger (`CSI > granted u` to re-apply,
+    ///    `CSI < 1 u` to pop), so teardown pops the reality, not the request; and
+    /// 4. returns a [`KittyKeyboardGrant`] carrying the requested set and what the terminal
+    ///    granted.
+    ///
+    /// The granted set may be a subset of the requested set (the mismatch case the caller must
+    /// handle). On a terminal that never answers the query — an old terminal, or a mux that
+    /// swallowed it — the request **degrades gracefully**: the `timeout` elapses (or the terminal
+    /// closes), the grant is recorded as *unknown* ([`KittyKeyboardGrant::is_unknown`]), **no**
+    /// keyboard entry is recorded in the ledger, and no enhancement is assumed (FM-C4: unknown is
+    /// not unsupported). Only a genuine read error other than EOF surfaces as an `Err`.
+    ///
+    /// `timeout` bounds the whole request/response operation. Cancelling the future while it is
+    /// waiting leaves the session usable and preserves unrelated decoded events for later calls;
+    /// note that the push bytes are already on the wire, so a cancelled request may leave flags
+    /// pushed that the ledger has not recorded — call this to completion for the recorded-teardown
+    /// guarantee.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when writing, flushing, or a non-EOF read fails. A query timeout or
+    /// EOF is reported as an unknown grant, not an error.
+    pub async fn request_kitty_keyboard(
+        &mut self,
+        requested: KittyKeyboardFlags,
+        timeout: Duration,
+    ) -> terminal::Result<KittyKeyboardGrant> {
+        self.command(commands::terminal::push_kitty_keyboard_flags(requested))
+            .await?;
+
+        let reply = self
+            .run_query(
+                Expectation::KittyKeyboardFlags,
+                commands::terminal::query_kitty_keyboard_flags(),
+                "kitty keyboard flags query",
+                timeout,
+            )
+            .await;
+
+        match reply {
+            Ok(Reply::KittyKeyboardFlags(bits)) => {
+                let granted = KittyKeyboardFlags::from_bits(bits);
+                self.session.record_kitty_keyboard(granted);
+                Ok(KittyKeyboardGrant::new(requested, Some(granted)))
+            }
+            Ok(other) => Err(unexpected_reply(other)),
+            // A timeout or EOF means the terminal never answered: unknown, not unsupported. The
+            // request degrades gracefully — no ledger entry, no assumed enhancement.
+            Err(terminal::Error::QueryTimeout { .. }) => {
+                Ok(KittyKeyboardGrant::new(requested, None))
+            }
+            Err(err) if is_unexpected_eof(&err) => Ok(KittyKeyboardGrant::new(requested, None)),
+            Err(err) => Err(err),
         }
     }
 

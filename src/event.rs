@@ -64,8 +64,10 @@
 //! ```
 
 mod key;
+mod kitty;
 
 pub use key::{Key, KeyEvent, KeyEventKind, Modifiers, TextPayload};
+pub(crate) use kitty::decode_flags_report as decode_kitty_flags_report;
 
 use crate::syntax::{EscapeSequence, SyntaxParser, SyntaxToken};
 
@@ -233,10 +235,14 @@ fn map_token(token: SyntaxToken, events: &mut Vec<Event>) {
         SyntaxToken::Text(bytes) => push_text_events(&bytes, events),
         // A C0 control maps to its named key, or a lossless catch-all key.
         SyntaxToken::Control(byte) => events.push(Event::Key(control_key_event(byte))),
-        // Arrow-key CSI decodes to a key event; every other CSI passes through as syntax.
-        SyntaxToken::Csi(csi) => match arrow_key(&csi) {
-            Some(key) => events.push(Event::Key(KeyEvent::new(key))),
-            None => events.push(Event::Syntax(SyntaxToken::Csi(csi))),
+        // A kitty `CSI u` (or legacy modified functional) sequence decodes to a rich key event; an
+        // unmodified arrow decodes to its bare key; every other CSI passes through as syntax.
+        SyntaxToken::Csi(csi) => match kitty::decode_key(&csi) {
+            Some(event) => events.push(Event::Key(event)),
+            None => match arrow_key(&csi) {
+                Some(key) => events.push(Event::Key(KeyEvent::new(key))),
+                None => events.push(Event::Syntax(SyntaxToken::Csi(csi))),
+            },
         },
         // A bare trailing Escape (no final byte) is the standalone Escape key; a complete escape
         // sequence passes through as syntax.

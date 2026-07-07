@@ -42,7 +42,11 @@ When a query helper reads terminal input before its matching response arrives:
 That behavior applies to the current live query helpers:
 
 - `request_cursor_position`, which sends `CSI 6 n` and waits for `CSI row ; column R`;
-- `request_terminal_status`, which sends `CSI 5 n` and waits for `CSI 0 n` or `CSI 3 n`.
+- `request_terminal_status`, which sends `CSI 5 n` and waits for `CSI 0 n` or `CSI 3 n`;
+- `request_kitty_keyboard`, which pushes `CSI > flags u`, sends `CSI ? u`, and waits for the
+  `CSI ? flags u` granted-flags report (verify-after-push). Unlike the other two, an unanswered
+  query is reported as an *unknown* grant rather than a timeout error, and the granted flags are
+  recorded in the session's mode ledger so `leave` pops them.
 
 This means an application loop can interleave ordinary event reads and narrow typed queries without
 having to rebuild routing state around each request:

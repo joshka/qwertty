@@ -71,6 +71,18 @@ Why it is release-blocking:
   output writes;
 - represents the decoded async event stream that users should expect from the Tokio session owner.
 
+### `kitty_keyboard.rs`
+
+Why it is release-blocking:
+
+- proves the kitty keyboard verify-after-push workflow end to end:
+  `TokioTerminalSession::request_kitty_keyboard`, the granted-subset result, and rich key-event
+  decoding (releases, modifiers, associated text);
+- keeps the first release honest about owning the terminal's most-requested input enhancement, with
+  the granted-vs-requested and unknown-vs-unsupported distinctions users must act on;
+- represents the progressive-enhancement lifecycle (push, verify, ledger-recorded teardown) that no
+  other example covers.
+
 ### `tokio_query_error_handling.rs`
 
 Why it is release-blocking:

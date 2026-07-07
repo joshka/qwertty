@@ -16,8 +16,8 @@ use std::path::PathBuf;
 
 use qwertty::report::TerminalStatus;
 use qwertty::{
-    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, ProtocolPosition, SyntaxParser,
-    SyntaxToken, TokioTerminalSession, commands,
+    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, ProtocolPosition,
+    SyntaxParser, SyntaxToken, TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
@@ -875,6 +875,134 @@ async fn tokio_session_cancel_sweep_does_not_misdeliver_late_reply() {
     );
 
     session.leave().await.expect("leave Tokio fake session");
+}
+
+#[tokio::test]
+async fn tokio_session_requests_kitty_keyboard_and_records_granted_flags() {
+    // Verify-after-push over a headless fake terminal: the session pushes the requested flags,
+    // queries, the fake answers a granted set, and the ledger pops the granted set on leave
+    // (design 06). Here the terminal grants everything requested.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let requested =
+        KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES.union(KittyKeyboardFlags::REPORT_EVENT_TYPES);
+
+    let request = async move {
+        let grant = session
+            .request_kitty_keyboard(requested, Duration::from_secs(1))
+            .await
+            .expect("request kitty keyboard flags");
+        (session, grant)
+    };
+    let peer = async {
+        // The session writes the push then the query; the fake terminal answers with the granted
+        // set (all requested flags = 3).
+        let written = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read push+query");
+        assert_eq!(written, b"\x1b[>3u\x1b[?u");
+        terminal
+            .feed_input(b"\x1b[?3u")
+            .expect("feed granted-flags report");
+    };
+
+    let ((session, grant), ()) = tokio::join!(request, peer);
+
+    assert_eq!(grant.requested(), requested);
+    assert_eq!(grant.granted(), Some(requested));
+    assert!(grant.granted_all_requested());
+    assert!(!grant.is_unknown());
+
+    // Leaving pops the granted entry: `CSI < 1 u`, then cooked mode via termios (no bytes).
+    session.leave().await.expect("leave Tokio fake session");
+    let teardown = terminal.output().expect("read teardown output");
+    assert!(
+        teardown.windows(5).any(|w| w == b"\x1b[<1u"),
+        "leave must pop the granted kitty entry with CSI < 1 u, got {teardown:?}",
+    );
+}
+
+#[tokio::test]
+async fn tokio_session_kitty_keyboard_grant_can_be_a_subset() {
+    // Verify-after-push mismatch (helix handshake, design 06): the caller requests more than the
+    // terminal grants. The grant reports the smaller set, and the ledger records the *granted*
+    // reality (so teardown pops what is actually pushed), not the request.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let requested = KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES
+        .union(KittyKeyboardFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES);
+
+    let request = async move {
+        let grant = session
+            .request_kitty_keyboard(requested, Duration::from_secs(1))
+            .await
+            .expect("request kitty keyboard flags");
+        (session, grant)
+    };
+    let peer = async {
+        let written = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read push+query");
+        // Requested = 1 | 8 = 9.
+        assert_eq!(written, b"\x1b[>9u\x1b[?u");
+        // The terminal grants only the disambiguate bit (1).
+        terminal
+            .feed_input(b"\x1b[?1u")
+            .expect("feed partial-grant report");
+    };
+
+    let ((session, grant), ()) = tokio::join!(request, peer);
+
+    assert_eq!(
+        grant.granted(),
+        Some(KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
+    assert!(
+        !grant.granted_all_requested(),
+        "the terminal granted a subset, so the request was not fully satisfied",
+    );
+
+    session.leave().await.expect("leave Tokio fake session");
+    let teardown = terminal.output().expect("read teardown output");
+    assert!(
+        teardown.windows(5).any(|w| w == b"\x1b[<1u"),
+        "leave pops the granted entry even on a partial grant, got {teardown:?}",
+    );
+}
+
+#[tokio::test]
+async fn tokio_session_kitty_keyboard_degrades_when_terminal_never_answers() {
+    // FM-C4: a terminal that never answers the flags query leaves the grant *unknown*, not
+    // unsupported. The request degrades gracefully — no error, no ledger entry, no assumed
+    // enhancement — so leave has no kitty pop to emit.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let requested = KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES;
+    let grant = session
+        .request_kitty_keyboard(requested, Duration::from_millis(150))
+        .await
+        .expect("an unanswered query degrades gracefully rather than erroring");
+
+    assert!(grant.is_unknown(), "no answer means unknown support");
+    assert_eq!(grant.granted(), None);
+    assert!(!grant.granted_all_requested());
+
+    // Drain what the session wrote: the push and the query went out, but no pop is recorded.
+    let written = read_fake_until_available(&mut terminal)
+        .await
+        .expect("read push+query");
+    assert_eq!(written, b"\x1b[>1u\x1b[?u");
+
+    session.leave().await.expect("leave Tokio fake session");
+    let teardown = terminal.output().expect("read teardown output");
+    assert!(
+        !teardown.windows(4).any(|w| w == b"\x1b[<u")
+            && !teardown.windows(5).any(|w| w == b"\x1b[<1u"),
+        "an unknown grant records no kitty entry, so leave emits no pop, got {teardown:?}",
+    );
 }
 
 fn open_test_pty() -> Option<(File, PathBuf)> {

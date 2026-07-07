@@ -37,6 +37,9 @@ point without scanning the repository tree.
   cursor-position queries, write ordered output, and leave explicitly.
 - `tokio_input_events.rs`: read decoded `Event` values through
   `TokioTerminalSession::next_event`.
+- `kitty_keyboard.rs`: request kitty keyboard progressive-enhancement flags with verify-after-push
+  (`TokioTerminalSession::request_kitty_keyboard`), inspect the granted subset, and decode rich key
+  events including releases and modifiers; the session pops the granted flags on `leave`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to

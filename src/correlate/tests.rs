@@ -50,6 +50,7 @@ fn distinguishes_is_false_on_identical_pairs() {
         Expectation::CursorPosition,
         Expectation::TerminalStatus,
         Expectation::PrimaryDeviceAttributes,
+        Expectation::KittyKeyboardFlags,
     ] {
         assert!(
             !distinguishes(&expectation, &expectation),
@@ -64,6 +65,7 @@ fn distinguishes_is_true_on_every_different_pair() {
         Expectation::CursorPosition,
         Expectation::TerminalStatus,
         Expectation::PrimaryDeviceAttributes,
+        Expectation::KittyKeyboardFlags,
     ];
     for (i, a) in variants.iter().enumerate() {
         for (j, b) in variants.iter().enumerate() {
@@ -83,6 +85,7 @@ fn distinguishes_is_symmetric() {
         Expectation::CursorPosition,
         Expectation::TerminalStatus,
         Expectation::PrimaryDeviceAttributes,
+        Expectation::KittyKeyboardFlags,
     ];
     for a in &variants {
         for b in &variants {
@@ -96,20 +99,22 @@ fn distinguishes_is_symmetric() {
 }
 
 #[test]
-fn m2_non_distinguishing_pairs_are_all_identical() {
+fn non_distinguishing_pairs_are_all_identical() {
     // The register-reject path (`RegisterError::Ambiguous`) fires only for a non-identical,
-    // non-distinguishing pair. For the M2 variants no such pair exists — every non-distinguishing
-    // pair is identical — so this invariant documents *why* register never rejects today, and why
-    // the reject branch first becomes reachable when M3 adds a discriminator-carrying variant.
+    // non-distinguishing pair. For the current fieldless variants no such pair exists — every
+    // non-distinguishing pair is identical — so this invariant documents *why* register never
+    // rejects today, and why the reject branch first becomes reachable when M3 adds a
+    // discriminator-carrying variant.
     let variants = [
         Expectation::CursorPosition,
         Expectation::TerminalStatus,
         Expectation::PrimaryDeviceAttributes,
+        Expectation::KittyKeyboardFlags,
     ];
     for a in &variants {
         for b in &variants {
             if !distinguishes(a, b) {
-                assert_eq!(a, b, "a non-distinguishing M2 pair must be identical");
+                assert_eq!(a, b, "a non-distinguishing pair must be identical");
             }
         }
     }
@@ -182,6 +187,49 @@ fn da1_reply_completes_fence_shape_tolerantly() {
         let expected = &bytes[3..bytes.len() - 1];
         assert_eq!(attrs.params(), expected, "DA1 params for {bytes:?}");
     }
+}
+
+#[test]
+fn kitty_flags_reply_completes_kitty_expectation() {
+    // The `CSI ? flags u` report completes the verify-after-push expectation, carrying the granted
+    // flag bitset. A bare `CSI ? u` reports zero flags.
+    for (bytes, expected) in [
+        (&b"\x1b[?1u"[..], 1u8),
+        (&b"\x1b[?31u"[..], 31u8),
+        (&b"\x1b[?u"[..], 0u8),
+    ] {
+        let mut correlator = Correlator::new();
+        let id = correlator
+            .register(Expectation::KittyKeyboardFlags)
+            .expect("register");
+        let feed = correlator.feed(csi_event(bytes));
+        assert!(
+            matches!(feed, Feed::Completed { .. }),
+            "flags report {bytes:?} must complete the expectation"
+        );
+        let Some(Reply::KittyKeyboardFlags(bits)) = correlator.take_reply(id) else {
+            panic!("expected kitty flags reply for {bytes:?}");
+        };
+        assert_eq!(bits, expected, "granted flags for {bytes:?}");
+    }
+}
+
+#[test]
+fn kitty_flags_matcher_rejects_key_csi_u_and_control_forms() {
+    let mut correlator = Correlator::new();
+    correlator
+        .register(Expectation::KittyKeyboardFlags)
+        .expect("register");
+    // A plain key `CSI u` (no `?`) is not a flags report.
+    assert!(matches!(
+        correlator.feed(csi_event(b"\x1b[97u")),
+        Feed::Passthrough(_)
+    ));
+    // The push/pop control forms (`>`/`<` markers) are not the report shape either.
+    assert!(matches!(
+        correlator.feed(csi_event(b"\x1b[>1u")),
+        Feed::Passthrough(_)
+    ));
 }
 
 #[test]

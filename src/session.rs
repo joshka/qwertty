@@ -9,15 +9,19 @@
 //! [`TerminalSession::enter`] applies it, and orderly [`TerminalSession::leave`], drop, and (on
 //! Unix) the panic-safe [`RestoreHandle`] undo it in reverse enablement order.
 
+mod kitty;
 mod ledger;
 #[cfg(unix)]
 mod restore;
 
+pub use kitty::{KittyKeyboardFlags, KittyKeyboardGrant};
 #[cfg(unix)]
 pub use restore::RestoreHandle;
 
 use crate::session::ledger::{ModeKind, ModeLedger, StateAction};
-use crate::{Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, terminal};
+use crate::{
+    Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, commands, terminal,
+};
 
 /// An active terminal session over a [`TerminalDevice`].
 ///
@@ -337,6 +341,40 @@ impl<D: TerminalDevice> TerminalSession<D> {
             StateAction::SetMode(DeviceMode::Raw),
             StateAction::SetMode(DeviceMode::Cooked),
         );
+    }
+
+    /// Records granted kitty keyboard flags in the ledger so teardown pops the granted reality.
+    ///
+    /// The apply action re-pushes the granted flags (`CSI > flags u`) on a later `enter`; the undo
+    /// pops the single pushed entry (`CSI < 1 u`). This records the *granted* set, not the
+    /// requested one (verify-after-push, design 06): the driver calls this only after querying the
+    /// terminal, so the ledger — and the emergency blob it feeds — never claims an enhancement the
+    /// terminal did not turn on. Recording the empty granted set records nothing, leaving no entry
+    /// to pop.
+    ///
+    /// The push bytes are already on the wire when the driver calls this (the request wrote them to
+    /// run the query), so this records the entry for lifecycle replay without re-emitting; the
+    /// `enter` replay path emits the apply bytes on a subsequent re-entry.
+    pub(crate) fn record_kitty_keyboard(&mut self, granted: KittyKeyboardFlags) {
+        if granted.is_empty() {
+            return;
+        }
+        let mut push = Vec::new();
+        commands::terminal::push_kitty_keyboard_flags(granted).encode(&mut push);
+        let mut pop = Vec::new();
+        commands::terminal::pop_kitty_keyboard_flags().encode(&mut pop);
+        self.ledger.record(
+            ModeKind::KittyKeyboard,
+            StateAction::WriteBytes(push),
+            StateAction::WriteBytes(pop),
+        );
+
+        // Refresh the emergency blob so a panic between now and the next `enter` still resets the
+        // keyboard flags (the ledger's emergency form is the stronger pop-all).
+        #[cfg(unix)]
+        if let Some(restore) = &self.restore {
+            restore.publish_blob(&self.ledger.protocol_undo_bytes());
+        }
     }
 
     /// Undoes the mode ledger in reverse enablement order, reporting the first error.

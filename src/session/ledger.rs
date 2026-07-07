@@ -7,6 +7,9 @@
 
 use crate::DeviceMode;
 
+/// The kitty keyboard full-reset (pop-all) sequence `CSI < u`, used in the emergency blob.
+pub(crate) const KITTY_KEYBOARD_EMERGENCY_RESET: &[u8] = b"\x1b[<u";
+
 /// One terminal state action a ledger entry can apply or undo.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum StateAction {
@@ -29,6 +32,16 @@ pub(crate) enum StateAction {
 pub(crate) enum ModeKind {
     /// Raw terminal mode.
     Raw,
+    /// Kitty keyboard progressive enhancement flags.
+    ///
+    /// The apply action pushes `CSI > flags u` (the *granted* flags, recorded after
+    /// verify-after-push); the undo action pops the single pushed entry off the terminal's
+    /// keyboard-flags stack with `CSI < 1 u`. This is a byte-based ledger entry, so the pop bytes
+    /// also flow into the emergency blob (`protocol_undo_bytes`) — design 06: teardown pops the
+    /// granted reality, not the requested intent. Design 01's panic-hook reset additionally emits
+    /// the stronger `CSI < u` full pop-all as belt-and-braces, but the ordinary ledger undo is the
+    /// exact one-entry pop.
+    KittyKeyboard,
 }
 
 #[derive(Debug)]
@@ -79,11 +92,21 @@ impl ModeLedger {
     ///
     /// Device-mode entries are skipped: the emergency path restores the terminal mode directly
     /// from the captured termios instead of replaying mode actions.
+    ///
+    /// The kitty keyboard entry is the one place the emergency form is **stronger than the ordinary
+    /// pop** (design 01, FM-L2, codex practice): where the orderly `leave` undo pops the single
+    /// pushed entry (`CSI < 1 u`), the emergency blob emits the full pop-all reset `CSI < u` so a
+    /// panic teardown clears the terminal's whole keyboard-flags stack regardless of how deep it
+    /// grew, rather than trusting the stack depth mid-panic.
     pub(crate) fn protocol_undo_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for action in self.undo_actions() {
-            if let StateAction::WriteBytes(undo) = action {
-                bytes.extend_from_slice(undo);
+        for entry in self.entries.iter().rev() {
+            match (entry.kind, &entry.undo) {
+                (ModeKind::KittyKeyboard, StateAction::WriteBytes(_)) => {
+                    bytes.extend_from_slice(KITTY_KEYBOARD_EMERGENCY_RESET);
+                }
+                (_, StateAction::WriteBytes(undo)) => bytes.extend_from_slice(undo),
+                (_, StateAction::SetMode(_)) => {}
             }
         }
         bytes
@@ -148,5 +171,33 @@ mod tests {
         );
 
         assert_eq!(ledger.protocol_undo_bytes(), b"\x1b[?1049l");
+    }
+
+    #[test]
+    fn kitty_keyboard_emergency_blob_is_the_full_pop_all_reset() {
+        let mut ledger = ModeLedger::new();
+        let (apply, undo) = raw_entry();
+        ledger.record(ModeKind::Raw, apply, undo);
+        // The ordinary undo pops the single pushed entry with `CSI < 1 u`...
+        ledger.record(
+            ModeKind::KittyKeyboard,
+            StateAction::WriteBytes(b"\x1b[>1u".to_vec()),
+            StateAction::WriteBytes(b"\x1b[<1u".to_vec()),
+        );
+
+        assert_eq!(
+            ledger.undo_actions().collect::<Vec<_>>(),
+            [
+                &StateAction::WriteBytes(b"\x1b[<1u".to_vec()),
+                &StateAction::SetMode(DeviceMode::Cooked),
+            ],
+            "orderly undo pops one entry",
+        );
+        // ...but the emergency blob is the stronger full-reset `CSI < u` (design 01, FM-L2).
+        assert_eq!(
+            ledger.protocol_undo_bytes(),
+            b"\x1b[<u",
+            "emergency blob is the pop-all reset, not the one-entry pop",
+        );
     }
 }

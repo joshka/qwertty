@@ -193,8 +193,8 @@ identically to feeding it whole.
 
 The `Event` vocabulary is **pre-freeze until milestone M4 exit**. These `event::` types (`Event`,
 `KeyEvent`, `Key`, `Modifiers`, `KeyEventKind`, `TextPayload`) change freely before the first
-published version and calcify at that release. Every enum is non-exhaustive, so the M4 variants add
-without breaking existing code.
+published version and calcify at that release. Every enum is non-exhaustive, so later M4 variants
+(mouse, paste, focus, resize) add without breaking existing code.
 
 ```rust
 use qwertty::{Event, Key, SemanticDecoder};
@@ -221,46 +221,77 @@ assert_eq!(
 
 ### What Maps Today
 
-This slice decodes the legacy input set — text, C0 controls, the four arrow keys, and standalone
-Escape — over the richer syntax layer, and passes everything else through losslessly:
+The decoder maps the legacy input set, the full kitty keyboard `CSI u` grammar, and the legacy
+modified-key CSI forms over the syntax layer, and passes everything else through losslessly:
 
 - **Text.** A printable UTF-8 run becomes one `KeyEvent` per character. The keycode is the trivial
   `Key::Char(c)` and the decoded character is also carried in the event's `TextPayload`, so text and
   key association is never lost. Legacy input always carries exactly one character per event.
 - **C0 controls.** `CR` (`0x0d`) maps to `Key::Enter`, `HT` (`0x09`) to `Key::Tab`, and both `DEL`
   (`0x7f`) and `BS` (`0x08`) to `Key::Backspace`. Terminals disagree on which byte the Backspace key
-  sends, so this layer folds both into the Backspace key to match the kitty model; a dedicated
-  Delete key is a distinct `CSI u` code that arrives in M4. Every other C0 control is preserved as
+  sends, so this layer folds both into the Backspace key to match the kitty model; the dedicated
+  forward-Delete key is the distinct `Key::Delete`. Every other C0 control is preserved as
   `Key::Control(byte)` so no input is lost.
 - **Arrow keys.** `ESC [ A/B/C/D` (with no parameters or the single default parameter `1`) map to
   `Key::Up`, `Key::Down`, `Key::Right`, and `Key::Left`.
+- **kitty `CSI u` key events.** The full grammar
+  `CSI unicode-key-code:shifted-key:base-layout-key ; modifiers:event-type ; text-codepoints u`
+  decodes to a rich `KeyEvent`:
+  - the unicode-key-code becomes `Key::Char(c)` or a named functional key (`Key::Home`, `Key::End`,
+    `Key::PageUp`, `Key::PageDown`, `Key::Insert`, `Key::Delete`, `Key::Function(n)`, and the
+    named C0 keys `Tab`/`Enter`/`Escape`/`Backspace`);
+  - the shifted-key and base-layout-key alternates populate `KeyEvent::shifted_key` and
+    `KeyEvent::base_layout_key` (an empty subfield stays absent, never a spurious `NUL`);
+  - the value-1-encoded modifier field (`1 + bitset`) populates `Modifiers`, including the Caps Lock
+    and Num Lock bits;
+  - the event-type subfield (`1`/`2`/`3`) selects `KeyEventKind::Press`, `Repeat`, or `Release`;
+  - the colon-separated text field becomes a multi-codepoint `TextPayload`, so a decomposed accent
+    or a ZWJ cluster is **one** event with its key and modifiers still attached.
+- **Legacy modified functional keys.** `CSI 1 ; mods A/B/C/D` (modified arrows),
+  `CSI 1 ; mods H/F` (Home/End), and `CSI n ; mods ~` (editing and function keys) decode their
+  modifiers rather than dropping them. A numeric first parameter other than `1` on a letter-final
+  form (for example `CSI 2 F`, Cursor Previous Line) is a cursor-movement control, not a key, and
+  passes through as syntax.
+- **Kitty flags report and control forms.** `CSI ? flags u` (the flags report) and the
+  host-to-terminal push/pop/query forms (`CSI > flags u`, `CSI < u`, `CSI < 1 u`, `CSI ? u`) are
+  never key events. The report feeds the query correlator (see below); the rest pass through as
+  lossless syntax.
 - **Standalone Escape.** A bare Escape, flushed by the layer above and surfaced by the parser as a
   lone `SyntaxToken::Esc`, maps to `Key::Escape`. The Escape-versus-sequence timing policy stays in
   the layer above this decoder; the decoder only ever sees a bare Escape once that layer has
   decided it stood alone.
-- **Everything else** — a CSI qwertty does not decode yet, an OSC/DCS/APC/PM/SOS control string,
+- **Everything else** — a CSI qwertty does not decode, an OSC/DCS/APC/PM/SOS control string,
   another escape sequence, or a malformed run — passes through losslessly as `Event::Syntax`,
   carrying its token and bytes. New protocols degrade to visible, lossless syntax, never a fake
   keypress.
 
-A `KeyEvent` from this slice is always a press (`KeyEventKind::Press`) with no modifiers
+A `KeyEvent` from legacy input is always a press (`KeyEventKind::Press`) with no modifiers
 (`Modifiers::empty()`), because legacy input carries neither a press/release distinction nor
-modifier information for these keys.
+modifier information for those keys; the richer fields are populated only by the kitty `CSI u`
+decode.
 
-### What Arrives In Milestone M4
+### Requesting Kitty Keyboard Flags
 
-The vocabulary is deliberately shaped for the milestone M4 input work, which adds:
+The kitty keyboard protocol is a progressive enhancement the application turns on per behaviour.
+`TokioTerminalSession::request_kitty_keyboard` runs the verify-after-push handshake: it pushes the
+caller-chosen `KittyKeyboardFlags` (`CSI > flags u`), queries the terminal (`CSI ? u`), and returns
+a `KittyKeyboardGrant` carrying what was actually **granted** — which may be a subset. The session
+records the granted set in its mode ledger so `leave` pops the reality (`CSI < 1 u`), and the
+emergency restore blob resets the whole keyboard-flags stack (`CSI < u`). A terminal that never
+answers leaves the grant *unknown* (`KittyKeyboardGrant::is_unknown`) rather than erroring, and no
+enhancement is assumed — unknown is not unsupported.
 
-- **kitty `CSI u` key decoding**: functional keys (Home, End, F-keys, and the rest), real
-  `Modifiers` values, `KeyEventKind::Repeat` and `KeyEventKind::Release`, and multi-codepoint
-  associated `TextPayload` values.
-- **mouse** events (SGR and legacy).
-- **paste** as a dedicated aggregated event, not keyless text.
-- **focus** in and out events.
+### What Arrives Later In Milestone M4
+
+The remaining M4 input work adds:
+
+- **mouse** events (SGR and legacy);
+- **paste** as a dedicated aggregated event, not keyless text;
+- **focus** in and out events;
 - **resize** events.
 
-Until then `Event` carries only `Key` and `Syntax`, and the modifier, key-kind, and multi-codepoint
-text capacity exists so those M4 additions need no vocabulary change.
+Until then `Event` carries `Key` and `Syntax`; the enum is non-exhaustive so those variants add
+without a vocabulary change.
 
 ## Typed Reports
 
@@ -295,9 +326,10 @@ nothing is stolen or reordered.
 The syntax layer tokenizes every byte losslessly, but the semantic layer does not yet map every
 token to a typed high-level event. It does not yet interpret:
 
-- terminal query responses other than cursor position and terminal status reports;
-- CSI meanings other than the four arrow keys and those two report shapes;
-- kitty `CSI u` functional keys, modifiers, key-event kinds, and associated text;
+- terminal query responses other than cursor position, terminal status, and kitty keyboard flags
+  reports;
+- CSI meanings other than the arrow, kitty `CSI u`, legacy modified-key, and those three report
+  shapes;
 - paste boundaries;
 - mouse, focus, graphics, clipboard, or vendor extension protocols.
 

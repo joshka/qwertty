@@ -298,6 +298,21 @@ fn split_corpus() -> Vec<(&'static str, Vec<u8>)> {
         ("mixed", b"\x1b[Aok\rmore\x1b[B".to_vec()),
         ("csi_passthrough", b"\x1b[?25n\x1b[0m\x1b[Z".to_vec()),
         ("modified_arrow_csi", b"\x1b[1;5A".to_vec()),
+        // Kitty CSI-u forms: press, release, shifted alternate, multi-codepoint text, functional
+        // key, and the flags report — split-equivalence must hold at the event level for all.
+        ("kitty_press", b"\x1b[97;1u".to_vec()),
+        ("kitty_release", b"\x1b[97;1:3u".to_vec()),
+        ("kitty_shifted_alt", b"\x1b[97:65;2u".to_vec()),
+        (
+            "kitty_zwj_text",
+            b"\x1b[128104;1;128104:8205:128105:8205:128103u".to_vec(),
+        ),
+        ("kitty_functional", b"\x1b[57357u".to_vec()),
+        ("kitty_flags_report", b"\x1b[?1u".to_vec()),
+        (
+            "kitty_mixed_with_text",
+            b"hi\x1b[97:65;2;65uok\x1b[57357u".to_vec(),
+        ),
         ("non_csi_escape", b"a\x1bcb".to_vec()),
         ("osc", b"\x1b]0;title\x07after".to_vec()),
         (
@@ -506,6 +521,102 @@ fn fixture_corpus_decodes_without_panic_or_drops() {
             fixture.bytes.len(),
         );
     }
+}
+
+// --- kitty CSI-u decode through the full SemanticDecoder ----------------------------------------
+
+/// Decodes an input to exactly one event, asserting nothing is left pending.
+fn decode_one(input: &[u8]) -> Event {
+    let events = decode_whole(input);
+    assert_eq!(events.len(), 1, "{input:?} did not decode to one event");
+    events.into_iter().next().expect("one event")
+}
+
+/// Returns the key event an input decodes to, panicking if it is not a single key event.
+fn decode_key_event(input: &[u8]) -> KeyEvent {
+    match decode_one(input) {
+        Event::Key(key) => key,
+        other => panic!("{input:?} decoded to {other:?}, not a key event"),
+    }
+}
+
+#[test]
+fn kitty_press_release_repeat_decode_through_decoder() {
+    assert_eq!(decode_key_event(b"\x1b[97;1u").kind(), KeyEventKind::Press);
+    assert_eq!(
+        decode_key_event(b"\x1b[97;1:2u").kind(),
+        KeyEventKind::Repeat
+    );
+    assert_eq!(
+        decode_key_event(b"\x1b[97;1:3u").kind(),
+        KeyEventKind::Release
+    );
+}
+
+#[test]
+fn kitty_shifted_and_base_layout_alternates_decode_through_decoder() {
+    let event = decode_key_event(b"\x1b[97:65:97;2;65u");
+    assert_eq!(event.key(), Key::Char('a'));
+    assert_eq!(event.shifted_key(), Some('A'));
+    assert_eq!(event.base_layout_key(), Some('a'));
+    assert_eq!(event.modifiers(), Modifiers::SHIFT);
+    assert_eq!(event.text(), Some(&TextPayload::from_char('A')));
+}
+
+#[test]
+fn kitty_multi_codepoint_text_is_one_event_through_decoder() {
+    // The OQ-6 payoff: a decomposed accent and a ZWJ cluster each arrive as ONE event carrying the
+    // whole multi-codepoint TextPayload, with key/modifier association intact.
+    let combining = decode_key_event(b"\x1b[101;1;101:769u");
+    assert_eq!(combining.key(), Key::Char('e'));
+    assert_eq!(combining.text(), Some(&TextPayload::from_text("e\u{0301}")));
+
+    let zwj = decode_key_event(b"\x1b[128104;1;128104:8205:128105:8205:128103u");
+    assert_eq!(
+        zwj.text(),
+        Some(&TextPayload::from_text(
+            "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}"
+        ))
+    );
+}
+
+#[test]
+fn kitty_functional_keys_decode_through_decoder() {
+    assert_eq!(decode_key_event(b"\x1b[57356u").key(), Key::Home);
+    assert_eq!(decode_key_event(b"\x1b[57357u").key(), Key::End);
+    assert_eq!(decode_key_event(b"\x1b[3~").key(), Key::Delete);
+    assert_eq!(decode_key_event(b"\x1b[57364u").key(), Key::Function(1));
+}
+
+#[test]
+fn kitty_modifier_arithmetic_edge_cases_through_decoder() {
+    // Value-1 encoding, Ctrl, and the Caps/Num lock bits.
+    assert_eq!(decode_key_event(b"\x1b[97;5u").modifiers(), Modifiers::CTRL);
+    assert_eq!(
+        decode_key_event(b"\x1b[97;65u").modifiers(),
+        Modifiers::CAPS_LOCK
+    );
+    assert_eq!(
+        decode_key_event(b"\x1b[97;129u").modifiers(),
+        Modifiers::NUM_LOCK
+    );
+}
+
+#[test]
+fn kitty_legacy_modified_arrow_decodes_modifiers() {
+    let event = decode_key_event(b"\x1b[1;5A");
+    assert_eq!(event.key(), Key::Up);
+    assert_eq!(event.modifiers(), Modifiers::CTRL);
+}
+
+#[test]
+fn kitty_flags_report_and_control_forms_pass_through_as_syntax() {
+    // Neither a `CSI ? flags u` report nor the push/pop/query host-to-terminal control forms are
+    // key events: they degrade to lossless syntax passthrough, never fake keypresses.
+    assert_eq!(decode_one(b"\x1b[?1u"), csi_event(b"\x1b[?1u"));
+    assert_eq!(decode_one(b"\x1b[>1u"), csi_event(b"\x1b[>1u"));
+    assert_eq!(decode_one(b"\x1b[<u"), csi_event(b"\x1b[<u"));
+    assert_eq!(decode_one(b"\x1b[<1u"), csi_event(b"\x1b[<1u"));
 }
 
 // --- settled trailing text (drain-boundary flush support) ---------------------------------------

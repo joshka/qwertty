@@ -352,6 +352,59 @@ that session-owned routing boundary.
 When no cursor position report is present, the match result contains no report and all events remain
 available.
 
+## Syntax Tokens
+
+`SyntaxParser` is qwertty's total, lossless syntax layer. Where the `InputEvent` decoder above names
+only the small set of shapes it can classify honestly and leaves everything else as
+`InputEvent::Undecoded`, `SyntaxParser` classifies *every* input byte into a `SyntaxToken` by its
+ECMA-48 family without assigning protocol meaning:
+
+- `SyntaxToken::Text` for maximal runs of printable UTF-8, including multibyte characters.
+- `SyntaxToken::Control` for a single C0 control byte that is not a sequence introducer.
+- `SyntaxToken::Csi` for a complete CSI sequence, with structured `ControlParams` access.
+- `SyntaxToken::Osc`, `Dcs`, `Apc`, `Pm`, `Sos` for complete control-string sequences.
+- `SyntaxToken::Esc` for a complete non-CSI, non-string escape, or a bare trailing `ESC`.
+- `SyntaxToken::Malformed` for any byte run that cannot be valid syntax.
+
+The old `InputEvent` decoder preserves bytes but only recognizes complete UTF-8, C0 controls, the
+four arrow keys, and 7-bit CSI input; OSC, DCS, APC, PM, SOS, 8-bit C1 forms, and malformed runs all
+collapse into `InputEvent::Undecoded`. `SyntaxParser` closes that gap: OSC/DCS/APC/PM/SOS payloads,
+8-bit C1 introducers and terminators (per ECMA-48), and aborted or invalid input are all preserved
+as their own honest tokens.
+
+```rust
+use qwertty::{SyntaxParser, SyntaxToken};
+
+let mut parser = SyntaxParser::new();
+let mut tokens = parser.feed(b"hi\x1b]52;c;SGVsbG8=\x07");
+tokens.extend(parser.finish());
+
+assert_eq!(tokens[0], SyntaxToken::Text(b"hi".to_vec()));
+match &tokens[1] {
+    SyntaxToken::Osc(osc) => assert_eq!(osc.payload(), b"52;c;SGVsbG8="),
+    other => panic!("expected Osc, got {other:?}"),
+}
+```
+
+The layer upholds four invariants. Concatenating each token's raw bytes reconstructs the input
+byte-for-byte. Any chunking of the same input yields the identical token sequence, with continuation
+state held in the parser and `SyntaxParser::finish` flushing pending bytes. String payloads are
+bounded by a configurable limit (default 64 KiB via `SyntaxParser::with_payload_limit`); an
+over-limit payload sets `StringSequence::truncated` and records the dropped-byte count instead of
+buffering without bound. The bound is enforced while bytes accumulate, so parser memory stays
+bounded even when a terminator never arrives. The same cap applies to CSI parameter runs, which
+overflow to `SyntaxToken::Malformed` with nothing dropped, and to the size of individual text
+tokens. CSI and DCS parameters keep both raw bytes and parsed numbers, preserve `:` versus `;`
+separators, and flag param-count overflow rather than merging silently.
+
+Because bytes `0x80..=0x9f` are both C1 controls and UTF-8 continuation bytes, a C1 byte is treated
+as an introducer only at a position where a new character starts, never inside an in-progress UTF-8
+sequence.
+
+The semantic layer that turns these tokens into typed key, mouse, paste, and report events lands in
+later slices. Until then, `SyntaxParser` is the lossless, forward-compatible foundation those layers
+build on.
+
 ## What Remains Undecoded
 
 The basic event layer does not classify or interpret:

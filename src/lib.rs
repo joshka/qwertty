@@ -27,6 +27,9 @@
 //! - [`TerminalStatusReport`], parsed `CSI 0 n` and `CSI 3 n` terminal status reports.
 //! - [`InputDecoder`], stateful classification for input split across byte chunks.
 //! - [`InputEvent`], basic classification for simple text, control, key, and undecoded input.
+//! - [`SyntaxParser`], the total, lossless, bounded, stateful syntax tokenizer over input bytes.
+//! - [`SyntaxToken`], one classified byte-span in the syntax layer (text, control, CSI, OSC, DCS,
+//!   APC, PM, SOS, escape, or malformed).
 //! - [`TerminalSize`], terminal dimensions reported by the operating system.
 //! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
 //! - [`commands`], user-intent helpers that return [`Command`].
@@ -56,6 +59,7 @@ pub mod docs;
 mod escape;
 mod input;
 mod session;
+mod syntax;
 mod terminal;
 #[cfg(all(feature = "tokio", unix))]
 mod tokio_session;
@@ -69,6 +73,10 @@ pub use input::{
 #[cfg(unix)]
 pub use session::RestoreHandle;
 pub use session::TerminalSession;
+pub use syntax::{
+    ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
+    StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
+};
 pub use terminal::{DeviceMode, Error, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};

@@ -27,6 +27,8 @@ point without scanning the repository tree.
   events.
 - `parse_cursor_position_report.rs`: parse a cursor-position report from CSI bytes and inspect the
   typed result.
+- `decode_syntax_tokens.rs`: feed OSC-8 hyperlink and CSI corpus lines through `SyntaxParser` and
+  inspect the lossless `SyntaxToken` families.
 
 ## Tokio Session Basics
 

@@ -115,7 +115,7 @@ not add async methods that only wrap synchronous file reads or writes.
 
 The first async public surface is `TokioTerminalSession`, a separate Tokio session owner behind an
 optional `tokio` Cargo feature on Unix. It uses runtime-backed terminal reads and writes, preserves
-output ordering, feeds input through `InputDecoder`, delivers decoded events without swallowing
+output ordering, feeds input through `SemanticDecoder`, delivers decoded events without swallowing
 unrelated input, and documents cancellation at the event-delivery boundary.
 
 Keeping this boundary explicit avoids making every user compile Tokio and avoids adding a
@@ -152,16 +152,16 @@ session.leave().await
 ```
 
 `TokioTerminalSession::next_event` reads from the terminal through Tokio readiness and returns the
-next decoded `InputEvent`:
+next decoded `Event`:
 
 ```rust,no_run
-use qwertty::{InputEvent, TokioTerminalSession};
+use qwertty::{Event, Key, TokioTerminalSession};
 
 # async fn run() -> qwertty::Result<()> {
 let mut session = TokioTerminalSession::open()?;
 
 match session.next_event().await? {
-    InputEvent::Text('q') => {}
+    Event::Key(key) if key.key() == Key::Char('q') => {}
     _ => {}
 }
 
@@ -240,7 +240,7 @@ If the terminal path closes before any matching report arrives, the helper retur
 
 If the matching report arrives after that timeout has already been returned, the timed-out helper
 does not claim it later. Under the current API, a later `next_event` call sees that late reply
-through the ordinary decoded input path, typically as `InputEvent::Csi(...)`.
+through the ordinary decoded input path, as a lossless `Event::Syntax(...)` CSI passthrough.
 
 The same rule applies to typed reports that belong to some other helper. If a cursor-position
 query sees `CSI 0 n` or `CSI 3 n` while it is still waiting for `CSI row ; column R`, the
@@ -256,7 +256,8 @@ status reports:
 ```rust,no_run
 use std::time::Duration;
 
-use qwertty::{TerminalStatus, TokioTerminalSession};
+use qwertty::TokioTerminalSession;
+use qwertty::report::TerminalStatus;
 
 # async fn run() -> qwertty::Result<()> {
 let mut session = TokioTerminalSession::open()?;

@@ -1,8 +1,11 @@
 # Tokio Input Ownership And Query Handoff
 
 `TokioTerminalSession` is qwertty's first async terminal owner. It does more than expose async
-reads and writes: it owns the live terminal file descriptor, raw-mode lifecycle, `InputDecoder`
-state, decoded event queue, and the first live query-routing boundary.
+reads and writes: it is the driver over qwertty's sans-io core. It composes a runtime-neutral
+`TerminalSession` (device, mode ledger, restore handle, raw-mode lifecycle), a `SemanticDecoder`
+that turns each read into typed `Event` values, and a `Correlator` that matches query replies to
+registered expectations. It owns the live terminal file descriptor, the decoded-event queue, and
+the single in-flight query.
 
 This guide explains how to use that ownership model without guessing from API details.
 
@@ -47,7 +50,7 @@ having to rebuild routing state around each request:
 ```rust,no_run
 use std::time::Duration;
 
-use qwertty::{InputEvent, TokioTerminalSession};
+use qwertty::{Event, Key, TokioTerminalSession};
 
 # async fn run() -> qwertty::Result<()> {
 let mut session = TokioTerminalSession::open()?;
@@ -56,7 +59,7 @@ let position = session.request_cursor_position(Duration::from_secs(1)).await?;
 assert!(position.row() > 0);
 
 match session.next_event().await? {
-    InputEvent::Text('q') => {}
+    Event::Key(key) if key.key() == Key::Char('q') => {}
     _ => {}
 }
 
@@ -147,7 +150,8 @@ already queued unrelated input.
 The timeout also does not reserve the matching reply forever. If the expected cursor-position or
 terminal-status reply reaches the session after the timeout has already been returned, the
 timed-out helper does not consume it later. Under the current API, a later `next_event` call
-receives that late reply through the normal decoded event stream, typically as `InputEvent::Csi(...)`.
+receives that late reply through the normal decoded event stream, as a lossless `Event::Syntax(...)`
+CSI passthrough.
 
 For a small checked-in example that times out a live query and then handles a late reply through
 `next_event`, see `examples/tokio_late_query_reply.rs` in the repository.

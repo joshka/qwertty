@@ -89,13 +89,14 @@
 //! (FM-Q10 — a DECRQM reply completing the wrong mode's query) is exactly what the discriminator in
 //! [`distinguishes`] prevents.
 
-// This slice lands the correlator ahead of its first non-test consumer. The Tokio/blocking sessions
-// that drive `register`/`feed`/`resolve` arrive in M2-S2; until then every item here is exercised
-// only by this module's unit tests, so the whole `pub(crate)` module is dead code in a plain
-// non-test lib build. Allow it module-wide with this note rather than sprinkling per-item allows;
-// remove this when the session wires the correlator in.
-#![allow(dead_code)]
-
+// The Tokio session (M2-S2) wires the correlator's core surface: `register`, `feed`, `take_reply`,
+// `resolve`, `distinguishes`, the CPR/DSR expectation and reply variants, and their support types.
+// A handful of items are still ahead of their first non-test consumer — the DA1 fence
+// (`Expectation::PrimaryDeviceAttributes`, `DeviceAttributes::params`), the batch/fence primitive
+// (`feed_batch`), and the introspection helpers (`len`, `is_empty`, `contains`, `waiters`,
+// `is_completed`) that the M3 probe layer and diagnostics will drive. Those are exercised by this
+// module's unit tests but unused in a plain non-test lib build, so each carries a targeted
+// `cfg_attr(not(test), allow(dead_code))` with this rationale rather than a module-wide allow.
 use crate::event::Event;
 use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::syntax::{ControlSequence, SyntaxToken};
@@ -126,6 +127,10 @@ pub enum Expectation {
     /// (FM-C4). This is a fence, not a feature oracle: completing it means "replies that were
     /// coming have arrived," not "the terminal supports X." The correlator does not
     /// auto-resolve other expectations on this completion; the probe layer (M3) owns that.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "M3 fence; test-exercised, unwired until then")
+    )]
     PrimaryDeviceAttributes,
 }
 
@@ -237,6 +242,10 @@ impl DeviceAttributes {
     /// Returns the raw DA1 parameter bytes, excluding the `?` private marker and the final `c`.
     ///
     /// For `CSI ? 1 ; 2 c` this is `b"1;2"`. An empty slice is possible for a bare `CSI ? c`.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "M3 fence; test-exercised, unwired until then")
+    )]
     #[must_use]
     pub fn params(&self) -> &[u8] {
         &self.params
@@ -468,6 +477,13 @@ impl Correlator {
     /// completion as a signal to resolve other expectations; that fence *semantics* is the probe
     /// layer's job (M3). This method only guarantees ordering and completeness of matching over the
     /// batch.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "M3 fence primitive; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn feed_batch(&mut self, events: impl IntoIterator<Item = Event>) -> Vec<Feed> {
         events.into_iter().map(|event| self.feed(event)).collect()
@@ -544,18 +560,39 @@ impl Correlator {
     }
 
     /// Returns the number of expectations currently tracked (pending or completed-but-unread).
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "introspection for M3/diagnostics; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn len(&self) -> usize {
         self.slots.len()
     }
 
     /// Returns `true` when no expectations are tracked.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "introspection for M3/diagnostics; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
     }
 
     /// Returns `true` when an expectation with this id is still tracked (pending or held).
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "introspection for M3/diagnostics; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn contains(&self, id: ExpectationId) -> bool {
         self.slots.iter().any(|slot| slot.id == id)
@@ -565,6 +602,13 @@ impl Correlator {
     ///
     /// While pending this is the live waiter count; after completion it is the number of waiters
     /// that have not yet taken the reply.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "introspection for M3/diagnostics; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn waiters(&self, id: ExpectationId) -> Option<u32> {
         self.slots
@@ -574,6 +618,13 @@ impl Correlator {
     }
 
     /// Returns `true` when an expectation has been completed and its reply is still held.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "introspection for M3/diagnostics; test-exercised, unwired until then"
+        )
+    )]
     #[must_use]
     pub fn is_completed(&self, id: ExpectationId) -> bool {
         self.slots

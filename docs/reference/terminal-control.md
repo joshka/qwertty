@@ -177,7 +177,8 @@ the request, flushes output, waits for the matching report, and applies a caller
 ```rust,no_run
 use std::time::Duration;
 
-use qwertty::{TerminalStatus, TokioTerminalSession};
+use qwertty::TokioTerminalSession;
+use qwertty::report::TerminalStatus;
 
 # async fn run() -> qwertty::Result<()> {
 let mut session = TokioTerminalSession::open()?;

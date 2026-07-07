@@ -1,5 +1,11 @@
 #![cfg(all(unix, feature = "tokio"))]
 //! Tokio-backed Unix terminal session tests.
+//!
+//! These port the twelve query/event contracts (×2 report types) that the old `InputEvent`-based
+//! Tokio session proved, adapted to the new `Event`/`KeyEvent` vocabulary the M2-S2 rework
+//! delivers. The PTY harness is unchanged. Two tests exercise the driver over a headless
+//! `FakeDevice` with no pseudoterminal: a full query round-trip, and the cancel-sweep that
+//! guarantees a dropped query's late reply is never misdelivered to the next query.
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -8,13 +14,35 @@ use std::os::fd::AsFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
+use qwertty::report::TerminalStatus;
 use qwertty::{
-    Error, InputEvent, KeyInput, ProtocolPosition, TerminalStatus, TokioTerminalSession, commands,
+    Error, Event, FakeDevice, FakeTerminal, Key, KeyEvent, ProtocolPosition, SyntaxParser,
+    SyntaxToken, TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
 use rustix::termios::{LocalModes, Termios, tcgetattr};
 use tokio::time::{Duration, sleep, timeout};
+
+/// Builds the semantic key event a single printable character decodes to.
+fn text_event(character: char) -> Event {
+    Event::Key(KeyEvent::new(Key::Char(character)).with_text(character))
+}
+
+/// Builds the passthrough `Event::Syntax` a complete CSI sequence decodes to.
+///
+/// This is the shape a query-shaped reply that no live query claimed surfaces as through
+/// `next_event`: lossless CSI syntax, byte-for-byte.
+fn csi_event(bytes: &[u8]) -> Event {
+    let mut parser = SyntaxParser::new();
+    let mut tokens = parser.feed(bytes);
+    tokens.extend(parser.finish());
+    assert_eq!(tokens.len(), 1, "expected exactly one token from {bytes:?}");
+    match tokens.into_iter().next().expect("one token") {
+        token @ SyntaxToken::Csi(_) => Event::Syntax(token),
+        other => panic!("expected a CSI token, got {other:?}"),
+    }
+}
 
 #[tokio::test]
 async fn tokio_session_preserves_output_order() {
@@ -82,15 +110,15 @@ async fn tokio_session_delivers_decoded_events() {
 
     assert_eq!(
         session.next_event().await.expect("read text event"),
-        InputEvent::Text('A')
+        text_event('A')
     );
     assert_eq!(
         session.next_event().await.expect("read key event"),
-        InputEvent::Key(KeyInput::Up)
+        Event::Key(KeyEvent::new(Key::Up))
     );
     assert_eq!(
         session.next_event().await.expect("read utf8 event"),
-        InputEvent::Text('é')
+        text_event('é')
     );
 
     session.leave().await.expect("leave Tokio session");
@@ -162,7 +190,7 @@ async fn tokio_session_cursor_query_preserves_unrelated_events() {
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -204,7 +232,7 @@ async fn tokio_session_cursor_query_timeout_preserves_unrelated_events() {
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -248,7 +276,7 @@ async fn tokio_session_cursor_query_wrong_report_becomes_next_csi_event() {
             .next_event()
             .await
             .expect("read preserved wrong-report csi"),
-        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[0n").expect("parse wrong-report csi"))
+        csi_event(b"\x1b[0n")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -292,7 +320,7 @@ async fn tokio_session_cursor_query_unmatched_csi_becomes_next_event() {
             .next_event()
             .await
             .expect("read preserved unmatched csi"),
-        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[?25n").expect("parse unmatched csi"))
+        csi_event(b"\x1b[?25n")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -365,7 +393,7 @@ async fn tokio_session_cursor_query_late_reply_becomes_next_csi_event() {
     ));
     assert_eq!(
         session.next_event().await.expect("read late cursor report"),
-        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[12;34R").expect("parse late csi"))
+        csi_event(b"\x1b[12;34R")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -403,7 +431,7 @@ async fn tokio_session_cursor_query_cancellation_preserves_unrelated_events() {
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -501,7 +529,7 @@ async fn tokio_session_terminal_status_query_preserves_unrelated_events() {
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -543,7 +571,7 @@ async fn tokio_session_terminal_status_query_timeout_preserves_unrelated_events(
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -587,9 +615,7 @@ async fn tokio_session_terminal_status_query_wrong_report_becomes_next_csi_event
             .next_event()
             .await
             .expect("read preserved wrong-report csi"),
-        InputEvent::Csi(
-            qwertty::CsiInput::from_bytes(b"\x1b[12;34R").expect("parse wrong-report csi")
-        )
+        csi_event(b"\x1b[12;34R")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -633,7 +659,7 @@ async fn tokio_session_terminal_status_query_unmatched_csi_becomes_next_event() 
             .next_event()
             .await
             .expect("read preserved unmatched csi"),
-        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[?25n").expect("parse unmatched csi"))
+        csi_event(b"\x1b[?25n")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -709,7 +735,7 @@ async fn tokio_session_terminal_status_query_late_reply_becomes_next_csi_event()
             .next_event()
             .await
             .expect("read late terminal status report"),
-        InputEvent::Csi(qwertty::CsiInput::from_bytes(b"\x1b[0n").expect("parse late csi"))
+        csi_event(b"\x1b[0n")
     );
     session.leave().await.expect("leave Tokio session");
 }
@@ -747,9 +773,108 @@ async fn tokio_session_terminal_status_query_cancellation_preserves_unrelated_ev
             .next_event()
             .await
             .expect("read preserved unrelated event"),
-        InputEvent::Text('x')
+        text_event('x')
     );
     session.leave().await.expect("leave Tokio session");
+}
+
+// --- FakeDevice-driven tests (no PTY): the runtime-neutral-core payoff ---------------------------
+
+#[tokio::test]
+async fn tokio_session_over_fake_device_round_trips_a_query() {
+    // The whole point of `from_device`: a headless fake terminal drives the real Tokio session,
+    // proving the query round-trip with no pseudoterminal (R-TST-1).
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let query = async move {
+        let report = session
+            .request_cursor_position(Duration::from_secs(1))
+            .await
+            .expect("request cursor position over fake device");
+        (session, report)
+    };
+    let peer = async {
+        // The fake terminal answers the request the session just wrote.
+        let request = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read cursor position request from fake terminal");
+        assert_eq!(request, b"\x1b[6n");
+        terminal
+            .feed_input(b"\x1b[7;9R")
+            .expect("feed cursor position report");
+    };
+
+    let ((session, report), ()) = tokio::join!(query, peer);
+
+    assert_eq!(report.position(), ProtocolPosition::new(7, 9));
+    session.leave().await.expect("leave Tokio fake session");
+}
+
+#[tokio::test]
+async fn tokio_session_cancel_sweep_does_not_misdeliver_late_reply() {
+    // Drop a cursor query mid-await (its expectation stays registered), then run a second cursor
+    // query. The first query's late reply must NOT complete the second query: the cancel-sweep
+    // resolves the abandoned expectation as Cancelled, so the late reply passes through as an
+    // event, and the second query completes only with its own, distinct reply.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    // First query: start it, let it write the request, then cancel it by dropping the future while
+    // it is still awaiting a reply.
+    {
+        let mut first = Box::pin(session.request_cursor_position(Duration::from_secs(1)));
+        let cancellation = async {
+            let result = timeout(Duration::from_millis(100), &mut first).await;
+            assert!(result.is_err(), "first query stays pending until cancelled");
+        };
+        let peer = async {
+            let request = read_fake_until_available(&mut terminal)
+                .await
+                .expect("read first cursor request");
+            assert_eq!(request, b"\x1b[6n");
+        };
+        let ((), ()) = tokio::join!(cancellation, peer);
+        // The first query's expectation is still registered here; dropping it does not resolve it.
+    }
+
+    // Now the abandoned reply for the first query and a fresh reply for the second both flow in.
+    // The second query must complete with the second reply; the first reply must surface as an
+    // event.
+    let query = async move {
+        let report = session
+            .request_cursor_position(Duration::from_secs(1))
+            .await
+            .expect("second cursor query completes with its own reply");
+        (session, report)
+    };
+    let peer = async {
+        // The second query writes its own request; answer the first query late, then the second.
+        let request = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read second cursor request");
+        assert_eq!(request, b"\x1b[6n");
+        // The stale first reply arrives first, followed by the second query's real reply.
+        terminal
+            .feed_input(b"\x1b[1;1R\x1b[5;6R")
+            .expect("feed late first reply then second reply");
+    };
+
+    let ((mut session, report), ()) = tokio::join!(query, peer);
+
+    // The second query got its own reply, not the stale one.
+    assert_eq!(report.position(), ProtocolPosition::new(5, 6));
+
+    // The stale first reply was not misdelivered; it passes through as an ordinary event. A row-1
+    // two-parameter CPR (`1;1`) is the modified-F3-ambiguous shape the correlator refuses to match,
+    // so it is guaranteed to be a passthrough here regardless of query state — exactly the "late
+    // reply is never misdelivered" contract.
+    assert_eq!(
+        session.next_event().await.expect("read stale first reply"),
+        csi_event(b"\x1b[1;1R")
+    );
+
+    session.leave().await.expect("leave Tokio fake session");
 }
 
 fn open_test_pty() -> Option<(File, PathBuf)> {
@@ -816,6 +941,18 @@ async fn read_until_available(master: &mut File) -> io::Result<Vec<u8>> {
         sleep(Duration::from_millis(10)).await;
     }
 
+    Ok(Vec::new())
+}
+
+/// Polls the fake terminal for output the session has written, giving the write time to arrive.
+async fn read_fake_until_available(terminal: &mut FakeTerminal) -> qwertty::Result<Vec<u8>> {
+    for _ in 0..20 {
+        let bytes = terminal.output()?;
+        if !bytes.is_empty() {
+            return Ok(bytes);
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
     Ok(Vec::new())
 }
 

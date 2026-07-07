@@ -21,7 +21,7 @@
 async fn main() -> qwertty::Result<()> {
     use std::time::Duration;
 
-    use qwertty::{InputEvent, TokioTerminalSession};
+    use qwertty::{Event, TokioTerminalSession};
 
     let timeout = Duration::from_secs(2);
     let mut session = TokioTerminalSession::open()?;
@@ -102,8 +102,11 @@ async fn main() -> qwertty::Result<()> {
     while let Ok(Ok(event)) =
         tokio::time::timeout(Duration::from_millis(200), session.next_event()).await
     {
-        if let InputEvent::Text(character) = event {
-            typed.push(character);
+        // Typed characters arrive as key events carrying their decoded text.
+        if let Event::Key(key) = event
+            && let Some(text) = key.text()
+        {
+            typed.push_str(text.as_str());
         }
     }
 

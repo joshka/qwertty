@@ -37,7 +37,7 @@ point without scanning the repository tree.
 
 - `tokio_terminal_queries.rs`: open a Tokio session, issue live terminal-status and
   cursor-position queries, write ordered output, and leave explicitly.
-- `tokio_input_events.rs`: read decoded `InputEvent` values through
+- `tokio_input_events.rs`: read decoded `Event` values through
   `TokioTerminalSession::next_event`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.

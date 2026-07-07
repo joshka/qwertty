@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 #[cfg(all(unix, feature = "tokio"))]
-use qwertty::{Error, InputEvent, TokioTerminalSession};
+use qwertty::{Error, Event, TokioTerminalSession};
 
 #[cfg(all(unix, feature = "tokio"))]
 #[tokio::main(flavor = "current_thread")]
@@ -34,11 +34,11 @@ async fn main() -> qwertty::Result<()> {
                 .await?;
 
             match tokio::time::timeout(Duration::from_millis(250), session.next_event()).await {
-                Ok(Ok(InputEvent::Csi(csi))) => {
+                Ok(Ok(Event::Syntax(token))) => {
                     session
                         .text(format!(
                             "other helper's report arrived through next_event: {:?}\r\n",
-                            csi.as_bytes()
+                            token.as_bytes()
                         ))
                         .await?;
                 }

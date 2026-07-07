@@ -48,6 +48,20 @@ impl Terminal {
     pub fn open_path(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let device = open_read_write(&path).map_err(Error::open_terminal)?;
+        Self::from_file(device, path)
+    }
+
+    /// Builds a terminal from an already-opened device file and its path.
+    ///
+    /// The Tokio session uses this to hand a terminal an fd it resolved itself — the duplicate of
+    /// the inherited standard input that stays pollable on macOS (see the Tokio session's
+    /// controlling-terminal path). The current terminal mode is captured from the file so cooked
+    /// mode can be restored later.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the current terminal mode cannot be captured from the file.
+    pub(crate) fn from_file(device: File, path: PathBuf) -> Result<Self> {
         let original_mode = tcgetattr(&device)
             .map_err(io::Error::from)
             .map_err(Error::get_terminal_mode)?;

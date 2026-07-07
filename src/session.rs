@@ -321,6 +321,15 @@ impl<D: TerminalDevice> TerminalSession<D> {
         Ok(self)
     }
 
+    /// Returns a shared reference to the owned device.
+    ///
+    /// A driver that registers the same device's descriptor with a runtime reactor (the Tokio
+    /// session) uses this to reach the device the session owns — for its pollable fd and its path —
+    /// without taking it away from the session's mode ledger and restore paths.
+    pub(crate) fn device(&self) -> &D {
+        &self.device
+    }
+
     /// Records the terminal state every session applies on entry.
     fn record_initial_state(&mut self) {
         self.ledger.record(

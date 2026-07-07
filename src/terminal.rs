@@ -154,7 +154,7 @@ impl Error {
         Self::QueryTimeout { operation, timeout }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(any(not(unix), all(feature = "tokio", unix)))]
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
             operation,

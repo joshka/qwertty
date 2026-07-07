@@ -5,8 +5,9 @@
 //! management, a small terminal session lifecycle, raw terminal input bytes, and basic terminal
 //! input events with a stateful decoder for split chunks, complete CSI input syntax, and cursor
 //! position and terminal status report parsing. With the optional `tokio` feature on Unix, it also
-//! exposes a Tokio-backed session owner for runtime-backed reads, writes, decoded input events, and
-//! explicit cleanup, including live cursor position and terminal status queries.
+//! exposes a Tokio-backed session owner that drives the sans-io core (device, [`SemanticDecoder`],
+//! and query correlator) for runtime-backed reads, writes, decoded [`Event`] delivery, and explicit
+//! cleanup, including live cursor position and terminal status queries.
 //!
 //! The main types are:
 //!

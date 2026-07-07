@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 #[cfg(all(unix, feature = "tokio"))]
-use qwertty::{Error, InputEvent, TokioTerminalSession};
+use qwertty::{Error, Event, TokioTerminalSession};
 
 #[cfg(all(unix, feature = "tokio"))]
 #[tokio::main(flavor = "current_thread")]
@@ -26,20 +26,8 @@ async fn main() -> qwertty::Result<()> {
                 ))
                 .await?;
 
-            match session.next_event().await? {
-                InputEvent::Text(ch) => {
-                    session
-                        .text(format!(
-                            "preserved unrelated input arrived through next_event: {ch:?}\r\n"
-                        ))
-                        .await?;
-                }
-                event => {
-                    session
-                        .text(format!("saw other input after query: {event:?}\r\n"))
-                        .await?;
-                }
-            }
+            let event = session.next_event().await?;
+            session.text(describe_preserved(&event)).await?;
         }
         Err(Error::QueryTimeout { timeout, .. }) => {
             session
@@ -49,17 +37,8 @@ async fn main() -> qwertty::Result<()> {
                 .await?;
 
             match tokio::time::timeout(Duration::from_millis(250), session.next_event()).await {
-                Ok(Ok(InputEvent::Text(ch))) => {
-                    session
-                        .text(format!(
-                            "preserved unrelated input arrived through next_event: {ch:?}\r\n"
-                        ))
-                        .await?;
-                }
                 Ok(Ok(event)) => {
-                    session
-                        .text(format!("saw other input after timeout: {event:?}\r\n"))
-                        .await?;
+                    session.text(describe_preserved(&event)).await?;
                 }
                 Ok(Err(err)) => return Err(err),
                 Err(_elapsed) => {
@@ -74,6 +53,23 @@ async fn main() -> qwertty::Result<()> {
 
     session.flush().await?;
     session.leave().await
+}
+
+/// Describes a preserved event, calling out the text a key event carries.
+#[cfg(all(unix, feature = "tokio"))]
+fn describe_preserved(event: &Event) -> String {
+    match event {
+        Event::Key(key) => match key.text() {
+            Some(text) => {
+                format!(
+                    "preserved unrelated input arrived through next_event: {:?}\r\n",
+                    text.as_str()
+                )
+            }
+            None => format!("saw key event after query: {:?}\r\n", key.key()),
+        },
+        event => format!("saw other input after query: {event:?}\r\n"),
+    }
 }
 
 #[cfg(not(all(unix, feature = "tokio")))]

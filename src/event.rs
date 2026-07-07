@@ -192,6 +192,29 @@ impl SemanticDecoder {
         let tokens = self.parser.finish();
         map_tokens(tokens)
     }
+
+    /// Returns whether the decoder is holding a **settled** trailing text run.
+    ///
+    /// The syntax layer buffers a trailing text run at a read boundary because the next read might
+    /// continue it (keeping split-equivalence). When a reader has drained the operating-system
+    /// input buffer, that pending run is instead *settled* input the caller should receive now
+    /// — but only when it is complete: a run parked mid-character (an incomplete UTF-8 lead
+    /// byte) or a partial escape/control sequence must keep waiting for the bytes that finish
+    /// it.
+    ///
+    /// This returns `true` exactly when [`pending`](SemanticDecoder::finish) holds a run that
+    /// begins with a text byte and is complete valid UTF-8, so a driver can
+    /// [`finish`](Self::finish) it at a drained-buffer boundary without prematurely flushing a
+    /// genuinely partial sequence. See the Tokio session's read loop for the drain-boundary
+    /// flush this enables.
+    #[must_use]
+    pub fn has_settled_text(&self) -> bool {
+        let pending = self.parser.pending_bytes();
+        !pending.is_empty()
+            && pending[0] >= 0x20
+            && pending[0] != DEL
+            && std::str::from_utf8(pending).is_ok()
+    }
 }
 
 /// Maps a batch of syntax tokens to semantic events.

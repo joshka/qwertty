@@ -507,3 +507,67 @@ fn fixture_corpus_decodes_without_panic_or_drops() {
         );
     }
 }
+
+// --- settled trailing text (drain-boundary flush support) ---------------------------------------
+
+#[test]
+fn has_settled_text_true_for_complete_trailing_text() {
+    // A complete UTF-8 text run parked at the end of a feed is settled: a drained-buffer reader
+    // should be able to flush it. This is what lets the Tokio session deliver the last character
+    // typed before a pause instead of holding it until the next keystroke.
+    let mut decoder = SemanticDecoder::new();
+    let events = decoder.feed(b"\xc3\xa9");
+    assert!(
+        events.is_empty(),
+        "trailing text is buffered, not yet emitted"
+    );
+    assert!(
+        decoder.has_settled_text(),
+        "complete trailing UTF-8 is settled text"
+    );
+    assert_eq!(decoder.finish(), [char_event('é')]);
+}
+
+#[test]
+fn has_settled_text_true_for_ascii_run() {
+    let mut decoder = SemanticDecoder::new();
+    assert!(decoder.feed(b"hi").is_empty());
+    assert!(decoder.has_settled_text());
+}
+
+#[test]
+fn has_settled_text_false_for_partial_utf8() {
+    // A run parked mid-character is NOT settled: the continuation bytes may still arrive.
+    let mut decoder = SemanticDecoder::new();
+    assert!(
+        decoder.feed(b"\xc3").is_empty(),
+        "lone lead byte is buffered"
+    );
+    assert!(
+        !decoder.has_settled_text(),
+        "a mid-character UTF-8 run must keep waiting for its continuation"
+    );
+}
+
+#[test]
+fn has_settled_text_false_for_partial_escape() {
+    // A partial escape/CSI prefix is NOT settled text: flushing it early would guess an ambiguous
+    // ESC or a truncated sequence.
+    let mut decoder = SemanticDecoder::new();
+    assert!(decoder.feed(b"\x1b[").is_empty(), "CSI prefix is buffered");
+    assert!(
+        !decoder.has_settled_text(),
+        "a partial control sequence is not settled text"
+    );
+}
+
+#[test]
+fn has_settled_text_false_when_nothing_pending() {
+    let mut decoder = SemanticDecoder::new();
+    // A complete sequence leaves nothing pending.
+    assert_eq!(decoder.feed(b"\x1b[A").len(), 1);
+    assert!(
+        !decoder.has_settled_text(),
+        "no pending run after a complete token"
+    );
+}

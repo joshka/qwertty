@@ -41,6 +41,8 @@ point without scanning the repository tree.
   `TokioTerminalSession::next_event`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
+- `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to
+  check live query answers, typeahead survival, and a clean exit with your own eyes.
 
 ## Query Cancellation
 

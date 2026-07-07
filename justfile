@@ -22,7 +22,10 @@ clippy:
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
+loom:
+    RUSTFLAGS="--cfg loom" cargo test --lib loom_
+
 markdown:
     markdownlint-cli2 "**/*.md"
 
-check: metadata fmt-check test clippy doc markdown
+check: metadata fmt-check test loom clippy doc markdown

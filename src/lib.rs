@@ -19,6 +19,7 @@
 //! - `FakeDevice` and `FakeTerminal`, an in-process device pair for headless tests on Unix.
 //! - [`TerminalSession`], an application-facing owner for raw mode, ordered output, flushing, and
 //!   explicit leave cleanup.
+//! - `RestoreHandle`, a panic-safe emergency terminal-restore handle on Unix.
 //! - [`InputBytes`], raw terminal input bytes read through a session.
 //! - [`CsiInput`], lossless syntax for complete Control Sequence Introducer input.
 //! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
@@ -65,6 +66,8 @@ pub use input::{
     InputDecoder, InputEvent, KeyInput, TerminalStatus, TerminalStatusReport,
     TerminalStatusReportMatch,
 };
+#[cfg(unix)]
+pub use session::RestoreHandle;
 pub use session::TerminalSession;
 pub use terminal::{DeviceMode, Error, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]

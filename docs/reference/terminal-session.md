@@ -62,12 +62,44 @@ query responses, paste, mouse input, or vendor protocols. See the
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible
 before later application work continues.
 
-`TerminalSession::leave` consumes the session and restores cooked mode. Use it during orderly
-shutdown so restoration errors can be handled. Dropping a session without `leave` still relies on
-the underlying `Terminal` drop fallback, but drop-time restoration errors cannot be reported.
+`TerminalSession::leave` consumes the session and replays its mode ledger: every reversible state
+change the session made is undone in reverse enablement order, every step is attempted even after
+a failure, and the first error is reported. The replay ends with a flush so restoration bytes
+never sit in a buffer. Today the ledger holds raw-mode restoration; alternate screen, cursor
+visibility, mouse mode, and paste mode join it in later slices.
 
-`leave` does not flush pending output for you. Flush explicitly when output visibility is part of
-the user-facing behavior.
+Restoration runs at most once across all exit paths. Whichever of `leave`, drop, or the panic-safe
+restore handle runs first performs it; the others skip. Dropping a session without `leave` still
+restores the terminal, but drop-time failures cannot be reported.
+
+Flush explicitly before `leave` when the visibility ordering of your own output matters.
+
+## Panic-Safe Restore
+
+On Unix, `TerminalSession::restore_handle` returns a `RestoreHandle`: a cheap, cloneable handle
+that restores the terminal without borrowing the session, built for panic hooks.
+
+```no_run
+use qwertty::TerminalSession;
+
+fn main() -> qwertty::Result<()> {
+    let session = TerminalSession::open()?;
+
+    let restore = session.restore_handle();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        _ = restore.restore();
+        previous(info);
+    }));
+
+    session.leave()
+}
+```
+
+The emergency path is precomposed: the session keeps the handle's teardown bytes current as its
+state changes, so the hook only writes bytes and restores the captured terminal mode. Writes are
+bounded, so a stalled terminal cannot hang the hook. A panic hook covers unwinding panics on any
+thread; it does not run on `abort` or fatal signals. See the `panic_safe_restore.rs` example.
 
 ## Async Boundary
 

@@ -69,6 +69,44 @@ fn pty_session_leave_restores_cooked_mode() {
     );
 }
 
+#[test]
+fn pty_restore_handle_restores_from_another_thread_once() {
+    let Some((_master, slave_path)) = open_test_pty() else {
+        return;
+    };
+    let slave = open_read_write(&slave_path).expect("open pty slave");
+    let original = tcgetattr(&slave).expect("read original termios");
+
+    let terminal = Terminal::open_path(&slave_path).expect("open pty-backed terminal");
+    let session = TerminalSession::from_terminal(terminal).expect("start terminal session");
+    let restore = session.restore_handle();
+
+    let raw = tcgetattr(&slave).expect("read raw termios");
+    assert_ne!(
+        format!("{original:?}"),
+        format!("{raw:?}"),
+        "session should have entered raw mode"
+    );
+
+    // Emergency restoration runs off-thread, the way a panic hook on a worker thread would.
+    let restored = thread::spawn(move || restore.restore())
+        .join()
+        .expect("join restore thread");
+    assert!(restored, "the emergency path should perform restoration");
+
+    let after_restore = tcgetattr(&slave).expect("read restored termios");
+    assert_eq!(
+        termios_without_pending_input(original),
+        termios_without_pending_input(after_restore),
+        "the emergency path should restore the captured termios"
+    );
+
+    // Orderly leave after an emergency restoration is a clean no-op.
+    session
+        .leave()
+        .expect("leave should succeed after emergency restoration");
+}
+
 fn open_test_pty() -> Option<(File, PathBuf)> {
     match open_test_pty_result() {
         Ok(pty) => Some(pty),

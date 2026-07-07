@@ -13,6 +13,8 @@ point without scanning the repository tree.
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore
   cooked mode on leave.
+- `panic_safe_restore.rs`: install a panic hook with `RestoreHandle` so a panic restores the
+  terminal before the backtrace prints.
 - `read_input_bytes.rs`: read raw terminal bytes through the synchronous session boundary.
 - `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
   input and asserting output without opening a terminal.

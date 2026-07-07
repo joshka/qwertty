@@ -20,11 +20,15 @@ tokio = ["dep:tokio"]
 
 [lints.rust]
 missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
 unsafe_code = "forbid"
 
 [lints.clippy]
 all = "warn"
 pedantic = "warn"
+
+[dev-dependencies]
+loom = "0.7"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "pty", "termios"] }

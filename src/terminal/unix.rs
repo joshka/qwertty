@@ -65,6 +65,16 @@ impl Terminal {
         &self.path
     }
 
+    /// Returns the cooked terminal mode captured when this terminal was opened.
+    pub(crate) fn cooked_mode(&self) -> Termios {
+        self.original_mode.clone()
+    }
+
+    /// Duplicates the underlying device handle for the emergency restore path.
+    pub(crate) fn try_clone_device(&self) -> Result<File> {
+        self.device.try_clone().map_err(Error::open_terminal)
+    }
+
     /// Returns the current terminal size.
     ///
     /// The result is a snapshot. This method does not subscribe to future resize events.

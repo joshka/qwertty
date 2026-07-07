@@ -48,6 +48,11 @@ jobs:
       - name: Test examples
         run: cargo test --examples --workspace --all-features
 
+      - name: Loom models
+        run: cargo test --lib loom_
+        env:
+          RUSTFLAGS: --cfg loom
+
   clippy:
     runs-on: ubuntu-latest
     steps:

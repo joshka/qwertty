@@ -185,6 +185,10 @@ push, and `just fuzz` runs them locally.
 
 ## Key Events
 
+The `Event` vocabulary and the command families are **frozen for 0.1** (ADR 0019): their shape is
+stable to build against, breaking changes are maintainer-gated, and additive growth stays open
+because the enums are `#[non_exhaustive]`.
+
 `SemanticDecoder` is qwertty's semantic input layer. It owns a `SyntaxParser` and maps its lossless
 tokens to the typed `Event` vocabulary applications consume. Feed input chunks with
 `SemanticDecoder::feed` and flush pending state with `SemanticDecoder::finish`, exactly like the

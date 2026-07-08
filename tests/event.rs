@@ -122,14 +122,15 @@ fn decodes_mixed_arrow_key_text_and_controls() {
 
 #[test]
 fn passes_unmapped_csi_through_as_syntax() {
-    // Parity with input_bytes_classify_complete_csi_input: "A\x1b[Z". CSI Z is not an arrow key, so
-    // it passes through losslessly as syntax rather than becoming a fake keypress.
-    let events = decode_whole(b"A\x1b[Z");
+    // `CSI 3 Z` is Cursor Backward Tabulation (an output control with a count, selector 3), not a
+    // key, so it passes through losslessly as syntax rather than becoming a fake keypress. Bare
+    // `CSI Z` is backtab / Shift-Tab and *does* decode — see `backtab_decodes_as_shift_tab`.
+    let events = decode_whole(b"A\x1b[3Z");
 
-    assert_eq!(events, vec![char_event('A'), csi_event(b"\x1b[Z")]);
+    assert_eq!(events, vec![char_event('A'), csi_event(b"\x1b[3Z")]);
     assert_eq!(
         events[1].syntax_token().map(SyntaxToken::as_bytes),
-        Some(&b"\x1b[Z"[..])
+        Some(&b"\x1b[3Z"[..])
     );
 }
 

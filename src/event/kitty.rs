@@ -45,7 +45,7 @@ pub(crate) fn decode_key(csi: &ControlSequence) -> Option<KeyEvent> {
         b'u' => decode_csi_u(params),
         // Legacy CSI functional-key forms. These decode only to carry modifiers; the unmodified
         // arrow forms are still handled by the arrow-key path in the parent module for parity.
-        b'A' | b'B' | b'C' | b'D' | b'H' | b'F' | b'P' | b'Q' | b'S' | b'~' => {
+        b'A' | b'B' | b'C' | b'D' | b'H' | b'F' | b'P' | b'Q' | b'S' | b'Z' | b'~' => {
             decode_legacy_functional(params)
         }
         _ => None,
@@ -136,9 +136,21 @@ fn decode_legacy_functional(params: &ControlParams) -> Option<KeyEvent> {
     }
 
     // The letter-final modified-key forms require the CSI-1 selector; anything else is a cursor
-    // control, not a key.
+    // control, not a key. This is why `CSI Z` (bare backtab, selector 1) is Shift-Tab input while
+    // `CSI 3 Z` (Cursor Backward Tabulation, selector 3) stays an output control that passes
+    // through as syntax.
     if selector != 1 {
         return None;
+    }
+
+    // Backtab (`CSI Z`) is Shift-Tab. It carries no modifier field of its own, so the shift is
+    // implicit; an explicit modifier group (a rare `CSI 1 ; 5 Z`) unions with it.
+    if final_byte == b'Z' {
+        return Some(
+            KeyEvent::new(Key::Tab)
+                .with_modifiers(modifiers.union(Modifiers::SHIFT))
+                .with_kind(kind),
+        );
     }
 
     // A bare arrow with no modifier group is the parity arrow path's job (handled by the parent
@@ -169,12 +181,14 @@ fn decode_legacy_functional(params: &ControlParams) -> Option<KeyEvent> {
 /// Maps a legacy `CSI n ~` editing/function number to its [`Key`].
 fn legacy_tilde_key(number: u32) -> Option<Key> {
     Some(match number {
+        // Home/End have two tilde numbers each: 1/4 are the alternate forms some terminals send
+        // instead of the `CSI H`/`CSI F` letter forms; 7/8 are the more common tilde Home/End.
+        1 | 7 => Key::Home,
         2 => Key::Insert,
         3 => Key::Delete,
+        4 | 8 => Key::End,
         5 => Key::PageUp,
         6 => Key::PageDown,
-        7 => Key::Home,
-        8 => Key::End,
         // The `CSI n ~` function-key block: 11-15 -> F1-F5, 17-21 -> F6-F10, 23-24 -> F11-F12.
         11 => Key::Function(1),
         12 => Key::Function(2),
@@ -510,6 +524,29 @@ mod tests {
         assert_eq!(key(b"\x1b[15~").key(), Key::Function(5));
         assert_eq!(key(b"\x1b[24;5~").modifiers(), Modifiers::CTRL);
         assert_eq!(key(b"\x1b[24;5~").key(), Key::Function(12));
+    }
+
+    #[test]
+    fn backtab_decodes_as_shift_tab() {
+        // `CSI Z` is backtab — Shift-Tab — with the shift implicit.
+        let event = key(b"\x1b[Z");
+        assert_eq!(event.key(), Key::Tab);
+        assert!(event.modifiers().contains(Modifiers::SHIFT));
+        // An explicit modifier group unions with the implicit shift: `CSI 1 ; 5 Z` ->
+        // Ctrl+Shift+Tab.
+        let event = key(b"\x1b[1;5Z");
+        assert_eq!(event.key(), Key::Tab);
+        assert!(event.modifiers().contains(Modifiers::SHIFT));
+        assert!(event.modifiers().contains(Modifiers::CTRL));
+        // `CSI 3 Z` is Cursor Backward Tabulation (selector 3), an output control — not backtab. It
+        // must decline so it passes through as syntax, not a fake Shift-Tab.
+        assert!(decode_key(&csi(b"\x1b[3Z")).is_none());
+    }
+
+    #[test]
+    fn tilde_home_end_alternate_forms_decode() {
+        assert_eq!(key(b"\x1b[1~").key(), Key::Home);
+        assert_eq!(key(b"\x1b[4~").key(), Key::End);
     }
 
     #[test]

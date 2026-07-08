@@ -1214,6 +1214,35 @@ async fn tokio_session_requests_kitty_keyboard_and_records_granted_flags() {
 }
 
 #[tokio::test]
+async fn tokio_session_pushes_kitty_keyboard_without_querying() {
+    // The set-only primitive writes the push and records the pop, with NO query round-trip — the
+    // narrow primitive under the verify-after-push convenience (review-02 §6).
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let flags =
+        KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES.union(KittyKeyboardFlags::REPORT_EVENT_TYPES);
+    session
+        .push_kitty_keyboard(flags)
+        .await
+        .expect("push kitty keyboard flags");
+
+    // Only the push (`CSI > 3 u`) was written — no `CSI ? u` query follows it.
+    let written = read_fake_until_available(&mut terminal)
+        .await
+        .expect("read push");
+    assert_eq!(written, b"\x1b[>3u");
+
+    // Teardown pops the pushed level.
+    session.leave().await.expect("leave Tokio fake session");
+    let teardown = terminal.output().expect("read teardown output");
+    assert!(
+        teardown.windows(5).any(|w| w == b"\x1b[<1u"),
+        "leave must pop the pushed kitty entry with CSI < 1 u, got {teardown:?}",
+    );
+}
+
+#[tokio::test]
 async fn tokio_session_kitty_keyboard_grant_can_be_a_subset() {
     // Verify-after-push mismatch (helix handshake, design 06): the caller requests more than the
     // terminal grants. The grant reports the smaller set, and the ledger records the *granted*

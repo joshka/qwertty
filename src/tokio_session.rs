@@ -697,9 +697,32 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         }
     }
 
+    /// Pushes kitty keyboard progressive-enhancement flags, without verifying what was granted.
+    ///
+    /// This is the narrow primitive: it writes `CSI > flags u`, flushes, and records the matching
+    /// pop so teardown pops it — the async analogue of
+    /// [`TerminalSession::push_kitty_keyboard`](crate::TerminalSession::push_kitty_keyboard). It
+    /// does **not** query what the terminal granted. Drive that readback yourself at your own
+    /// timing with [`commands::terminal::query_kitty_keyboard_flags`] and
+    /// [`next_event`](Self::next_event), or use
+    /// [`request_kitty_keyboard`](Self::request_kitty_keyboard) for the verify-after-push
+    /// convenience built on top of this.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the push bytes cannot be written or flushed.
+    pub async fn push_kitty_keyboard(&mut self, flags: KittyKeyboardFlags) -> terminal::Result<()> {
+        self.command(commands::terminal::push_kitty_keyboard_flags(flags))
+            .await?;
+        self.flush().await?;
+        self.session.record_kitty_keyboard(flags);
+        Ok(())
+    }
+
     /// Requests kitty keyboard progressive-enhancement flags and verifies what was granted.
     ///
-    /// This is the verify-after-push handshake (design 06). It:
+    /// This is the opt-in verify-after-push convenience layered on the set-only primitive
+    /// [`push_kitty_keyboard`](Self::push_kitty_keyboard) (design 06). It:
     ///
     /// 1. writes `CSI > flags u` to push the caller-chosen `requested` flags (rabbitui P0-4);
     /// 2. queries `CSI ? u` and reads decoded input until the `CSI ? flags u` reply completes,
@@ -1834,22 +1857,6 @@ fn unexpected_reply(_reply: Reply) -> terminal::Error {
     ))
 }
 
-/// Reaches the controlling terminal through the inherited standard-input descriptor.
-///
-/// On macOS, kqueue rejects a *freshly opened* descriptor for the process's own controlling
-/// terminal with `EINVAL` — both through the `/dev/tty` alias and through the underlying device
-/// path — while the descriptor inherited as standard input registers fine (verified empirically;
-/// this is the incumbent failure class the Phase 1 catalog records for crossterm's dev-tty path on
-/// macOS, FM-A11). Duplicating standard input shares its open file description, so the duplicate
-/// stays pollable. Because the description is shared with the parent shell's standard input, the
-/// session's non-blocking flag would leak into the shell on exit; the Tokio session therefore
-/// captures the original status flags from the readiness dup and restores them on leave and on
-/// drop.
-///
-/// The duplicate is only usable when standard input is a terminal opened read-write, which is how
-/// interactive shells set up their children. Otherwise (redirected stdin, read-only fd 0) the
-/// caller falls back to opening `/dev/tty`, which remains correct on platforms whose pollers accept
-/// it.
 /// Resolves the controlling terminal to its specific device path for a fresh open.
 ///
 /// When standard input cannot supply the terminal (redirected, or not read-write), a fresh open
@@ -1881,6 +1888,22 @@ fn resolved_controlling_terminal_path() -> (PathBuf, TerminalAcquisition) {
         )
 }
 
+/// Reaches the controlling terminal through the inherited standard-input descriptor.
+///
+/// On macOS, kqueue rejects a *freshly opened* descriptor for the process's own controlling
+/// terminal with `EINVAL` — both through the `/dev/tty` alias and through the underlying device
+/// path — while the descriptor inherited as standard input registers fine (verified empirically;
+/// this is the incumbent failure class the Phase 1 catalog records for crossterm's dev-tty path on
+/// macOS, FM-A11). Duplicating standard input shares its open file description, so the duplicate
+/// stays pollable. Because the description is shared with the parent shell's standard input, the
+/// session's non-blocking flag would leak into the shell on exit; the Tokio session therefore
+/// captures the original status flags from the readiness dup and restores them on leave and on
+/// drop.
+///
+/// The duplicate is only usable when standard input is a terminal opened read-write, which is how
+/// interactive shells set up their children. Otherwise (redirected stdin, read-only fd 0) the
+/// caller falls back to opening `/dev/tty`, which remains correct on platforms whose pollers accept
+/// it.
 fn controlling_terminal_via_stdin() -> Option<(File, PathBuf)> {
     let stdin = rustix::stdio::stdin();
     if !rustix::termios::isatty(stdin) {

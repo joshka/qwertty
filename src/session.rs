@@ -645,6 +645,35 @@ impl<D: TerminalDevice> TerminalSession<D> {
         )
     }
 
+    /// Pushes kitty keyboard progressive-enhancement flags, without verifying what was granted.
+    ///
+    /// This is the narrow primitive: it writes `CSI > flags u` now and records the matching pop
+    /// (`CSI < u`) so the session re-applies the push on `enter` and pops it on
+    /// `leave`/drop/emergency. It does **not** query the terminal for what was actually granted —
+    /// the kitty protocol is a progressive enhancement, so a terminal may enable only a subset, or
+    /// (over a multiplexer, or on an old terminal) none at all.
+    ///
+    /// Use this when you want to drive the exchange yourself: push the flags, then read back the
+    /// active set at your own timing with [`commands::terminal::query_kitty_keyboard_flags`] and
+    /// the [`report`](crate::report) parsers. When you want that verify-after-push handled for
+    /// you, the Tokio session's
+    /// [`request_kitty_keyboard`](crate::TokioTerminalSession::request_kitty_keyboard)
+    /// is the convenience layered on top of this primitive.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the terminal device cannot write the push bytes.
+    pub fn push_kitty_keyboard(
+        &mut self,
+        flags: KittyKeyboardFlags,
+    ) -> terminal::Result<&mut Self> {
+        self.enable_mode(
+            ModeKind::KittyKeyboard,
+            &commands::terminal::push_kitty_keyboard_flags(flags),
+            &commands::terminal::pop_kitty_keyboard_flags(),
+        )
+    }
+
     /// Enters the alternate screen buffer.
     ///
     /// This writes `CSI ? 1049 h` **followed by an explicit `CSI 2 J`** now and records the pair as
@@ -1393,6 +1422,36 @@ mod tests {
         let mut expected = Vec::new();
         osc::set_clipboard(ClipboardSelection::Clipboard, b"Hello").encode(&mut expected);
         assert_eq!(fake_terminal.output().expect("output"), expected);
+    }
+
+    #[test]
+    fn push_kitty_keyboard_writes_push_now_and_pops_on_leave() {
+        use crate::KittyKeyboardFlags;
+        use crate::commands::terminal;
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        let flags = KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES;
+        session
+            .push_kitty_keyboard(flags)
+            .expect("push kitty flags")
+            .flush()
+            .expect("flush");
+
+        // The set-only primitive writes exactly the push bytes — no query round-trip, no framing.
+        let mut expected_push = Vec::new();
+        terminal::push_kitty_keyboard_flags(flags).encode(&mut expected_push);
+        assert_eq!(fake_terminal.output().expect("output"), expected_push);
+
+        // Teardown pops the pushed level the ledger recorded.
+        session.leave().expect("leave");
+        let mut expected_pop = Vec::new();
+        terminal::pop_kitty_keyboard_flags().encode(&mut expected_pop);
+        assert_eq!(
+            fake_terminal.output().expect("output after leave"),
+            expected_pop
+        );
     }
 
     #[test]

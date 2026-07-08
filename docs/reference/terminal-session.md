@@ -116,8 +116,19 @@ enablement order, and the reset bytes flow into the panic-safe emergency blob au
 panic teardown turns the modes back off, not just an orderly `leave`. `enable_mouse` always pairs
 the chosen tracking mode (1000/1002/1003) with SGR extended coordinates (1006), and re-recording a
 different `MouseMode` replaces the entry in place so switching tracking modes never leaves a stale
-one enabled. The same methods are available on the Tokio session (`TokioTerminalSession`), which
-writes the enable bytes through its readiness path before recording the ledger entry.
+one enabled. `enable_in_band_resize()` turns on mode 2048 the same way, so the terminal reports
+size changes in band as `Event::Resize` (design 01) instead of requiring `SIGWINCH`. The same
+methods are available on the Tokio session (`TokioTerminalSession`), which writes the enable bytes
+through its readiness path before recording the ledger entry.
+
+Kitty keyboard follows the narrow-primitive rule. `push_kitty_keyboard(flags)` is the set-only
+primitive: it writes `CSI > flags u` and records the pop for teardown, with **no** query — the
+kitty protocol is a progressive enhancement, so the terminal may grant only a subset. Drive the
+readback yourself (`commands::terminal::query_kitty_keyboard_flags` plus the reply parsers) at your
+own timing, or use the Tokio session's `request_kitty_keyboard(flags, timeout)` — the opt-in
+verify-after-push convenience that pushes, queries, and records the *granted* set, degrading to an
+unknown grant when the terminal never answers (FM-C4). The set-only push is available on both the
+sync and Tokio sessions.
 
 The lifecycle is re-entrant: `leave` does not consume the session, and
 `TerminalSession::enter` re-applies the recorded state afterwards. A line-editor-shaped caller

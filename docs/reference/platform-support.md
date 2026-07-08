@@ -82,6 +82,15 @@ such as these return `Error::Unsupported`:
 Higher-level live terminal APIs built on that device boundary inherit the same unsupported behavior
 instead of pretending a broader platform contract.
 
+## Building On Unsupported Platforms
+
+The platform-neutral types build the same everywhere. qwertty's CI cross-compiles and lints the
+library with warnings denied for `x86_64-pc-windows-msvc` and `wasm32-unknown-unknown` in addition
+to running the real test suite on Windows, which proves the platform-neutral surface stays portable
+even though live terminal ownership does not extend there yet. A clean cross-compile is evidence
+that the type surface stays honest on those targets, not evidence of live terminal support; the
+`Error::Unsupported` boundary above is still the operative contract.
+
 ## What This Means For Callers
 
 - Use command and parser types freely across platforms when you only need byte building or byte

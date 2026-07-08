@@ -3,41 +3,70 @@
 qwertty is a Rust library for building terminal applications that need explicit terminal ownership,
 ordered output, input handling, and policy-aware terminal features.
 
-The library is being developed in small public slices. The first slices establish project quality
-standards, then add command encoding, terminal device access, session lifecycle management, input,
-queries, and capability policy.
+qwertty is Unix-first and ships both a synchronous session owner and an optional Tokio-backed async
+session owner behind the `tokio` feature, so an application can pick the runtime shape it needs
+without qwertty imposing one.
 
 ## Status
 
-qwertty has an encode-only command foundation, a Unix terminal device layer, a small terminal
-session lifecycle, raw terminal input bytes, basic input events, and a small stateful input decoder.
-It can build terminal output bytes, open the current terminal, manage raw mode, query terminal
-size, write ordered session output, read input bytes, classify simple UTF-8 text/control/key input
-across chunks, preserve complete CSI input syntax, parse and match cursor position reports, parse
-terminal status reports, flush explicitly, and leave with reported cleanup errors. With the optional
-`tokio` feature on Unix, it also exposes a Tokio-backed session owner for runtime-backed reads,
-writes, decoded input events, explicit cleanup, live cursor position queries, and live terminal
-status queries. It does not include a general terminal query router yet.
+qwertty has a runtime-neutral command encoding layer, a Unix terminal device layer, a synchronous
+terminal session (`TerminalSession`) and an optional Tokio-backed async session
+(`TokioTerminalSession`), a total lossless input syntax layer, and a semantic decoder that maps
+input to typed `Event` values.
+
+It can build terminal output bytes, open the current terminal, manage raw mode through a mode
+ledger, query terminal size, write ordered session output, read raw input bytes or decoded events,
+classify UTF-8 text/control/key input across chunks, preserve complete CSI/OSC/DCS syntax, and parse
+cursor-position and terminal-status reports. Sessions are re-entrant (repeated enter/leave cycles,
+the way a line editor hands the terminal back between prompts) and panic-safe: `RestoreHandle`
+restores cooked mode from a panic hook even if the program never reaches its own cleanup code.
 
 The public surface also includes:
 
-- **Capability detection** — `Capabilities`, built by `TokioTerminalSession::probe_capabilities`
-  (with the `tokio` feature on Unix), reports synchronized output, grapheme clustering, in-band
-  resize, bracketed paste, kitty keyboard flags, terminal identity, and env-inferred hyperlink and
-  truecolor support, each with evidence of how it was learned. See the
-  [capability model reference](docs/reference/capability-model.md).
+- **Sync and async sessions** — `TerminalSession::request_cursor_position` and
+  `request_terminal_status` answer live terminal queries with a blocking poll loop and no async
+  runtime; `TokioTerminalSession` answers the same queries asynchronously and adds decoded
+  `next_event` delivery. Both drive the same sans-io query correlator, so the query-routing
+  contracts (timeout, cancellation, preserved input, wrong-report, unmatched input) are identical
+  either way. See the [session lifecycle reference](docs/reference/terminal-session.md) and its
+  [Tokio tail](docs/reference/terminal-session-tokio.md).
+- **Suspend, resume, and handoff** — `TokioTerminalSession::suspend`/`resume(flush_input)` restore
+  the terminal and re-enter raw mode around a `SIGTSTP`/`SIGCONT` job-control cycle, and
+  `run_detached(f)` hands the terminal to a synchronous child (an `$EDITOR`, a pager, a subshell)
+  and reclaims it afterward, resyncing termios and readiness either way. qwertty installs no signal
+  handler itself; the app owns the `SIGTSTP`/`SIGCONT` wiring. See
+  [Tokio Input Ownership And Query Handoff](docs/reference/tokio-input-ownership.md).
+- **Terminal-relevant signals and resize** — `TokioTerminalSession::signals()` returns a
+  `SignalStream` of typed `TerminalSignal::Suspend`/`Continue`/`Terminate`/`Interrupt` events for
+  `SIGTSTP`/`SIGCONT`/`SIGTERM`/`SIGINT`, and `resize_stream()` returns a `ResizeStream` fallback
+  for `SIGWINCH` alongside in-band coalesced `Event::Resize` delivery.
 - **Security policy** — `Policy` and `PolicyGate` gate side-effecting and exfiltrating features
-  (clipboard write/read, notifications, file transfer, mux passthrough) so a program's output
-  cannot silently reach the clipboard or the filesystem. See the
+  (clipboard write/read, notifications, file transfer, mux passthrough) behind `restricted`,
+  `interactive`, and `trusted` presets, so a program's output cannot silently reach the clipboard or
+  the filesystem. Both sessions expose a gated `set_clipboard`, and a denied gate is a typed
+  `Error::PolicyDenied` naming the gate. See the
   [session lifecycle reference](docs/reference/terminal-session.md#security-policy).
-- **Kitty keyboard** — `commands::terminal::push_kitty_keyboard_flags`/`pop_kitty_keyboard_flags`
-  request progressive-enhancement key reporting, verified by readback rather than assumed granted.
-  See [Input Modes](docs/reference/terminal-session.md#input-modes).
+- **Kitty keyboard** — `push_kitty_keyboard` (on both the sync and Tokio sessions) sets
+  progressive-enhancement key reporting flags directly, and
+  `TokioTerminalSession::request_kitty_keyboard` verifies the granted subset by readback rather than
+  assuming the request was honored. See [Input Modes](docs/reference/terminal-session.md#input-modes).
+- **Capability probing** — `Capabilities`, built by `TokioTerminalSession::probe_capabilities` (with
+  the `tokio` feature on Unix), reports synchronized output, grapheme clustering, in-band resize,
+  bracketed paste, kitty keyboard flags, terminal identity, and env-inferred hyperlink and truecolor
+  support, each with evidence of how it was learned — probed, inferred, or unknown, never assumed
+  unsupported. See the [capability model reference](docs/reference/capability-model.md).
+- **Terminal acquisition observability** — `TokioTerminalSession::acquisition()` reports how the
+  controlling terminal was reached on macOS, for diagnostics and support requests.
 - **Mouse, focus, paste, and resize events** — `enable_mouse`, `enable_focus_events`,
   `enable_bracketed_paste`, and `enable_in_band_resize` turn on the terminal reporting modes the
   decoder turns into `Event::Mouse`, `Event::Focus`, `Event::Paste`, and `Event::Resize`. See
   [Input Modes](docs/reference/terminal-session.md#input-modes) and the
   [terminal control reference](docs/reference/terminal-control.md).
+- **Sequence database** — `db/` is a hand-curated, machine-validated database of terminal control
+  sequences (375 entries across 16 families: ECMA-48, DEC, xterm, kitty, iTerm2, OSC, and vendor
+  DCS), each with citations and byte-exact fixtures. The `qdb` tool validates the database and
+  renders a live-capture conformance matrix (`db/caniuse.md`) from headless tmux and betamax
+  (libghostty) captures. See [db/README.md](db/README.md).
 
 ## Small Example
 

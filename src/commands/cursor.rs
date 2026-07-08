@@ -5,8 +5,8 @@
 //! than passing zero-based layout indexes directly.
 //!
 //! The positioning helper in this module uses ECMA-48 control functions. The terms ECMA-48, CSI,
-//! and CUP are introduced in [Command Anatomy](crate::docs#command-anatomy) and
-//! [Cursor Position](crate::docs#cursor-position).
+//! and CUP are introduced in [Command Anatomy](crate::docs::terminal_control#command-anatomy) and
+//! [Cursor Position](crate::docs::terminal_control#cursor-position).
 //!
 //! Cursor visibility and save/restore are terminal state changes represented as encoded
 //! [`Command`] values. They do not track state locally; the session that writes them owns cleanup
@@ -32,7 +32,7 @@ use crate::{Command, ProtocolPosition, escape};
 ///
 /// This encodes ECMA-48 CUP, "Cursor Position". CUP is written as
 /// `CSI row ; column H`, where CSI is emitted as `ESC [` by qwertty.
-/// See [Cursor Position](crate::docs#cursor-position) for the protocol terms.
+/// See [Cursor Position](crate::docs::terminal_control#cursor-position) for the protocol terms.
 ///
 /// `ProtocolPosition::new(3, 5)` emits `b"\x1b[3;5H"`.
 ///
@@ -81,7 +81,8 @@ pub fn request_position() -> Command {
 /// This encodes the commonly supported xterm/DEC private cursor-visibility mode reset:
 /// `CSI ? 25 l`, emitted as `b"\x1b[?25l"`.
 ///
-/// See [Cursor Visibility](crate::docs#cursor-visibility) for the protocol details.
+/// See [Cursor Visibility](crate::docs::terminal_control#cursor-visibility) for the protocol
+/// details.
 ///
 /// Hiding the cursor changes terminal state. Code that writes this command to a real terminal
 /// should arrange to show the cursor again during cleanup.
@@ -108,7 +109,8 @@ pub fn hide() -> Command {
 /// `CSI ? 25 h`, emitted as `b"\x1b[?25h"`.
 ///
 /// Use this as the cleanup pair for [`hide`].
-/// See [Cursor Visibility](crate::docs#cursor-visibility) for the protocol details.
+/// See [Cursor Visibility](crate::docs::terminal_control#cursor-visibility) for the protocol
+/// details.
 ///
 /// # Example
 ///
@@ -130,7 +132,8 @@ pub fn show() -> Command {
 ///
 /// This emits the DEC save-cursor sequence `ESC 7`, written as `b"\x1b7"`.
 ///
-/// See [Cursor Save And Restore](crate::docs#cursor-save-and-restore) for the protocol details.
+/// See [Cursor Save And Restore](crate::docs::terminal_control#cursor-save-and-restore) for the
+/// protocol details.
 ///
 /// Save/restore support is widespread, but the saved position is terminal state. Prefer using the
 /// pair within a narrow output frame.
@@ -155,7 +158,8 @@ pub fn save() -> Command {
 ///
 /// This emits the DEC restore-cursor sequence `ESC 8`, written as `b"\x1b8"`.
 ///
-/// See [Cursor Save And Restore](crate::docs#cursor-save-and-restore) for the protocol details.
+/// See [Cursor Save And Restore](crate::docs::terminal_control#cursor-save-and-restore) for the
+/// protocol details.
 ///
 /// # Example
 ///
@@ -182,10 +186,10 @@ pub fn restore() -> Command {
 /// The enum is `#[non_exhaustive]`: DECSCUSR has no vendor extension today, but future terminal
 /// families may define additional `Ps` values.
 ///
-/// See [Cursor Shape](crate::docs#cursor-shape) for the protocol details and the restore caveat
-/// (FM-L3): no single reset value matches every terminal profile's prior shape, so an application
-/// that changes the cursor shape should restore its own remembered shape explicitly rather than
-/// rely on one universal reset.
+/// See [Cursor Shape](crate::docs::terminal_control#cursor-shape) for the protocol details and the
+/// restore caveat (FM-L3): no single reset value matches every terminal profile's prior shape, so
+/// an application that changes the cursor shape should restore its own remembered shape explicitly
+/// rather than rely on one universal reset.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CursorShape {
@@ -228,10 +232,11 @@ impl CursorShape {
 /// For example, `set_shape(CursorShape::SteadyBar)` emits `b"\x1b[6 q"`.
 ///
 /// DECSCUSR support and its default appearance vary by terminal profile. See [Cursor
-/// Shape](crate::docs#cursor-shape) for the restore caveat (FM-L3): no single `Ps` value is a
-/// universal reset to what the shape was before this call, because "default" means the terminal
-/// profile's own default, not necessarily the shape a prior `set_shape` call changed away from.
-/// Application code that changes the shape should restore its own remembered shape explicitly.
+/// Shape](crate::docs::terminal_control#cursor-shape) for the restore caveat (FM-L3): no single
+/// `Ps` value is a universal reset to what the shape was before this call, because "default" means
+/// the terminal profile's own default, not necessarily the shape a prior `set_shape` call changed
+/// away from. Application code that changes the shape should restore its own remembered shape
+/// explicitly.
 ///
 /// # Example
 ///
@@ -260,7 +265,7 @@ pub fn set_shape(shape: CursorShape) -> Command {
 /// was active before an application changed it (the user's own profile default, a previous
 /// application's leaked shape, or another value entirely). Session code that tracks the shape it
 /// set should restore that specific shape explicitly instead of relying on this reset alone; see
-/// [Cursor Shape](crate::docs#cursor-shape).
+/// [Cursor Shape](crate::docs::terminal_control#cursor-shape).
 ///
 /// # Example
 ///

@@ -5,8 +5,9 @@
 //! support. Real terminal ownership and cleanup belong to later session layers.
 //!
 //! These helpers use ECMA-48 erase controls. The terms ECMA-48, CSI, ED, and EL are introduced in
-//! [Command Anatomy](crate::docs#command-anatomy), [Erase In
-//! Display](crate::docs#erase-in-display), and [Erase In Line](crate::docs#erase-in-line).
+//! [Command Anatomy](crate::docs::terminal_control#command-anatomy), [Erase In
+//! Display](crate::docs::terminal_control#erase-in-display), and [Erase In
+//! Line](crate::docs::terminal_control#erase-in-line).
 //!
 //! ```
 //! use qwertty::CommandBuffer;
@@ -24,7 +25,7 @@ use crate::{Command, escape};
 ///
 /// This encodes ECMA-48 ED, "Erase in Display", with mode `2`, "erase the complete display".
 /// qwertty emits `CSI 2 J` as `b"\x1b[2J"`. See
-/// [Erase In Display](crate::docs#erase-in-display) for the protocol terms.
+/// [Erase In Display](crate::docs::terminal_control#erase-in-display) for the protocol terms.
 ///
 /// This affects the terminal display but does not move the cursor.
 ///
@@ -48,7 +49,7 @@ pub fn clear() -> Command {
 ///
 /// This encodes ECMA-48 EL, "Erase in Line", with mode `2`, "erase the complete line".
 /// qwertty emits `CSI 2 K` as `b"\x1b[2K"`. See
-/// [Erase In Line](crate::docs#erase-in-line) for the protocol terms.
+/// [Erase In Line](crate::docs::terminal_control#erase-in-line) for the protocol terms.
 ///
 /// This affects the active line but does not move the cursor.
 ///
@@ -78,8 +79,8 @@ pub fn erase_line() -> Command {
 /// This helper only builds the enter bytes. It does not clear the alternate buffer, track whether
 /// the terminal is currently on the alternate screen, or arrange cleanup. Session code pairs this
 /// with an explicit clear and with [`leave_alternate_screen`] as a ledger entry — see
-/// [Alternate Screen](crate::docs#alternate-screen) for why the explicit clear after entry
-/// matters.
+/// [Alternate Screen](crate::docs::terminal_control#alternate-screen) for why the explicit clear
+/// after entry matters.
 ///
 /// # Example
 ///

@@ -8,7 +8,14 @@
 //! position are matched to their replies without mistaking a keystroke for an answer.
 //!
 //! qwertty is async-first. A runtime-neutral, side-effect-free core — encoding, the input decoder,
-//! and the query correlator — is driven either by the asynchronous `TokioTerminalSession` (the
+#![cfg_attr(
+    feature = "tokio",
+    doc = "and the query correlator — is driven either by the asynchronous [`TokioTerminalSession`] (the"
+)]
+#![cfg_attr(
+    not(feature = "tokio"),
+    doc = "and the query correlator — is driven either by the asynchronous `TokioTerminalSession` (the"
+)]
 //! `tokio` feature) or by the blocking [`TerminalSession`], so the same decode and query logic
 //! backs both. Live terminal ownership is Unix-only; the encode and decode layers compile
 //! everywhere.
@@ -21,7 +28,14 @@
 //!   screen control, OSC, terminal mode changes); a [`CommandBuffer`] collects them in order.
 //! - **Own.** A session enters raw mode through a mode ledger, writes output in call order, and
 //!   undoes exactly what it enabled on `leave`, on drop, or from a panic hook (the unix-only
-//!   [`RestoreHandle`]). [`TerminalSession`] is synchronous; `TokioTerminalSession` is its async
+#![cfg_attr(
+    feature = "tokio",
+    doc = "  [`RestoreHandle`]). [`TerminalSession`] is synchronous; [`TokioTerminalSession`] is its async"
+)]
+#![cfg_attr(
+    not(feature = "tokio"),
+    doc = "  [`RestoreHandle`]). [`TerminalSession`] is synchronous; `TokioTerminalSession` is its async"
+)]
 //!   counterpart.
 //! - **Decode.** A [`SyntaxParser`] turns input bytes into lossless [`SyntaxToken`] spans, and a
 //!   [`SemanticDecoder`] maps those to typed [`Event`] values — [`KeyEvent`], mouse, focus, paste,
@@ -36,14 +50,28 @@
 //! - **default** (no features): encoding, the synchronous [`TerminalSession`] (raw mode, ordered
 //!   output, blocking cursor-position and terminal-status queries), the input decoders, and the
 //!   [`report`] parsers.
-//! - **`tokio`**: adds `TokioTerminalSession`, which drives the same sans-io core over Tokio
+#![cfg_attr(
+    feature = "tokio",
+    doc = "- **`tokio`**: adds [`TokioTerminalSession`], which drives the same sans-io core over Tokio"
+)]
+#![cfg_attr(
+    not(feature = "tokio"),
+    doc = "- **`tokio`**: adds `TokioTerminalSession`, which drives the same sans-io core over Tokio"
+)]
 //!   readiness — decoded [`Event`] delivery, live queries, capability probing, suspend/resume,
 //!   `$EDITOR` handoff, and signal and resize streams.
 //!
 //! # Where to start
 //!
 //! - Build output with [`Command`], [`CommandBuffer`], and the [`commands`] modules.
-//! - Own the terminal with [`TerminalSession`] (or `TokioTerminalSession` under the `tokio`
+#![cfg_attr(
+    feature = "tokio",
+    doc = "- Own the terminal with [`TerminalSession`] (or [`TokioTerminalSession`] under the `tokio`"
+)]
+#![cfg_attr(
+    not(feature = "tokio"),
+    doc = "- Own the terminal with [`TerminalSession`] (or `TokioTerminalSession` under the `tokio`"
+)]
 //!   feature); both guarantee cleanup.
 //! - Read input through the [`SemanticDecoder`] and the [`Event`] / [`KeyEvent`] vocabulary, with
 //!   [`SyntaxParser`] and [`SyntaxToken`] as the lossless layer beneath.

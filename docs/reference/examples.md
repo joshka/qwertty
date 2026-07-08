@@ -34,6 +34,10 @@ point without scanning the repository tree.
 - `session_cycles.rs`: cycle the re-entrant session enter/leave lifecycle headless, the way a
   line editor hands the terminal back between prompts.
 - `read_input_bytes.rs`: read raw terminal bytes through the synchronous session boundary.
+- `clipboard_policy.rs`: gate an OSC 52 clipboard write behind the session security policy
+  (`TerminalSession::set_clipboard`) headless over a `FakeDevice` — a `trusted()` policy allows the
+  write, a hand-built restricted policy with clipboard write off denies it, and the denial is a
+  typed `Error::PolicyDenied` naming the gate (FM-X4).
 - `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
   input and asserting output without opening a terminal.
 

@@ -11,6 +11,8 @@
 use std::time::Duration;
 use std::{error, fmt, io};
 
+use crate::policy::PolicyGate;
+
 mod device;
 #[cfg(unix)]
 mod fake;
@@ -152,6 +154,17 @@ pub enum Error {
         /// Platform family that rejected the operation.
         platform: &'static str,
     },
+    /// The session's [`Policy`](crate::Policy) denied a gated operation.
+    ///
+    /// A side-effecting or exfiltrating feature (clipboard write/read, notifications, file
+    /// transfer, mux passthrough) was requested while its [`PolicyGate`] was off. Nothing was
+    /// written. Widen the session policy (for example with
+    /// [`Policy::trusted`](crate::Policy::trusted)
+    /// via [`set_policy`](crate::TerminalSession::set_policy)) if the operation is intended.
+    PolicyDenied {
+        /// The gate whose policy field was off.
+        gate: PolicyGate,
+    },
 }
 
 impl Error {
@@ -220,6 +233,9 @@ impl fmt::Display for Error {
             } => {
                 write!(f, "{operation} is not supported on {platform}")
             }
+            Self::PolicyDenied { gate } => {
+                write!(f, "operation denied by policy: {gate}")
+            }
         }
     }
 }
@@ -235,7 +251,8 @@ impl error::Error for Error {
             | Self::ReadTerminal { source } => Some(source),
             Self::InvalidTerminalSize { .. }
             | Self::QueryTimeout { .. }
-            | Self::Unsupported { .. } => None,
+            | Self::Unsupported { .. }
+            | Self::PolicyDenied { .. } => None,
         }
     }
 }

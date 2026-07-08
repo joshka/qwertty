@@ -21,6 +21,9 @@
 //! - `FakeDevice` and `FakeTerminal`, an in-process device pair for headless tests on Unix.
 //! - [`TerminalSession`], an application-facing owner for raw mode, ordered output, flushing, and
 //!   explicit leave cleanup.
+//! - [`Policy`] and [`PolicyGate`], the session security policy gating side-effecting and
+//!   exfiltrating features (clipboard write/read, notifications, file transfer, mux passthrough)
+//!   and the gate a [`PolicyDenied`](Error::PolicyDenied) error names.
 //! - [`KittyKeyboardFlags`] and [`KittyKeyboardGrant`], the caller-chosen kitty keyboard
 //!   progressive-enhancement request set and the granted result of the verify-after-push handshake.
 //! - `RestoreHandle`, a panic-safe emergency terminal-restore handle on Unix.
@@ -83,6 +86,7 @@ pub mod docs;
 mod escape;
 pub mod event;
 mod input;
+pub mod policy;
 pub mod report;
 mod session;
 mod syntax;
@@ -101,6 +105,7 @@ pub use event::{
     MouseEventKind, PasteEvent, ResizeEvent, ScrollDirection, SemanticDecoder, TextPayload,
 };
 pub use input::InputBytes;
+pub use policy::{Policy, PolicyGate};
 pub use report::{
     CursorPositionReport, DecPrivateModeReport, DecPrivateModeState, OscColorKind, OscColorReport,
     TerminalStatus, TerminalStatusReport, XtVersionReport,

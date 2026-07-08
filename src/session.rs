@@ -19,6 +19,7 @@ pub use kitty::{KittyKeyboardFlags, KittyKeyboardGrant};
 pub use restore::RestoreHandle;
 
 use crate::commands::terminal::MouseMode;
+use crate::policy::{Policy, PolicyGate};
 use crate::session::ledger::{ModeKind, ModeLedger, StateAction};
 use crate::{
     Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, commands, terminal,
@@ -67,6 +68,7 @@ pub struct TerminalSession<D: TerminalDevice = Terminal> {
     device: D,
     ledger: ModeLedger,
     entered: bool,
+    policy: Policy,
     #[cfg(unix)]
     restore: Option<RestoreHandle>,
 }
@@ -105,6 +107,7 @@ impl TerminalSession<Terminal> {
             device: terminal,
             ledger: ModeLedger::new(),
             entered: false,
+            policy: Policy::default(),
             #[cfg(unix)]
             restore,
         };
@@ -146,6 +149,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
             device,
             ledger: ModeLedger::new(),
             entered: false,
+            policy: Policy::default(),
             #[cfg(unix)]
             restore: None,
         };
@@ -251,6 +255,68 @@ impl<D: TerminalDevice> TerminalSession<D> {
             }),
             Err(error) => environment_size().ok_or(error),
         }
+    }
+
+    /// Returns the session's current security policy.
+    ///
+    /// The policy gates side-effecting and exfiltrating features (clipboard write/read,
+    /// notifications, file transfer, mux passthrough). A new session starts at
+    /// [`Policy::restricted`], the safe default. [`Policy`] is [`Copy`], so this returns a value.
+    #[must_use]
+    pub fn policy(&self) -> Policy {
+        self.policy
+    }
+
+    /// Sets the session's security policy, returning `&mut Self` so it chains with other setters.
+    ///
+    /// The new policy takes effect for every later gated call (for example
+    /// [`set_clipboard`](Self::set_clipboard)). It does not retroactively affect bytes already
+    /// written.
+    pub fn set_policy(&mut self, policy: Policy) -> &mut Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Builder-style variant of [`set_policy`](Self::set_policy): sets the policy and returns the
+    /// session by value.
+    ///
+    /// This composes with the constructors, letting a caller open a session and choose its policy
+    /// in one expression: `TerminalSession::from_device(device)?.with_policy(Policy::trusted())`.
+    #[must_use]
+    pub fn with_policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Writes a clipboard selection through the session's [`Policy`] gate (OSC 52, FM-X4).
+    ///
+    /// When the policy allows [`PolicyGate::ClipboardWrite`], this emits
+    /// [`commands::osc::set_clipboard`] through the same immediate-write path as
+    /// [`command`](Self::command) and returns `Ok(self)` so it chains like the other session
+    /// methods. A restricted (default) session allows clipboard writes, because the terminal itself
+    /// gates the sensitive paste-back direction (FM-X4).
+    ///
+    /// Clipboard writes are an exfiltration surface, not merely a formatting choice: any emitted
+    /// output can reach the system clipboard (MITRE ATT&CK T1115). This gate is the session's own
+    /// opt-in above the encode-only [`commands::osc::set_clipboard`] builder, which has no policy
+    /// of its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::PolicyDenied`] with [`PolicyGate::ClipboardWrite`] — **without
+    /// writing anything** — when the policy has clipboard write off. Otherwise returns the terminal
+    /// device's write error if the encoded bytes cannot be written.
+    pub fn set_clipboard(
+        &mut self,
+        selection: commands::osc::ClipboardSelection,
+        data: &[u8],
+    ) -> terminal::Result<&mut Self> {
+        if !self.policy.allows(PolicyGate::ClipboardWrite) {
+            return Err(terminal::Error::PolicyDenied {
+                gate: PolicyGate::ClipboardWrite,
+            });
+        }
+        self.command(commands::osc::set_clipboard(selection, data))
     }
 
     /// Writes one terminal command immediately.
@@ -768,5 +834,114 @@ fn emergency_device(terminal: &Terminal) -> terminal::Result<std::fs::File> {
     match reopened {
         Ok(device) => Ok(device),
         Err(_) => terminal.try_clone_device(),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use crate::TerminalSession;
+    use crate::commands::osc::{self, ClipboardSelection};
+    use crate::policy::{Policy, PolicyGate};
+    use crate::terminal::{Error, FakeDevice};
+
+    #[test]
+    fn new_session_starts_restricted() {
+        let (device, _terminal) = FakeDevice::open().expect("open fake device");
+        let session = TerminalSession::from_device(device).expect("start fake session");
+
+        assert_eq!(session.policy(), Policy::restricted());
+    }
+
+    #[test]
+    fn set_clipboard_denied_writes_zero_bytes() {
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // A hand-built policy with clipboard write off must deny the write.
+        session.set_policy(Policy {
+            clipboard_write: false,
+            ..Policy::restricted()
+        });
+
+        let result = session.set_clipboard(ClipboardSelection::Clipboard, b"secret");
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::PolicyDenied {
+                    gate: PolicyGate::ClipboardWrite
+                })
+            ),
+            "expected PolicyDenied, got {result:?}",
+        );
+
+        // Raw mode is a device mode, not bytes, so a denied write leaves the output empty.
+        assert_eq!(
+            fake_terminal.output().expect("output"),
+            Vec::<u8>::new(),
+            "a denied clipboard write must not emit any bytes",
+        );
+    }
+
+    #[test]
+    fn set_clipboard_allowed_writes_exact_command_bytes_and_chains() {
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        // Default (restricted) session allows clipboard write.
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        session
+            .set_clipboard(ClipboardSelection::Clipboard, b"Hello")
+            .expect("clipboard write allowed")
+            .flush()
+            .expect("flush");
+
+        // The exact bytes are the command builder's own encoding — the session gate adds no
+        // framing.
+        let mut expected = Vec::new();
+        osc::set_clipboard(ClipboardSelection::Clipboard, b"Hello").encode(&mut expected);
+        assert_eq!(fake_terminal.output().expect("output"), expected);
+    }
+
+    #[test]
+    fn set_clipboard_uses_policy_after_widening() {
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device)
+            .expect("start fake session")
+            .with_policy(Policy {
+                clipboard_write: false,
+                ..Policy::restricted()
+            });
+
+        assert!(
+            session
+                .set_clipboard(ClipboardSelection::Primary, b"x")
+                .is_err()
+        );
+        assert_eq!(fake_terminal.output().expect("output"), Vec::<u8>::new());
+
+        // Widening the policy lets the same write through.
+        session.set_policy(Policy::trusted());
+        session
+            .set_clipboard(ClipboardSelection::Primary, b"x")
+            .expect("write allowed after widening")
+            .flush()
+            .expect("flush");
+
+        let mut expected = Vec::new();
+        osc::set_clipboard(ClipboardSelection::Primary, b"x").encode(&mut expected);
+        assert_eq!(fake_terminal.output().expect("output"), expected);
+    }
+
+    #[test]
+    fn policy_denied_error_display_names_the_gate() {
+        let error = Error::PolicyDenied {
+            gate: PolicyGate::ClipboardWrite,
+        };
+        let message = error.to_string();
+        assert!(!message.is_empty());
+        assert!(
+            message.contains("clipboard write"),
+            "error message should name the gate: {message}",
+        );
     }
 }

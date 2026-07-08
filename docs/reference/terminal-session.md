@@ -90,6 +90,75 @@ only and never reopens the device, so cycling stays as cheap as the mode changes
 Sessions also run headless over any `TerminalDevice` through `TerminalSession::from_device` — the
 `session_cycles.rs` example drives the full lifecycle against a `FakeDevice`.
 
+## Security Policy
+
+Some terminal features do more than paint the grid: they reach the system clipboard, pull data back
+from the terminal, transfer files, raise desktop notifications, or wrap sequences for a multiplexer
+to pass through. Those are exactly the operations an attacker who controls a program's *output*
+wants to reach — a log line that quietly writes the clipboard (FM-X4) is an exfiltration primitive,
+not a formatting choice. The session carries a `Policy` value that gates them (R-SEC-1).
+
+A new session starts at `Policy::restricted()`, the safe default. Read it with
+`TerminalSession::policy` (which returns a `Copy` value) and change it with
+`TerminalSession::set_policy` (chains, returns `&mut Self`) or the builder-style
+`TerminalSession::with_policy` (returns the session by value). Every field is public, so an app can
+also build a policy by hand.
+
+The presets form a ladder from safe-by-default to fully trusted:
+
+| Preset          | Clipboard write | Clipboard read | Notifications | File transfer | Mux passthrough |
+| --------------- | --------------- | -------------- | ------------- | ------------- | --------------- |
+| `restricted()`  | on              | off            | off           | off           | off             |
+| `interactive()` | on              | off            | on            | off           | on              |
+| `trusted()`     | on              | on             | on            | on            | on              |
+
+`Default` returns `restricted()`. Clipboard **write** is on even in `restricted` because the
+terminal itself gates the sensitive paste-back direction (FM-X4, kitty#9428), so a write here cannot
+silently reach the user. The surfaces that *read* or *exfiltrate* — clipboard read, file transfer —
+open only at `trusted`; `interactive` widens `restricted` with notifications and mux passthrough for
+a locally-trusted interactive app, but not those reads.
+
+Gated session methods consult the policy through `Policy::allows(PolicyGate)` before emitting. When
+a gate is off, the method returns `Error::PolicyDenied { gate }` — a teachable error naming the gate
+(OQ-4) — **without writing anything**. The generic `command`, `bytes`, and `text` methods stay
+ungated: they write exactly what the caller encoded.
+
+`set_clipboard(selection, data)` is the first wired gate. It checks `PolicyGate::ClipboardWrite`,
+and on success emits `commands::osc::set_clipboard(selection, data)` (OSC 52) through the same
+immediate-write path as `command`, returning `Ok(self)` so it chains:
+
+```rust,no_run
+use qwertty::commands::osc::ClipboardSelection;
+use qwertty::{Error, Policy, TerminalSession};
+
+# fn main() -> qwertty::Result<()> {
+let mut session = TerminalSession::open()?.with_policy(Policy::trusted());
+
+// Allowed under a trusted (or the default restricted) policy.
+session
+    .set_clipboard(ClipboardSelection::Clipboard, b"copied")?
+    .flush()?;
+
+// A policy with clipboard write off denies the call before any bytes are written.
+session.set_policy(Policy {
+    clipboard_write: false,
+    ..Policy::restricted()
+});
+match session.set_clipboard(ClipboardSelection::Clipboard, b"secret") {
+    Err(Error::PolicyDenied { gate }) => eprintln!("denied by policy: {gate}"),
+    other => {
+        other?;
+    }
+}
+
+session.leave()
+# }
+```
+
+The `clipboard_policy.rs` example runs both paths headless over a `FakeDevice`. Clipboard read, file
+transfer, notifications, and mux passthrough are policy fields today; their session methods join as
+those features land.
+
 ## Screen And Cursor Lifecycle
 
 `enter_alternate_screen()` switches to the alternate screen buffer for full-screen applications.

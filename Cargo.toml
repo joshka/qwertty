@@ -6,7 +6,7 @@ members = ["tools/qdb"]
 
 [package]
 name = "qwertty"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Terminal application building blocks for explicit ownership, ordered output, and policy-aware features."
@@ -15,7 +15,6 @@ repository = "https://github.com/joshka/qwertty"
 readme = "README.md"
 keywords = ["terminal", "tui", "ansi", "tty"]
 categories = ["command-line-interface"]
-publish = false
 
 [lib]
 path = "src/lib.rs"

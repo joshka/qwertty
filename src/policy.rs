@@ -35,6 +35,25 @@
 /// [`PolicyDenied`](crate::Error::PolicyDenied) when a gate is off.
 ///
 /// See the [module documentation](self) for why each preset sits where it does on the ladder.
+///
+/// # Construction
+///
+/// Build from the preset closest to what you want and override with struct-update syntax, rather
+/// than listing every field:
+///
+/// ```
+/// use qwertty::Policy;
+///
+/// let policy = Policy {
+///     clipboard_read: true,
+///     ..Policy::restricted()
+/// };
+/// ```
+///
+/// A future version may add gate fields as [`PolicyGate`] grows; the `..Policy::restricted()`
+/// spread keeps such an addition from breaking your construction, where a full field-by-field
+/// literal would not. The open-fields shape is a deliberate two-way door for 0.1 — hand-buildable
+/// now, and free to tighten to builder methods later if a more stable API calls for it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[expect(
     clippy::struct_excessive_bools,

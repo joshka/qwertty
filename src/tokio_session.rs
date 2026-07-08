@@ -19,6 +19,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::os::fd::OwnedFd;
@@ -84,6 +85,60 @@ enum CapabilityField {
 
 const DEV_TTY: &str = "/dev/tty";
 const READ_BUFFER_LEN: usize = 1024;
+
+/// Which of the controlling-terminal fallback branches produced a session's device.
+///
+/// [`open`](TokioTerminalSession::open) reaches the controlling terminal through a three-branch
+/// fallback (see that method); every branch yields a working device, so the choice is normally
+/// invisible. This enum makes the outcome observable: a caller can read
+/// [`acquisition`](TokioTerminalSession::acquisition) to log which branch won or surface it in a
+/// status view, without having to reconstruct the decision itself. It is deliberately *not* meant
+/// for branching on — it records what happened, it does not steer what happens next.
+///
+/// This type is available when the `tokio` feature is enabled, on unix, alongside
+/// [`TokioTerminalSession`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TerminalAcquisition {
+    /// The session duplicated the inherited read-write standard-input descriptor.
+    ///
+    /// This is the robust primary and the branch [`open`](TokioTerminalSession::open) prefers
+    /// whenever standard input is a terminal opened read-write (how interactive shells set up their
+    /// children). It matters on macOS: kqueue rejects a *freshly opened* controlling-terminal
+    /// descriptor with `EINVAL`, while the inherited one registers fine, so duplicating the shared
+    /// open file description keeps readiness pollable (FM-A11). Because the description is
+    /// inherited, this branch is what makes sessions work under tmux, where a fresh open is not
+    /// pollable.
+    InheritedStdin,
+
+    /// The session opened the resolved specific device path fresh (for example `/dev/ttys003`).
+    ///
+    /// Reached when standard input cannot supply the terminal (redirected or read-only, the
+    /// fzf-style case where a tool runs with stdin piped from another program). The `/dev/tty`
+    /// alias is opened only long enough to ask the kernel for the real device name, then that
+    /// specific path is opened afresh — it is pollable through kqueue on macOS where the alias
+    /// is not. This is also the branch recorded when a caller opens an explicit path via
+    /// [`open_path`](TokioTerminalSession::open_path).
+    ResolvedDevicePath,
+
+    /// The session fell back to opening the `/dev/tty` alias.
+    ///
+    /// The last resort, used when the specific device path could not be resolved. It remains
+    /// correct on platforms whose pollers accept the alias; on macOS a freshly opened alias is
+    /// not pollable, so this branch marks the least-robust outcome.
+    DevTtyAlias,
+}
+
+impl fmt::Display for TerminalAcquisition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let phrase = match self {
+            Self::InheritedStdin => "duplicated inherited stdin",
+            Self::ResolvedDevicePath => "opened resolved device path",
+            Self::DevTtyAlias => "opened /dev/tty alias",
+        };
+        f.write_str(phrase)
+    }
+}
 
 /// A Tokio-backed terminal session driving the sans-io core.
 ///
@@ -183,6 +238,15 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// exactly like an unknown finding: the gate degrades rather than emitting into a terminal
     /// that never answered.
     capabilities: Option<Capabilities>,
+    /// Which controlling-terminal fallback branch produced this session's device, when it was
+    /// opened from a live terminal.
+    ///
+    /// Set on every construction path that opens a terminal ([`open`](Self::open) and
+    /// [`open_path`](Self::open_path)). It is `None` for [`from_device`](Self::from_device), which
+    /// wraps an already-opened device (such as `FakeDevice`) rather than reaching for the
+    /// controlling terminal, so no fallback branch was taken. Read-only observability; exposed
+    /// through [`acquisition`](Self::acquisition).
+    acquisition: Option<TerminalAcquisition>,
 }
 
 impl TokioTerminalSession<Terminal> {
@@ -203,12 +267,13 @@ impl TokioTerminalSession<Terminal> {
     ///
     /// Returns an error when the terminal cannot be opened, configured, or registered with Tokio.
     pub fn open() -> terminal::Result<Self> {
-        match controlling_terminal_via_stdin() {
-            Some((device, path)) => {
-                let terminal = Terminal::from_file(device, path)?;
-                Self::from_terminal(terminal)
-            }
-            None => Self::open_path(resolved_controlling_terminal_path()),
+        if let Some((device, path)) = controlling_terminal_via_stdin() {
+            let terminal = Terminal::from_file(device, path)?;
+            Self::from_terminal(terminal, TerminalAcquisition::InheritedStdin)
+        } else {
+            let (path, acquisition) = resolved_controlling_terminal_path();
+            let terminal = Terminal::open_path(path)?;
+            Self::from_terminal(terminal, acquisition)
         }
     }
 
@@ -227,13 +292,19 @@ impl TokioTerminalSession<Terminal> {
     /// entered, non-blocking mode cannot be set, or Tokio cannot register the file descriptor.
     pub fn open_path(path: impl Into<PathBuf>) -> terminal::Result<Self> {
         let terminal = Terminal::open_path(path)?;
-        Self::from_terminal(terminal)
+        Self::from_terminal(terminal, TerminalAcquisition::ResolvedDevicePath)
     }
 
     /// Builds a Tokio-backed session from an already-opened terminal.
-    fn from_terminal(terminal: Terminal) -> terminal::Result<Self> {
+    ///
+    /// `acquisition` records which controlling-terminal fallback branch produced `terminal`, so the
+    /// session can report it through [`acquisition`](Self::acquisition).
+    fn from_terminal(
+        terminal: Terminal,
+        acquisition: TerminalAcquisition,
+    ) -> terminal::Result<Self> {
         let session = TerminalSession::from_terminal(terminal)?;
-        Self::from_session(session)
+        Self::from_session(session, Some(acquisition))
     }
 
     /// Returns a panic-safe restore handle for this session.
@@ -271,7 +342,25 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// cannot register the descriptor.
     pub fn from_device(device: D) -> terminal::Result<Self> {
         let session = TerminalSession::from_device(device)?;
-        Self::from_session(session)
+        // No controlling-terminal fallback runs here: the device is already open, so there is no
+        // acquisition branch to record. `acquisition()` therefore returns `None` for this path.
+        Self::from_session(session, None)
+    }
+
+    /// Reports which controlling-terminal fallback branch produced this session's device.
+    ///
+    /// [`open`](Self::open) reaches the controlling terminal through a three-branch fallback and
+    /// every branch yields a working session, so which one won is otherwise invisible. This
+    /// accessor makes that outcome observable — a caller can log it or show it in a status view
+    /// — without having to reconstruct the decision. It is read-only observability, not a
+    /// branching control: see [`TerminalAcquisition`] for the variants and why each branch
+    /// exists.
+    ///
+    /// Returns `None` for sessions built with [`from_device`](Self::from_device), which wrap an
+    /// already-opened device (such as `FakeDevice`) and so run no fallback and take no branch.
+    #[must_use]
+    pub fn acquisition(&self) -> Option<TerminalAcquisition> {
+        self.acquisition
     }
 
     /// Wraps an entered [`TerminalSession`] with the readiness registration and sans-io core.
@@ -279,7 +368,13 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// This duplicates the device descriptor for Tokio readiness (a dup shares the same open file
     /// description, so readiness is shared), captures the original status flags, sets the dup
     /// non-blocking, and registers it with the current runtime.
-    fn from_session(session: TerminalSession<D>) -> terminal::Result<Self> {
+    ///
+    /// `acquisition` is the fallback branch that produced the device, or `None` when the device was
+    /// supplied already open (the [`from_device`](Self::from_device) path).
+    fn from_session(
+        session: TerminalSession<D>,
+        acquisition: Option<TerminalAcquisition>,
+    ) -> terminal::Result<Self> {
         let borrowed = session.device().as_fd().ok_or_else(|| {
             terminal::Error::unsupported("Tokio readiness registration", "device without a fd")
         })?;
@@ -315,6 +410,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             active_query: None,
             active_probe: Vec::new(),
             capabilities: None,
+            acquisition,
         })
     }
 
@@ -1763,7 +1859,13 @@ fn unexpected_reply(_reply: Reply) -> terminal::Error {
 /// which remains correct on platforms whose pollers accept it. Known residual: inside tmux panes
 /// even the specific path is not freshly pollable, so redirected-stdin sessions under tmux still
 /// fail at registration (FM-A11).
-fn resolved_controlling_terminal_path() -> PathBuf {
+///
+/// Returns the path to open together with the [`TerminalAcquisition`] branch it represents:
+/// [`ResolvedDevicePath`](TerminalAcquisition::ResolvedDevicePath) when the kernel yielded the
+/// specific device name, or [`DevTtyAlias`](TerminalAcquisition::DevTtyAlias) when it did not and
+/// the alias itself is the path. Threading the branch out here is what lets the session record an
+/// accurate acquisition instead of collapsing both cases into one path.
+fn resolved_controlling_terminal_path() -> (PathBuf, TerminalAcquisition) {
     OpenOptions::new()
         .read(true)
         .write(true)
@@ -1771,8 +1873,11 @@ fn resolved_controlling_terminal_path() -> PathBuf {
         .ok()
         .and_then(|device| rustix::termios::ttyname(&device, Vec::new()).ok())
         .map_or_else(
-            || PathBuf::from(DEV_TTY),
-            |name| PathBuf::from(OsString::from_vec(name.into_bytes())),
+            || (PathBuf::from(DEV_TTY), TerminalAcquisition::DevTtyAlias),
+            |name| {
+                let path = PathBuf::from(OsString::from_vec(name.into_bytes()));
+                (path, TerminalAcquisition::ResolvedDevicePath)
+            },
         )
 }
 

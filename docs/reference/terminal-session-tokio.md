@@ -72,6 +72,33 @@ session enables and tears down mouse, focus, and bracketed-paste modes (see
 Cursor Lifecycle](crate::docs#screen-and-cursor-lifecycle)); it does not yet add graphics,
 clipboard, or vendor protocol policy.
 
+## Terminal Acquisition Observability
+
+On Unix, `TokioTerminalSession::open` reaches the controlling terminal through a three-branch
+fallback. It prefers duplicating the inherited read-write standard input (the robust primary, and
+the branch that works under tmux and around the macOS kqueue restriction on freshly opened
+controlling-terminal descriptors); failing that it opens the resolved specific device path fresh;
+and as a last resort it opens the `/dev/tty` alias. Every branch yields a working session, so which
+one won is otherwise invisible.
+
+`TokioTerminalSession::acquisition` makes that outcome observable. It returns a `TerminalAcquisition`
+so a caller can log which branch produced the session or show it in a status view, without having to
+reconstruct the decision. It is read-only observability, not a control to branch on. Sessions built
+from an already-opened device through `from_device` return `None`, because no fallback runs and no
+branch is taken.
+
+```rust,no_run
+use qwertty::TokioTerminalSession;
+
+# async fn run() -> qwertty::Result<()> {
+let session = TokioTerminalSession::open()?;
+if let Some(acquisition) = session.acquisition() {
+    eprintln!("acquired controlling terminal: {acquisition}");
+}
+session.leave().await
+# }
+```
+
 ## Live Cursor Position Query
 
 `TokioTerminalSession::request_cursor_position` is the first live query helper. It writes the

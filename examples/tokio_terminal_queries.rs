@@ -10,6 +10,9 @@ use qwertty::{ProtocolPosition, TokioTerminalSession, commands};
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> qwertty::Result<()> {
     let mut session = TokioTerminalSession::open()?;
+    if let Some(acquisition) = session.acquisition() {
+        eprintln!("acquired controlling terminal: {acquisition}");
+    }
     session.command(commands::screen::clear()).await?;
     session
         .command(commands::cursor::move_to(ProtocolPosition::ORIGIN))

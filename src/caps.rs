@@ -304,6 +304,7 @@ pub enum Multiplexer {
 /// weak signal (FM-C4: it proves nothing about features, and even less about identity — many
 /// terminals share widened DA1 attribute lists), used only when nothing else resolved a program.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct TerminalIdentity {
     /// The recognized terminal program, or `None` when nothing (XTVERSION, DA1, env) resolved one.
     pub program: Option<TerminalProgram>,

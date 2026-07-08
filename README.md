@@ -19,6 +19,26 @@ terminal status reports, flush explicitly, and leave with reported cleanup error
 writes, decoded input events, explicit cleanup, live cursor position queries, and live terminal
 status queries. It does not include a general terminal query router yet.
 
+The public surface also includes:
+
+- **Capability detection** — `Capabilities`, built by `TokioTerminalSession::probe_capabilities`
+  (with the `tokio` feature on Unix), reports synchronized output, grapheme clustering, in-band
+  resize, bracketed paste, kitty keyboard flags, terminal identity, and env-inferred hyperlink and
+  truecolor support, each with evidence of how it was learned. See the
+  [capability model reference](docs/reference/capability-model.md).
+- **Security policy** — `Policy` and `PolicyGate` gate side-effecting and exfiltrating features
+  (clipboard write/read, notifications, file transfer, mux passthrough) so a program's output
+  cannot silently reach the clipboard or the filesystem. See the
+  [session lifecycle reference](docs/reference/terminal-session.md#security-policy).
+- **Kitty keyboard** — `commands::terminal::push_kitty_keyboard_flags`/`pop_kitty_keyboard_flags`
+  request progressive-enhancement key reporting, verified by readback rather than assumed granted.
+  See [Input Modes](docs/reference/terminal-session.md#input-modes).
+- **Mouse, focus, paste, and resize events** — `enable_mouse`, `enable_focus_events`,
+  `enable_bracketed_paste`, and `enable_in_band_resize` turn on the terminal reporting modes the
+  decoder turns into `Event::Mouse`, `Event::Focus`, `Event::Paste`, and `Event::Resize`. See
+  [Input Modes](docs/reference/terminal-session.md#input-modes) and the
+  [terminal control reference](docs/reference/terminal-control.md).
+
 ## Small Example
 
 ```rust

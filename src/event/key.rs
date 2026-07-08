@@ -2,13 +2,14 @@
 //!
 //! These types describe a single key press in the kitty-shaped model design 02 settled on: a
 //! keycode ([`Key`]), a set of active [`Modifiers`], an event [`kind`](KeyEventKind), and optional
-//! associated [`text`](TextPayload). The shape mirrors the kitty keyboard wire protocol so the full
-//! `CSI u` decode landing in milestone M4 maps onto it without changing the vocabulary.
+//! associated [`text`](TextPayload). The shape mirrors the kitty keyboard wire protocol, and the
+//! full `CSI u` decode maps onto it without changing the vocabulary.
 //!
-//! The parity scope of this slice produces only a small part of this vocabulary: single-character
-//! text keys, the C0 controls the old decoder named, the four arrow keys, and a standalone Escape.
-//! The enums are `#[non_exhaustive]` so kitty functional keys, release and repeat events, and
-//! richer modifiers add cleanly later.
+//! This vocabulary covers single-character text keys, the C0 controls the old decoder named, the
+//! four arrow keys, a standalone Escape, and the kitty functional keys (navigation keys and
+//! function keys, decoded from both the legacy CSI forms and the kitty `CSI u` Unicode-key-code
+//! range). The enums are `#[non_exhaustive]` so release and repeat events and richer modifiers add
+//! cleanly later.
 
 /// A keycode in the semantic input vocabulary.
 ///
@@ -19,12 +20,12 @@
 /// control is preserved losslessly as [`Key::Control`] so no byte is lost or turned into a fake
 /// named key.
 ///
-/// The kitty keyboard protocol's `CSI u` decode (milestone M4) adds the functional keys the
-/// protocol names by Unicode code point or legacy CSI final: navigation ([`Key::Home`],
-/// [`Key::End`], [`Key::PageUp`], [`Key::PageDown`], [`Key::Insert`], [`Key::Delete`]) and the
-/// function keys [`Key::Function`]. The enum is `#[non_exhaustive]` so the remaining kitty
-/// functional keys (keypad, media, and modifier keys) add without churning the vocabulary; only the
-/// variants the decode and fixtures exercise are present.
+/// The kitty keyboard protocol's `CSI u` decode adds the functional keys the protocol names by
+/// Unicode code point or legacy CSI final: navigation ([`Key::Home`], [`Key::End`],
+/// [`Key::PageUp`], [`Key::PageDown`], [`Key::Insert`], [`Key::Delete`]) and the function keys
+/// [`Key::Function`]. The enum is `#[non_exhaustive]` so the remaining kitty functional keys
+/// (keypad, media, and modifier keys) add without churning the vocabulary; only the variants the
+/// decode and fixtures exercise are present.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Key {
@@ -192,11 +193,9 @@ pub enum KeyEventKind {
 /// Text associated with a key event.
 ///
 /// A `TextPayload` is a small, multi-codepoint-capable string. Legacy UTF-8 input decodes one
-/// character per key event, so a payload from this slice always holds exactly one character (design
-/// 02: the multi-codepoint capacity exists for the kitty `CSI u` associated-text field that arrives
-/// in milestone M4, not for legacy bytes). Keeping text as an owned string rather than a bare
-/// `char` lets that later path represent decomposed accents, jamo runs, and ZWJ clusters as one
-/// event.
+/// character per key event, so a payload from that path always holds exactly one character; the
+/// multi-codepoint capacity is for the kitty `CSI u` associated-text field (design 02), which can
+/// carry decomposed accents, jamo runs, and ZWJ clusters as one event's text.
 ///
 /// The representation is a `std` [`String`] today. An inline small-string optimization is an
 /// implementation detail deferred to a later slice; the newtype exists so that change carries no

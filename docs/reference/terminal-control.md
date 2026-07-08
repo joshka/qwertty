@@ -185,6 +185,155 @@ Unrelated decoded events that arrive before the matching report remain available
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
 support multiple simultaneous live queries, capability probing, or query registration.
 
+### Input Enablement Commands
+
+`commands::terminal` also builds the DEC private-mode sequences that turn on the input reporting
+modes `SemanticDecoder` decodes, plus the probe requests a capability check needs. Every enable has
+a matching disable that emits the exact reverse bytes, which is what `TerminalSession`'s mode ledger
+replays on `leave`.
+
+**Mouse (DEC 1000/1002/1003, paired with SGR 1006).** `enable_mouse(MouseMode)` picks *which*
+events the terminal reports — [`MouseMode::Normal`](crate::commands::terminal::MouseMode::Normal)
+(press/release only), [`MouseMode::ButtonEvent`](crate::commands::terminal::MouseMode::ButtonEvent)
+(press/release/drag), or [`MouseMode::AnyEvent`](crate::commands::terminal::MouseMode::AnyEvent)
+(all motion) — and always pairs it with mode 1006, the SGR extended-coordinate encoding qwertty
+decodes to `MouseEvent`:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal::{self, MouseMode};
+
+let mut frame = CommandBuffer::new();
+frame.command(terminal::enable_mouse(MouseMode::ButtonEvent));
+assert_eq!(frame.as_bytes(), b"\x1b[?1002h\x1b[?1006h");
+
+frame.command(terminal::disable_mouse(MouseMode::ButtonEvent));
+assert_eq!(
+    frame.as_bytes(),
+    b"\x1b[?1002h\x1b[?1006h\x1b[?1006l\x1b[?1002l"
+);
+```
+
+**Focus (DEC 1004).** `enable_focus_events()`/`disable_focus_events()` turn `CSI I` (gain) and
+`CSI O` (loss) reporting on and off; qwertty decodes these to `FocusEvent`:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal;
+
+let mut frame = CommandBuffer::new();
+frame.command(terminal::enable_focus_events());
+assert_eq!(frame.as_bytes(), b"\x1b[?1004h");
+```
+
+**Bracketed paste (DEC 2004).** `enable_bracketed_paste()`/`disable_bracketed_paste()` turn on the
+`ESC [ 200 ~ … ESC [ 201 ~` wrapping qwertty decodes to `PasteEvent` segments, so pasted text is
+delivered as data instead of being mistaken for typed keys:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal;
+
+let mut frame = CommandBuffer::new();
+frame.command(terminal::enable_bracketed_paste());
+assert_eq!(frame.as_bytes(), b"\x1b[?2004h");
+```
+
+**In-band resize (DEC 2048).** `enable_in_band_resize()`/`disable_in_band_resize()` turn on
+`CSI 48 ; height ; width ; height_px ; width_px t` size reports, decoded to `ResizeEvent`, as an
+alternative to the out-of-band `SIGWINCH` signal:
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal;
+
+let mut frame = CommandBuffer::new();
+frame.command(terminal::enable_in_band_resize());
+assert_eq!(frame.as_bytes(), b"\x1b[?2048h");
+```
+
+**Probe requests: DA1, XTVERSION, DECRQM.** These build query bytes only; they do not write,
+flush, wait, or route a reply.
+
+- `request_primary_device_attributes()` emits `CSI c` (DA1). In a capability probe this is written
+  **last** as a fence: because a terminal answers in order, DA1's reply arriving means every
+  earlier reply that was coming has arrived.
+- `request_xtversion()` emits `CSI > q`. The terminal answers with a DCS string qwertty parses into
+  [`XtVersionReport`](crate::report::XtVersionReport) (see [Typed Reports](#typed-reports) below).
+- `request_dec_private_mode(mode)` emits the DECRQM request `CSI ? mode $ p` for the given DEC
+  private-mode number (`request_dec_private_mode(2026)` emits `b"\x1b[?2026$p"`). The terminal
+  answers `CSI ? mode ; value $ y`, parsed into
+  [`DecPrivateModeReport`](crate::report::DecPrivateModeReport).
+
+```rust
+use qwertty::CommandBuffer;
+use qwertty::commands::terminal;
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(terminal::request_xtversion())
+    .command(terminal::request_dec_private_mode(2026))
+    .command(terminal::request_primary_device_attributes());
+
+assert_eq!(frame.as_bytes(), b"\x1b[>q\x1b[?2026$p\x1b[c");
+```
+
+**Kitty keyboard push/pop/query.** `push_kitty_keyboard_flags(flags)` emits `CSI > flags u`,
+turning on the requested progressive-enhancement reporting and pushing the previous set onto the
+terminal's flags stack; `pop_kitty_keyboard_flags()` emits `CSI < 1 u`, the exact undo of one push.
+`query_kitty_keyboard_flags()` emits `CSI ? u`, asking for the currently active (granted) flags —
+the read half of the verify-after-push handshake (design 06), since a terminal may grant only a
+subset of what was pushed:
+
+```rust
+use qwertty::commands::terminal;
+use qwertty::{CommandBuffer, KittyKeyboardFlags};
+
+let mut frame = CommandBuffer::new();
+frame
+    .command(terminal::push_kitty_keyboard_flags(
+        KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES,
+    ))
+    .command(terminal::query_kitty_keyboard_flags())
+    .command(terminal::pop_kitty_keyboard_flags());
+
+assert_eq!(frame.as_bytes(), b"\x1b[>1u\x1b[?u\x1b[<1u");
+```
+
+See [Input Modes](crate::docs#input-modes) in the session reference for how `TerminalSession`
+records these as reversible ledger entries instead of raw one-off writes.
+
+### Typed Reports
+
+Three more `report::` types round out the query-response surface beyond cursor position and
+terminal status:
+
+- [`DecPrivateModeReport`](crate::report::DecPrivateModeReport) and
+  [`DecPrivateModeState`](crate::report::DecPrivateModeState) — the DECRPM answer to
+  `request_dec_private_mode`, `CSI ? mode ; value $ y`. `DecPrivateModeReport::mode()` and
+  `::state()` expose the queried mode number and its five-way state (`NotRecognized`, `Set`,
+  `Reset`, `PermanentlySet`, `PermanentlyReset`); `::is_enabled()` collapses that to
+  `Option<bool>` (`None` for `NotRecognized`, matching the unknown-not-unsupported rule in the
+  capability model reference).
+- [`XtVersionReport`](crate::report::XtVersionReport) — the answer to `request_xtversion`, a DCS
+  string `DCS > | text ST`. `::version()` returns the terminal's self-reported identification text
+  verbatim, unparsed.
+- [`OscColorReport`](crate::report::OscColorReport) and
+  [`OscColorKind`](crate::report::OscColorKind) — a parsed OSC 10/11 default-colour reply.
+  `OscColorKind` discriminates `Foreground` (OSC 10) from `Background` (OSC 11) — the two share
+  the `rgb:…` payload shape and differ only in the OSC selector — and
+  `OscColorReport::kind()`/`::rgb()` expose which colour it was and its normalized
+  [`Rgb`](crate::Rgb) value.
+
+```rust
+use qwertty::report::{OscColorKind, OscColorReport};
+use qwertty::Rgb;
+
+let report = OscColorReport::from_osc_payload(b"11;rgb:1a1a/2b2b/3c3c").expect("colour report");
+assert_eq!(report.kind(), OscColorKind::Background);
+assert_eq!(report.rgb(), Rgb::new(0x1a, 0x2b, 0x3c));
+```
+
 ### Erase In Display
 
 `ED` means "Erase in Display". qwertty's first screen clear helper uses mode `2`, which erases the

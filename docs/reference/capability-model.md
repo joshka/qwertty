@@ -1,11 +1,12 @@
 # Capability Model: Evidence, Identity, And Environment Inference
 
-`Capabilities` (returned by [`TokioTerminalSession::probe_capabilities`](
-crate::TokioTerminalSession::probe_capabilities), see [The Capability Probe Bundle (DA1 Fence)](
-crate::docs#the-capability-probe-bundle-da1-fence)) is a struct of typed findings, each carrying
-evidence of how it was obtained. This page explains that model: `Finding<T>` and `Evidence`,
-`TerminalIdentity`, the environment-heuristic table for capabilities with no query, and how the
-whole struct behaves as a per-attachment snapshot (design 06).
+`Capabilities` is the typed result of the DA1-fenced probe bundle, a struct of typed findings each
+carrying evidence of how it was obtained. With the optional `tokio` feature on Unix, it is what
+`TokioTerminalSession::probe_capabilities` returns — see "The Capability Probe Bundle (DA1 Fence)"
+in `qwertty::docs` (included with the `tokio` feature) for how the bundle is written and fenced.
+This page explains the `Capabilities` model itself, which is runtime-neutral: `Finding<T>` and
+`Evidence`, `TerminalIdentity`, the environment-heuristic table for capabilities with no query, and
+how the whole struct behaves as a per-attachment snapshot (design 06).
 
 ## Finding And Evidence
 
@@ -162,7 +163,7 @@ produces the snapshot; there is no cache, no TTL, and no automatic re-probe.
 
 ## See Also
 
-- [The Capability Probe Bundle (DA1 Fence)](crate::docs#the-capability-probe-bundle-da1-fence) —
-  how `probe_capabilities` writes the bundle and applies the DA1 fence.
+- "The Capability Probe Bundle (DA1 Fence)" in `qwertty::docs` (included with the `tokio`
+  feature) — how `probe_capabilities` writes the bundle and applies the DA1 fence.
 - `examples/probe_capabilities.rs` — a runnable example printing every finding, its evidence, and
   the derived identity.

@@ -195,12 +195,6 @@ tokens to the typed `Event` vocabulary applications consume. Feed input chunks w
 syntax parser; the owned parser carries partial sequences across chunks, so split input decodes
 identically to feeding it whole.
 
-The `Event` vocabulary is **pre-freeze until milestone M4 exit**. These `event::` types (`Event`,
-`KeyEvent`, `Key`, `Modifiers`, `KeyEventKind`, `TextPayload`, `MouseEvent`, `FocusEvent`,
-`PasteEvent`, and their parts) change freely before the first published version and calcify at that
-release. Every enum is non-exhaustive, so the remaining M4 variant (resize) adds without breaking
-existing code.
-
 ```rust
 use qwertty::{Event, Key, SemanticDecoder};
 

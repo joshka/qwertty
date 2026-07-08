@@ -66,3 +66,54 @@ The project grows in reviewable slices.
 
 Each slice should be understandable on its own, with issue scope, acceptance criteria, tests, and
 documentation in the right layer.
+
+## Forward Look (Unpublished Work In Progress)
+
+> The sections above reflect only published `main`-branch state. This section tracks the larger
+> in-progress rebuild happening in reviewed jj workspaces ahead of `main` — milestones M0 through
+> M9 — so the plan stays visible even where `main` has not caught up yet. Update this table as
+> milestones seal; it is deliberately concise, not a slice-by-slice log.
+
+| Milestone | Scope                                      | Status                              |
+| --------- | ------------------------------------------ | ----------------------------------- |
+| M0        | Device seam and lifecycle                  | Complete                            |
+| M1        | Syntax layer and events                    | Complete                            |
+| M2        | Query correlator                           | Complete                            |
+| M3        | Capabilities and policy                    | Nearly complete                     |
+| M4        | Full input vocabulary                      | Complete (frozen for 0.1, ADR 0019) |
+| M5        | Protocol-family commands                   | Complete                            |
+| M6        | Suspend, resume, handoff                   | In progress                         |
+| —         | Docs pass                                  | In progress (this slice)            |
+| M7        | Sequence database and capture              | Complete                            |
+| M8        | 0.1.0 publication gate                     | Not started                         |
+| M9        | Conformance runner and generated reference | Not started                         |
+
+Milestone detail:
+
+- **M0** — device seam, mode ledger, panic-safe restore handle, re-entrant session.
+- **M1** — lossless syntax layer, fuzz targets, fixture corpus, semantic event layer.
+- **M2** — sans-io query correlator, Tokio session integration, real-emulator verification.
+- **M3** — capability probe bundle and the `Capabilities`/`Finding`/`Evidence` model are done;
+  the policy skeleton is in flight.
+- **M4** — kitty `CSI u` keys, mouse, focus, bracketed paste, resize; the vocabulary froze for 0.1
+  (ADR 0019).
+- **M5** — SGR/style, alt-screen/cursor, OSC, synchronized output, scroll regions.
+- **M6** — suspend/resume (`SIGTSTP`/`SIGCONT`) is in a review workspace (M6-S1); handoff
+  (`run_detached`, M6-S2) and the optional signals stream (M6-S3) have not started.
+- **M8** — 0.1.0 publication gate: semver review, README/docs.rs polish, release-checklist rerun,
+  version bump, `publish = false` removal. Blocked on M6 and the docs pass; push, PR, and publish
+  are the maintainer's own act.
+- **M9** — generalizes the M7 capture harness into a full conformance runner (target-trait shape),
+  produces a results-driven support matrix and a generated docs.rs reference, and adds
+  width-behavior probes.
+
+### Design-owed items (gate-mandated, before their code lands)
+
+- **Width measurement mechanism** — a design doc plus a spike measuring how far real terminals
+  deviate from static Unicode-width tables, keyed by terminal identity and mode 2027
+  (grapheme-clustering) state, feeding the M9 conformance runner.
+- **Inline-insertion recipe** (R-OUT-6) — once the M9 runner produces per-terminal scroll-region
+  semantics data, write the recipe doc and wire the derived `inline_insertion_safe` capability
+  result.
+- **Suspend/handoff test harvest** — M6 needs new tests written from scratch; there is no prior
+  suspend/resume test suite to port from either evidence line.

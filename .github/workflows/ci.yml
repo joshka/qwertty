@@ -91,6 +91,13 @@ jobs:
       - name: Docs
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
+      # Default-feature docs. The all-features run above hides doc breakage that only affects a
+      # default build (for example an intra-doc link that only resolves under `tokio`), the same
+      # gate-hole class already closed for default clippy and default doctests. This step enforces
+      # that `cargo doc` is clean for a default-feature consumer of the crate.
+      - name: Docs (default features)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc -p qwertty --no-deps
+
   markdown:
     runs-on: ubuntu-latest
     steps:

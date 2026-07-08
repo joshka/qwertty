@@ -31,6 +31,11 @@ clippy:
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+    # The all-features run above hides default-feature doc breakage (for example an intra-doc link
+    # that only resolves under `tokio`), the same gate-hole class already closed for default clippy
+    # and default doctests. This lints the crate's docs exactly as a default-feature dependency sees
+    # them.
+    RUSTDOCFLAGS="-D warnings" cargo doc -p qwertty --no-deps
 
 loom:
     RUSTFLAGS="--cfg loom" cargo test --lib loom_

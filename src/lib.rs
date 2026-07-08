@@ -67,6 +67,14 @@
 //! [terminal control reference](crate::docs).
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables
+// the nightly-only `doc_cfg` feature there so gated items (for example `TokioTerminalSession` under
+// the `tokio` feature) show an automatic "Available on feature tokio only" badge. `doc_cfg` covers
+// both explicit `#[doc(cfg(..))]` and automatic cfg inference (the older `doc_auto_cfg` feature was
+// merged into it). Gated on `docsrs` so this never affects a normal stable build: `doc_cfg` is
+// unstable, and enabling a nightly-only feature unconditionally would break `cargo doc`/`cargo
+// build` on stable.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod caps;
 mod command;

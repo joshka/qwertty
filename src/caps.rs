@@ -1,9 +1,10 @@
 //! Terminal capabilities: the typed result of the DA1-fenced probe bundle (design 03/06).
 //!
-//! [`Capabilities`] is what [`probe_capabilities`](crate::TokioTerminalSession::probe_capabilities)
-//! returns: a struct of typed [`Finding`]s, one per queryable capability the probe bundle asks
-//! about in a single write-and-fence round trip, plus [`TerminalIdentity`] and the env-inferred
-//! findings that have no query at all (FM-C12). Every finding's `value` is `Option<T>`, and
+//! [`Capabilities`] is what `TokioTerminalSession::probe_capabilities` (available with the
+//! optional `tokio` feature on Unix) returns: a struct of typed [`Finding`]s, one per queryable
+//! capability the probe bundle asks about in a single write-and-fence round trip, plus
+//! [`TerminalIdentity`] and the env-inferred findings that have no query at all (FM-C12). Every
+//! finding's `value` is `Option<T>`, and
 //! **`None` means unknown, never unsupported** (FM-C4): a terminal that answers nothing — a silent
 //! terminal, or a multiplexer that swallowed the queries — yields an all-unknown `Capabilities`;
 //! that is different from a terminal that answered a DECRQM query with "mode reset" (`Some(false)`)
@@ -45,10 +46,10 @@
 //!
 //! A `TERM=dumb` terminal is not sent the probe bundle by well-behaved callers — probing has side
 //! effects even when unanswered (FM-C7) — so a caller that detects `TERM=dumb` should skip
-//! [`probe_capabilities`](crate::TokioTerminalSession::probe_capabilities) entirely and treat every
-//! finding as [`Evidence::Unknown`]. This module does not enforce that guard itself (it has no
-//! opinion on when a caller chooses to probe); [`identity_from_env`] still runs safely over a
-//! `TERM=dumb` environment because it only reads env vars and never writes to the terminal.
+//! `probe_capabilities` entirely and treat every finding as [`Evidence::Unknown`]. This module
+//! does not enforce that guard itself (it has no opinion on when a caller chooses to probe);
+//! [`identity_from_env`] still runs safely over a `TERM=dumb` environment because it only reads
+//! env vars and never writes to the terminal.
 
 use std::fmt;
 
@@ -607,10 +608,10 @@ pub fn infer_truecolor(env: impl EnvSource) -> Finding<bool> {
 ///
 /// Every DECRQM/query-backed field is a [`Finding`] whose `value` is `Option<T>` where **`None`
 /// means unknown, not unsupported** (FM-C4), and whose [`Evidence`] records how the value was
-/// obtained. Build one only through
-/// [`probe_capabilities`](crate::TokioTerminalSession::probe_capabilities); this type offers no
-/// public constructor because a hand-built `Capabilities` would carry no evidence of how it was
-/// obtained, which is the whole point of this layer.
+/// obtained. Build one only through `TokioTerminalSession::probe_capabilities` (available with the
+/// optional `tokio` feature on Unix); this type offers no public constructor because a hand-built
+/// `Capabilities` would carry no evidence of how it was obtained, which is the whole point of this
+/// layer.
 ///
 /// # The four DECRQM booleans
 ///
@@ -652,7 +653,7 @@ pub struct Capabilities {
     /// means no DA1 arrived — a fully silent terminal, in which case every other field is also
     /// unknown.
     pub primary_device_attributes: Option<DeviceAttributes>,
-    /// The terminal's self-reported version string from XTVERSION (`CSI > q`).
+    /// The terminal's default foreground colour from OSC 10.
     pub foreground_color: Finding<Rgb>,
     /// The terminal's default background colour from OSC 11.
     pub background_color: Finding<Rgb>,

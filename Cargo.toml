@@ -20,6 +20,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = []
 tokio = ["dep:tokio"]

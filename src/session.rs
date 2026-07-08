@@ -657,7 +657,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// active set at your own timing with [`commands::terminal::query_kitty_keyboard_flags`] and
     /// the [`report`](crate::report) parsers. When you want that verify-after-push handled for
     /// you, the Tokio session's
-    /// [`request_kitty_keyboard`](crate::TokioTerminalSession::request_kitty_keyboard)
+    /// `TokioTerminalSession::request_kitty_keyboard`
     /// is the convenience layered on top of this primitive.
     ///
     /// # Errors
@@ -956,7 +956,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// Requests and reads the current terminal cursor position, blocking without an async runtime.
     ///
     /// This is the synchronous mirror of the Tokio session's
-    /// [`request_cursor_position`](crate::TokioTerminalSession::request_cursor_position): it writes
+    /// `TokioTerminalSession::request_cursor_position`: it writes
     /// the Device Status Report request `CSI 6 n`, flushes, and drives the sans-io correlator with
     /// a hand-rolled poll/read/decode loop until a `CSI row ; column R` cursor-position report
     /// completes the query. It uses no Tokio and no signal handler — only the runtime-neutral
@@ -1020,7 +1020,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// Requests and reads terminal status, blocking without an async runtime.
     ///
     /// This is the synchronous mirror of the Tokio session's
-    /// [`request_terminal_status`](crate::TokioTerminalSession::request_terminal_status): it writes
+    /// `TokioTerminalSession::request_terminal_status`: it writes
     /// the Device Status Report request `CSI 5 n`, flushes, and drives the correlator with the same
     /// poll/read/decode loop until a `CSI 0 n` ready or `CSI 3 n` malfunction report completes the
     /// query. It composes over the identical machinery as

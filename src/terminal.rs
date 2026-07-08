@@ -67,9 +67,9 @@ impl TerminalSize {
 /// This is the optional pixel geometry an in-band resize report (DEC mode 2048) can carry
 /// alongside the cell dimensions: a report whose pixel fields are nonzero decodes to a
 /// [`ResizeEvent`](crate::event::ResizeEvent) with `Some(PixelSize)`, and one whose pixel fields
-/// are zero (or absent) decodes with `None`. The syntax mirrors the wire order width-then-height
-/// is *not* used here — the accessors name the axis so callers never have to remember the report's
-/// field order.
+/// are zero (or absent) decodes with `None`. The wire report orders its fields
+/// height-then-width, the reverse of this struct's `width`/`height` field order; the named
+/// accessors exist so callers never have to remember either order.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PixelSize {
     width: u16,

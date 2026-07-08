@@ -660,10 +660,10 @@ fn parse_x11_rgb(bytes: &[u8]) -> Option<Rgb> {
 
 /// Parses one 1–4-digit hex channel and scales it to an 8-bit value.
 ///
-/// The scaling takes the channel's most significant byte: a 1-digit `f` becomes `0xf0`… no — X11
-/// scales by repeating, but terminals report the widths they store, so qwertty normalizes by
-/// left-aligning to 16 bits and taking the high byte, which maps `ff`/`ffff` to `0xff` and `0`/`00`
-/// to `0x00`. Returns `None` for an empty channel, more than four digits, or a non-hex digit.
+/// X11's `rgb:` form lets a terminal report each channel at any width from 1 to 4 hex digits, so
+/// qwertty normalizes by left-aligning the parsed value to 16 bits and taking the high byte: `ff`
+/// and `ffff` both map to `0xff`, and `0` and `00` both map to `0x00`. Returns `None` for an empty
+/// channel, more than four digits, or a non-hex digit.
 fn parse_hex_channel(bytes: &[u8]) -> Option<u8> {
     if bytes.is_empty() || bytes.len() > 4 {
         return None;

@@ -232,7 +232,7 @@ impl CursorShape {
 /// For example, `set_shape(CursorShape::SteadyBar)` emits `b"\x1b[6 q"`.
 ///
 /// DECSCUSR support and its default appearance vary by terminal profile. See [Cursor
-/// Shape](crate::docs::terminal_control#cursor-shape) for the restore caveat (FM-L3): no single
+/// Shape](crate::docs::terminal_control#cursor-shape) for the restore caveat: no single
 /// `Ps` value is a universal reset to what the shape was before this call, because "default" means
 /// the terminal profile's own default, not necessarily the shape a prior `set_shape` call changed
 /// away from. Application code that changes the shape should restore its own remembered shape

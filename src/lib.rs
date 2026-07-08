@@ -69,7 +69,8 @@
 //! That builds bytes in memory without opening a terminal. Opening a live terminal is a session;
 //! the `examples/` directory has runnable programs for that — `session_status`,
 //! `tokio_terminal_queries`, and `panic_safe_restore` among them. Terminal protocol terms used by
-//! the command helpers are introduced in the [terminal control reference](crate::docs).
+//! the command helpers are introduced in the [terminal control
+//! reference](crate::docs::terminal_control).
 #![cfg_attr(feature = "tokio", doc = "# The `tokio` feature")]
 #![cfg_attr(feature = "tokio", doc = "")]
 #![cfg_attr(

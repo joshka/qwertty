@@ -25,6 +25,14 @@
 //! - [Platform support](platform) — what works today, what the `tokio` feature adds, and the
 //!   `Error::Unsupported` boundary on other platforms.
 //! - [Examples](examples) — the durable index of runnable examples shipped with the crate.
+//!
+//! Concept guides — how a specific terminal feature works:
+//!
+//! - [Alternate screen](alternate_screen) — the two screen buffers and switching between them.
+//! - [Mouse modes](mouse_modes) — the tracking-mode ladder and the SGR coordinate encoding.
+//! - [Bracketed paste](bracketed_paste) — telling pasted input apart from typed input.
+//! - [Kitty keyboard](kitty_keyboard) — progressive-enhancement key reporting and
+//!   verify-after-push.
 
 #[doc = include_str!("../docs/reference/terminal-control.md")]
 // The two live query-helper examples from the control reference use `TokioTerminalSession`, so they
@@ -71,3 +79,15 @@ pub mod platform {}
 
 #[doc = include_str!("../docs/reference/examples.md")]
 pub mod examples {}
+
+#[doc = include_str!("../docs/reference/alternate-screen.md")]
+pub mod alternate_screen {}
+
+#[doc = include_str!("../docs/reference/mouse-modes.md")]
+pub mod mouse_modes {}
+
+#[doc = include_str!("../docs/reference/bracketed-paste.md")]
+pub mod bracketed_paste {}
+
+#[doc = include_str!("../docs/reference/kitty-keyboard.md")]
+pub mod kitty_keyboard {}

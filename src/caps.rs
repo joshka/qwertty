@@ -39,8 +39,9 @@
 //! `Capabilities` is a snapshot taken at probe time for one attachment. Resume/reattach can move a
 //! session to a different outer terminal (zellij multi-client reattach) and mode-2031-style events
 //! can change the answer mid-session; treating a stale `Capabilities` as still current, and
-//! deciding when to mark findings stale and re-probe, is M6's concern (design 06 caching policy).
-//! This slice only produces the snapshot.
+//! deciding when to mark findings stale and re-probe, is a caller's concern (design 06 caching
+//! policy). A `Capabilities` value carries no staleness of its own — it is the answer as of the
+//! probe that produced it.
 //!
 //! # Detection posture: dumb terminals
 //!
@@ -296,8 +297,8 @@ pub enum Multiplexer {
 
 /// The terminal's derived identity: program, version, and multiplexer stack (design 06, R-CAP-5).
 ///
-/// Identity is itself a finding, assembled from whichever signals were available rather than
-/// carrying one `Evidence` for the whole struct: `program`/`version` come from XTVERSION when it
+/// Identity is itself a [`Finding`], assembled from whichever signals were available rather than
+/// carrying one [`Evidence`] for the whole struct: `program`/`version` come from XTVERSION when it
 /// answered (`Evidence::Probed { via: "XTVERSION" }`, conceptually — the fields here are the parsed
 /// result; see [`identity_from_env`] for how they are derived), cross-checked and, when XTVERSION
 /// is silent, filled in from environment variables (`Evidence::Inferred`). DA1's shape is at most a

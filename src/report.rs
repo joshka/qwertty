@@ -17,11 +17,8 @@
 //! root ([`crate::CursorPositionReport`], [`crate::TerminalStatusReport`],
 //! [`crate::TerminalStatus`]) for convenience and are also reachable through this module as
 //! [`report::`](self) for a stable module path — the ghostty-rs encode oracle uses the module path.
-//! Both paths name the same types.
-//!
-//! An earlier input slice shipped `CursorPositionReport` and `TerminalStatusReport` parsers over a
-//! basic `CsiInput` value; that path has been retired, and these `ControlSequence`-based parsers
-//! are the only report parsers qwertty ships.
+//! Both paths name the same types. Every parser takes a [`ControlSequence`] or [`StringSequence`]
+//! from the syntax layer; there is no separate report-input type.
 //!
 //! [`report::`]: self
 
@@ -428,8 +425,10 @@ impl DecPrivateModeReport {
 /// private marker and a `|` final byte), so the version text is the DCS *payload* — the terminal's
 /// self-reported identification (for example `xterm(390)` or `ghostty 1.0.0`).
 ///
-/// The version text is preserved verbatim as a UTF-8 string; this type does not attempt to split it
-/// into a program name and a semantic version (that identity parsing is a later slice, design 06).
+/// The version text is preserved verbatim as a UTF-8 string; this type does not split it into a
+/// program name and a semantic version. That identity parsing lives in
+/// [`caps`](crate::caps) (see [`program_from_xtversion`](crate::caps::program_from_xtversion)),
+/// which reads this verbatim text, not in the report parser.
 ///
 /// # Accepted shape
 ///

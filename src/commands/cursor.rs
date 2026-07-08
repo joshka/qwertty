@@ -9,8 +9,8 @@
 //! [Cursor Position](crate::docs#cursor-position).
 //!
 //! Cursor visibility and save/restore are terminal state changes represented as encoded
-//! [`Command`] values. They do not track state locally; future session code is responsible for
-//! cleanup and policy around real terminal output.
+//! [`Command`] values. They do not track state locally; the session that writes them owns cleanup
+//! and policy around real terminal output.
 //!
 //! ```
 //! use qwertty::commands::cursor;

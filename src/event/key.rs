@@ -197,8 +197,8 @@ pub enum KeyEventKind {
 /// multi-codepoint capacity is for the kitty `CSI u` associated-text field (design 02), which can
 /// carry decomposed accents, jamo runs, and ZWJ clusters as one event's text.
 ///
-/// The representation is a `std` [`String`] today. An inline small-string optimization is an
-/// implementation detail deferred to a later slice; the newtype exists so that change carries no
+/// The representation is a `std` [`String`]. It is wrapped in a newtype rather than exposed as a
+/// bare `String` so the storage can change (for example to an inline small-string form) without an
 /// API break.
 ///
 /// # Example

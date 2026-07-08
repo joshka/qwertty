@@ -34,8 +34,9 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Terminal dimensions reported by the operating system.
 ///
-/// `columns` and `rows` are measured in terminal cells. This is a snapshot, not a subscription to
-/// future resize events. Later session and input layers will own resize event routing.
+/// `columns` and `rows` are measured in terminal cells. This is a snapshot from one size query, not
+/// a subscription to size changes: a session that wants to track resizes reads them as
+/// [`ResizeEvent`](crate::ResizeEvent) values from the input stream, not from this type.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TerminalSize {
     columns: u16,

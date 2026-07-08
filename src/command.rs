@@ -10,8 +10,9 @@
 /// top-left cell in the active terminal coordinate system. Layout code that stores zero-based
 /// coordinates should convert at the boundary before building commands.
 ///
-/// The type does not validate against the current terminal size. A future terminal session layer is
-/// responsible for deciding whether a position is inside a live terminal.
+/// The type does not validate against the current terminal size: it is a coordinate value, not a
+/// bounds check. Deciding whether a position is inside a live terminal is a session's job, not this
+/// type's.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProtocolPosition {
     row: u16,
@@ -43,9 +44,9 @@ impl ProtocolPosition {
 
 /// Host-to-terminal command bytes.
 ///
-/// `Command` is the encode-only byte envelope shared by command helpers, buffers, examples, and
-/// future terminal sessions. It does not write to a terminal, check policy, flush output, or track
-/// terminal state.
+/// `Command` is the encode-only byte envelope shared by the [`commands`](crate::commands) helpers,
+/// [`CommandBuffer`], examples, and the terminal sessions. It does not write to a terminal, check
+/// policy, flush output, or track terminal state.
 ///
 /// # Examples
 ///
@@ -88,8 +89,9 @@ impl AsRef<Command> for Command {
 
 /// A growable byte buffer for encoded terminal output.
 ///
-/// `CommandBuffer` is useful for snapshot tests, renderer adapters, examples, and later terminal
-/// session code. It stores the encoded bytes exactly as they would be written.
+/// `CommandBuffer` is useful for snapshot tests, renderer adapters, examples, and building output
+/// before a session writes it. It stores the encoded [`Command`] bytes exactly as they would be
+/// written.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CommandBuffer {
     bytes: Vec<u8>,

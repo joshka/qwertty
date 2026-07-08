@@ -1,0 +1,87 @@
+name: Release-plz
+
+# This workflow automates releases from 0.1.1 onward. The FIRST 0.1.0 publish is done MANUALLY by
+# the maintainer (`cargo login` + `cargo publish` locally), because crates.io Trusted Publishing
+# can only be configured for a crate that already exists on the registry.
+#
+# After the manual 0.1.0 publish, the maintainer registers this repository as a crates.io Trusted
+# Publisher (Settings -> Trusted Publishing on the crate page, pointing at
+# `joshka/qwertty` + this workflow). Once that registration exists, the `release` job below
+# authenticates via GitHub OIDC (`id-token: write`) with no CARGO_REGISTRY_TOKEN secret, and
+# release-plz owns every subsequent publish, changelog tag, and GitHub Release.
+
+permissions: {}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    environment: release
+    runs-on: ubuntu-latest
+    # This job publishes crates and therefore enters the protected `release` environment. Keep it
+    # off ordinary `main` pushes so non-release merges do not require release approval. release-plz
+    # release PRs are merged with squash commits whose subjects are `chore: release` or the older
+    # `chore(<package>): release ...` form. Manual dispatch remains available for repair.
+    if: >-
+      ${{
+        github.repository_owner == 'joshka' &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          startsWith(github.event.head_commit.message, 'chore: release') ||
+          contains(github.event.head_commit.message, '): release')
+        )
+      }}
+    permissions:
+      contents: write
+      pull-requests: write
+      # crates.io Trusted Publishing uses GitHub OIDC, not CARGO_REGISTRY_TOKEN.
+      id-token: write
+    steps:
+      - &checkout
+        name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - &install-rust
+        name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - name: Run release-plz
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        github.repository_owner == 'joshka' &&
+        github.event_name == 'push' &&
+        !startsWith(github.event.head_commit.message, 'chore: release') &&
+        !contains(github.event.head_commit.message, '): release')
+      }}
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - *checkout
+      - *install-rust
+      - name: Run release-plz
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

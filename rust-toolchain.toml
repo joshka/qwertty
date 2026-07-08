@@ -1,0 +1,6 @@
+# Pin the default local toolchain to stable. This is the toolchain used for building, testing, and
+# clippy. Nightly is pulled per-job where it is needed (rustfmt with unstable options in
+# `rustfmt.toml`, and the fuzz targets), rather than being the repository default.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

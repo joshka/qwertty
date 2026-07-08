@@ -1,0 +1,30 @@
+# Consistent coding styles between different editors and IDEs.
+# https://editorconfig.org
+
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.md]
+# Trailing double whitespace denotes a hard line break in Markdown.
+trim_trailing_whitespace = false
+
+[*.{yml,yaml,toml,json}]
+indent_size = 2
+
+# Ignore diffs and patches.
+[*.{diff,patch}]
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# Ignore lockfiles.
+[*.lock]
+indent_size = unset

@@ -1,0 +1,51 @@
+# Configuration file for the bacon tool (https://dystroy.org/bacon/).
+#
+# Bacon repository: https://github.com/Canop/bacon
+# Complete help on configuration: https://dystroy.org/bacon/config/
+
+default_job = "check"
+
+[jobs.check]
+command = ["cargo", "check", "--workspace"]
+need_stdout = false
+
+[jobs.check-all]
+command = ["cargo", "check", "--workspace", "--all-targets", "--all-features"]
+need_stdout = false
+
+[jobs.clippy]
+command = ["cargo", "clippy", "--workspace", "--all-features", "--all-targets"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--workspace", "--all-features"]
+need_stdout = true
+
+[jobs.test-unit]
+command = ["cargo", "test", "--workspace", "--lib", "--all-features"]
+need_stdout = true
+
+[jobs.doc]
+command = ["cargo", "+nightly", "doc", "--all-features", "--no-deps"]
+need_stdout = false
+
+# If the doc compiles, then it opens in your browser and bacon switches to the previous job.
+[jobs.doc-open]
+command = ["cargo", "+nightly", "doc", "--all-features", "--no-deps", "--open"]
+need_stdout = false
+on_success = "job:doc" # so that we don't open the browser at each change
+
+[jobs.format]
+command = ["cargo", "+nightly", "fmt", "--", "--check"]
+on_success = "back"
+
+# Validate the sequence database.
+[jobs.qdb]
+command = ["cargo", "run", "-p", "qdb", "--", "validate"]
+need_stdout = true
+on_success = "back"
+
+[keybindings]
+f = "job:format"
+u = "job:test-unit"
+q = "job:qdb"

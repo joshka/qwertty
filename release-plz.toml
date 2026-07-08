@@ -1,0 +1,16 @@
+# qwertty does not use conventional commits, so release-plz cannot infer versions from commit
+# subjects. Instead it detects the next version from the public API diff via cargo-semver-checks
+# (`semver_check = true`): an API break bumps minor (pre-1.0) and any other change bumps patch.
+#
+# CHANGELOG.md is hand-maintained in keep-a-changelog format, so release-plz's changelog generation
+# (which assumes conventional-commit history) is turned off with `changelog_update = false`. The
+# maintainer edits CHANGELOG.md by hand; release-plz only bumps versions and publishes.
+[workspace]
+# Only `qwertty` is publishable; `tools/qdb` sets `publish = false` in its own manifest.
+changelog_update = false
+release_always = false
+semver_check = true
+
+git_release_body = """
+See the [changelog](https://github.com/joshka/qwertty/blob/main/CHANGELOG.md) for release notes.
+"""

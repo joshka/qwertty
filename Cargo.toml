@@ -15,6 +15,22 @@ repository = "https://github.com/joshka/qwertty"
 readme = "README.md"
 keywords = ["terminal", "tui", "ansi", "tty"]
 categories = ["command-line-interface"]
+# Keep the published tarball to what a downstream consumer compiles against. The library reads only
+# `docs/reference/*.md` at build time (via `include_str!` in `src/docs.rs`), so `src`, `docs`,
+# `examples`, `README.md`, and the `LICENSE-*` files stay; everything else is test data, capture
+# sidecars, tooling, or repo infrastructure. `db/` is excluded because nothing in `src/` reads it at
+# compile time (the `qdb` tool, which is unpublished, reads it at runtime from the working tree).
+exclude = [
+    "/.github",
+    "/db",
+    "/fixtures",
+    "/fuzz",
+    "/scripts",
+    "/tapes",
+    "/tests",
+    "/tools",
+    "/work",
+]
 
 [lib]
 path = "src/lib.rs"

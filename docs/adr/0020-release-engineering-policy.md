@@ -1,0 +1,72 @@
+# ADR 0020: Release Engineering Policy
+
+## Status
+
+Accepted
+
+## Context
+
+qwertty is preparing its first publication (0.1.0, ADR 0018). Before publishing, the project needs
+release-grade CI and supply-chain tooling (caching, `cargo-deny`, zizmor, CodeQL, dependabot,
+`cargo-semver-checks`, typos, minimal-versions, MSRV verification, release automation, governance
+files). Most of that is standard and adopted wholesale from the maintainer's existing library
+conventions. A few choices are opinionated and worth recording so they are not re-litigated, and so
+the same policy can be applied to the maintainer's other libraries.
+
+## Decision
+
+### 1. No conventional commits
+
+Commit messages stay free-form. The project does not adopt the Conventional Commits specification,
+does not lint commit messages or pull-request titles, and does not use commit-message-driven
+changelog generation (git-cliff).
+
+Release automation (release-plz) therefore determines version bumps from the **public API diff**
+(`cargo-semver-checks`), not from commit prefixes, and `CHANGELOG.md` is **maintained by hand** in
+keep-a-changelog form so release notes are curated for readers rather than assembled from commit
+subjects.
+
+Revisit if the maintenance cost of hand-curated changelogs and API-diff versioning outweighs the
+cost of imposing a commit convention.
+
+### 2. Three documents, deliberately separate (no cargo-rdme)
+
+qwertty keeps three front pages, each written for its audience and **not** auto-synchronised:
+
+- the **repository README** (GitHub landing page): badges, quickstart, contributor pointers;
+- the **crate README** (crates.io landing page): reuses the repository README, or a trimmed variant
+  if the repository README carries GitHub-only chrome;
+- the **`lib.rs` crate-root doc** (docs.rs landing page): an API-oriented introduction for a reader
+  already in the documentation.
+
+The project does not use `cargo-rdme` or any README↔doc synchronisation tool. Forcing these three to
+be identical serves none of the three audiences well; keeping them separate lets each be good.
+
+### 3. No binaries or heavy test data in the published tarball
+
+The published crate ships only what a *consumer* compiles against: source, the reference docs that
+are `include_str!`-embedded, the README, the licenses, and the examples. Test corpora (`fixtures/`),
+raw-byte capture sidecars (`db/captures/`), tapes, and integration tests are kept in the repository
+as evidence but **excluded** from the package via `Cargo.toml` `exclude`. Committed binary blobs are
+avoided in general; where evidence must be stored, prefer a text-encoded form over raw bytes.
+
+### 4. MSRV policy: stable minus one
+
+The minimum supported Rust version tracks **one release behind current stable** (a rolling "stable
+N-1" policy), verified by a dedicated CI job so the `rust-version` claim is tested rather than
+asserted. `rust-toolchain.toml` pins `channel = "stable"`; nightly is pulled per-job in CI only where
+required (rustfmt, fuzzing, some doc builds).
+
+## Consequences
+
+- Releases are cut with release-plz driving version detection from the API diff; a human writes the
+  changelog entry in the release pull request.
+- New contributors are not gated on a commit convention, but must update `CHANGELOG.md` by hand for
+  user-visible changes (documented in `CONTRIBUTING.md`).
+- The published crate is materially smaller than the repository, and downstream builds do not carry
+  qwertty's test evidence.
+- Bumping the MSRV is a deliberate, telegraphed change (it moves once per stable release at most),
+  and the MSRV CI job fails loudly if a dependency or code change raises the real floor.
+- These decisions are captured as a reusable standard in
+  [`docs/development/release-engineering.md`](../development/release-engineering.md) so they can be
+  applied consistently across the maintainer's libraries.

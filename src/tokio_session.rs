@@ -266,7 +266,29 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// (a CI-safety requirement, not just a test convenience). The closure returns a typed
     /// error for a degenerate process group.
     stop_signal: StopSignal,
+    /// How long [`next_event`](Self::next_event) waits on a lone pending `ESC` before flushing it
+    /// as [`Key::Escape`](crate::Key::Escape), or `None` to never flush on a timeout.
+    ///
+    /// A bare `ESC` (`0x1b`) byte is held pending by the decoder because it may begin an escape
+    /// sequence (an arrow key, a CSI, an OSC). Without a timeout, a standalone Esc keypress would
+    /// not surface until more input arrived (possibly completing a sequence) or EOF — blocking
+    /// Esc-to-cancel in a TUI. When this is `Some(d)` and the decoder's only pending state is a
+    /// lone `ESC`, `next_event` bounds the next read at `d`: input arriving first is decoded
+    /// normally (it may complete a real sequence), and on elapse the lone `ESC` is flushed as
+    /// `Key::Escape`.
+    ///
+    /// The default is `Some(25ms)` — a window small enough to feel instant for a human Esc yet
+    /// comfortably wider than the inter-byte gap of a real escape sequence on any transport.
+    /// `None` restores the wait-for-more-or-EOF behaviour. This is inert under kitty's
+    /// disambiguate-escape-codes flag, where Escape arrives as `CSI 27 u` rather than a bare
+    /// `0x1b`.
+    esc_flush_timeout: Option<Duration>,
 }
+
+/// The default [`esc_flush_timeout`](TokioTerminalSession::esc_flush_timeout): flush a lone pending
+/// `ESC` as [`Key::Escape`](crate::Key::Escape) `25ms` after the last byte, unless more input
+/// arrives first.
+const DEFAULT_ESC_FLUSH_TIMEOUT: Duration = Duration::from_millis(25);
 
 /// The injectable job-control stop-signal seam a [`TokioTerminalSession`] holds.
 ///
@@ -455,6 +477,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             capabilities: None,
             acquisition,
             stop_signal: StopSignal(Box::new(send_real_stop_signal)),
+            esc_flush_timeout: Some(DEFAULT_ESC_FLUSH_TIMEOUT),
         })
     }
 
@@ -483,6 +506,42 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Returns an error when neither the device nor the environment yields a usable size.
     pub fn size(&self) -> terminal::Result<TerminalSize> {
         self.session.size()
+    }
+
+    /// Returns the lone-Escape flush timeout for [`next_event`](Self::next_event).
+    ///
+    /// `Some(d)` means a lone pending `ESC` is flushed as [`Key::Escape`](crate::Key::Escape) `d`
+    /// after the last byte unless more input arrives first; `None` means it is never flushed on
+    /// a timeout (it waits for more input or EOF). The default is `Some(25ms)`. See
+    /// [`set_esc_flush_timeout`](Self::set_esc_flush_timeout) for the full policy.
+    #[must_use]
+    pub fn esc_flush_timeout(&self) -> Option<Duration> {
+        self.esc_flush_timeout
+    }
+
+    /// Sets the lone-Escape flush timeout for [`next_event`](Self::next_event).
+    ///
+    /// A bare `ESC` (`0x1b`) is held pending by the decoder because it may begin an escape sequence
+    /// (an arrow key, a CSI, an OSC), so a standalone Esc keypress does not otherwise surface until
+    /// more input arrives or the stream ends. With `Some(d)`, when the decoder's only pending state
+    /// is a lone `ESC`, `next_event` bounds its next read at `d`: bytes arriving before the
+    /// deadline are decoded normally (they may complete a real sequence, in which case no bare
+    /// Escape is produced), and on elapse the lone `ESC` is flushed as
+    /// [`Key::Escape`](crate::Key::Escape). A non-lone-ESC pending state (a partial CSI/OSC or
+    /// a mid-character UTF-8 run) is never flushed this way — it keeps waiting for the bytes
+    /// that finish it. `None` disables the timeout entirely, restoring the wait-for-more-or-EOF
+    /// behaviour.
+    ///
+    /// The default is `Some(25ms)`: small enough to feel instant for a human Esc, yet comfortably
+    /// wider than the inter-byte gap of a real escape sequence on any transport. This is inert
+    /// under kitty's disambiguate-escape-codes flag, where Escape arrives as `CSI 27 u` rather
+    /// than a bare `0x1b`, so the timeout never interferes with the kitty path. It also does
+    /// not affect query methods such as
+    /// [`request_cursor_position`](Self::request_cursor_position), which carry their
+    /// own timeout.
+    pub fn set_esc_flush_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.esc_flush_timeout = timeout;
+        self
     }
 
     /// Writes one terminal command through Tokio readiness.
@@ -608,6 +667,19 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// information an application must be able to see. Only resize collapses, and only here in
     /// delivery — the decoder itself emits one event per report.
     ///
+    /// # Lone-Escape flush
+    ///
+    /// A bare `ESC` (`0x1b`) is held pending by the decoder because it may begin an escape
+    /// sequence. When [`esc_flush_timeout`](Self::esc_flush_timeout) is `Some(d)` and the
+    /// decoder's only pending state is a lone `ESC`, this bounds its next read at `d`: bytes
+    /// arriving first are decoded normally (they may complete a real sequence), and on elapse
+    /// the lone `ESC` is flushed as [`Key::Escape`](crate::Key::Escape) so Esc-to-cancel is
+    /// responsive. A non-lone-ESC pending state (a partial CSI/OSC or a mid-character UTF-8
+    /// run) is never flushed this way. `None` disables the timeout. The default is
+    /// `Some(25ms)`, and the policy is inert under kitty's disambiguate-escape-codes flag
+    /// (Escape arrives there as `CSI 27 u`). See
+    /// [`set_esc_flush_timeout`](Self::set_esc_flush_timeout).
+    ///
     /// # Cancellation
     ///
     /// Cancel-safe. The decoder state, the correlator, and the pending-event queue all live on the
@@ -624,7 +696,32 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
                 return Ok(event);
             }
 
-            let events = self.read_events().await?;
+            // Lone-Escape flush policy: with a configured timeout and a decoder holding *only* a
+            // lone pending `ESC`, bound the read at a deadline. If bytes arrive first they are
+            // decoded normally (they may complete a real sequence); if the deadline elapses first
+            // the lone `ESC` is flushed as `Key::Escape`. Any other pending state (a partial
+            // CSI/OSC or a mid-character UTF-8 run) keeps its wait-for-more behaviour. This is
+            // scoped to `next_event` only — the query path (`run_query`) has its own deadline and
+            // never sees this. Cancel-safe: all decoder/queue state lives on the session, so a
+            // dropped future leaves the pending `ESC` pending and the session usable.
+            let events = match self.esc_flush_timeout {
+                Some(timeout) if self.decoder.has_pending_lone_escape() => {
+                    let deadline = Instant::now() + timeout;
+                    match timeout_at(deadline, self.read_events()).await {
+                        Ok(result) => result?,
+                        Err(_elapsed) => {
+                            if let Some(event) = self.decoder.flush_pending_escape() {
+                                return Ok(event);
+                            }
+                            // The pending state changed out from under the deadline (it cannot,
+                            // with state on the session and no concurrent access, but stay
+                            // defensive): fall through and read again rather than flush wrongly.
+                            continue;
+                        }
+                    }
+                }
+                _ => self.read_events().await?,
+            };
             self.buffer_events(events);
         }
     }
@@ -2479,6 +2576,111 @@ mod tests {
             Event::Key(KeyEvent::new(Key::Char('k')).with_text('k')),
             "without flush, typeahead typed at the shell survives",
         );
+    }
+
+    // --- lone-Escape flush timing policy (consumer P0) -------------------------------------------
+    //
+    // A bare `ESC` is held pending by the decoder (it may begin a sequence), so `next_event`
+    // applies a bounded flush timeout: a lone pending `ESC` becomes `Key::Escape` after the window
+    // unless more input arrives first. These tests are deterministic — time is paused and advanced
+    // manually, never a real sleep — and drive over the headless `FakeDevice`.
+
+    /// Opens a plain fake-device Tokio session and its terminal peer (no stop-signal stub needed).
+    fn fake_session() -> (TokioTerminalSession<FakeDevice>, FakeTerminal) {
+        let (device, peer) = FakeDevice::open().expect("open fake device");
+        let session =
+            TokioTerminalSession::from_device(device).expect("open Tokio session over fake device");
+        (session, peer)
+    }
+
+    #[tokio::test]
+    async fn the_default_esc_flush_timeout_is_25ms() {
+        let (session, _peer) = fake_session();
+        assert_eq!(
+            session.esc_flush_timeout(),
+            Some(Duration::from_millis(25)),
+            "the default lone-Escape flush window is 25ms",
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_lone_escape_flushes_as_key_escape_after_the_timeout() {
+        let (mut session, mut peer) = fake_session();
+        peer.feed_input(b"\x1b").expect("feed lone ESC");
+
+        // Drive next_event on a task so we can advance time past the window while it waits on the
+        // bounded read. With paused time the timer only fires when we advance it.
+        let handle = tokio::spawn(async move { session.next_event().await });
+        // Yield so the spawned task reads the ESC and parks on the timeout deadline.
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(26)).await;
+
+        let event = handle
+            .await
+            .expect("next_event task joined")
+            .expect("next_event yielded");
+        assert_eq!(
+            event,
+            Event::Key(KeyEvent::new(Key::Escape)),
+            "a lone pending ESC flushes as Key::Escape once the window elapses",
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_escape_sequence_arriving_within_the_window_suppresses_the_bare_escape() {
+        let (mut session, mut peer) = fake_session();
+        peer.feed_input(b"\x1b").expect("feed ESC");
+
+        // Complete the sequence *before* advancing past the window: ESC [ A is an Up arrow, so the
+        // bare Escape must never surface.
+        peer.feed_input(b"[A").expect("feed CSI Up tail");
+
+        // Do not advance time past the window; the sequence is already available to read.
+        let event = session.next_event().await.expect("next_event yielded");
+        assert_eq!(
+            event,
+            Event::Key(KeyEvent::new(Key::Up)),
+            "ESC completed into an arrow key within the window yields Key::Up, not Escape",
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_none_timeout_never_flushes_a_lone_escape_on_time_advance() {
+        let (mut session, mut peer) = fake_session();
+        session.set_esc_flush_timeout(None);
+        assert_eq!(session.esc_flush_timeout(), None, "opt-out took effect");
+        peer.feed_input(b"\x1b").expect("feed lone ESC");
+
+        let handle = tokio::spawn(async move { session.next_event().await });
+        tokio::task::yield_now().await;
+        // Advancing well past the default window must NOT produce an Escape: with None there is no
+        // deadline, so next_event stays parked waiting for more input. The still-pending task
+        // proves the opt-out (the ESC stays held on the decoder for a later completing byte).
+        tokio::time::advance(Duration::from_millis(500)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !handle.is_finished(),
+            "with esc_flush_timeout(None) a lone ESC never flushes on a time advance",
+        );
+        handle.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_partial_csi_is_not_flushed_as_escape_on_timeout() {
+        let (mut session, mut peer) = fake_session();
+        // A partial CSI: ESC [ with no final byte. This is NOT a lone ESC, so the flush timeout
+        // must not apply — it keeps waiting for the bytes that finish the sequence.
+        peer.feed_input(b"\x1b[").expect("feed partial CSI");
+
+        let handle = tokio::spawn(async move { session.next_event().await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(500)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !handle.is_finished(),
+            "a partial CSI (ESC [) must not be flushed as Escape on a time advance",
+        );
+        handle.abort();
     }
 
     #[test]

@@ -42,6 +42,12 @@ pedantic = "warn"
 [dev-dependencies]
 loom = "0.7"
 
+# `test-util` enables `tokio::time::{pause, advance}` and `#[tokio::test(start_paused = true)]`,
+# used by the Tokio session's deterministic timing tests (the lone-Escape flush window). It is a
+# dev-only feature, so it never ships to downstream consumers of the `tokio` feature.
+[target.'cfg(unix)'.dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["test-util"] }
+
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = [
     "event",

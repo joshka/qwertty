@@ -72,6 +72,49 @@ session enables and tears down mouse, focus, and bracketed-paste modes (see
 Cursor Lifecycle](crate::docs#screen-and-cursor-lifecycle)); it does not yet add graphics,
 clipboard, or vendor protocol policy.
 
+## Lone-Escape Flush Timing
+
+A bare `ESC` (`0x1b`) is ambiguous: it may be a standalone Escape keypress, or it may be the first
+byte of an escape sequence (an arrow key, a CSI, an OSC). The decoder cannot tell until the next
+byte arrives, so it holds a lone `ESC` pending rather than emitting it. Without a timing policy, a
+standalone Esc would not surface from `next_event` until more input arrived (possibly completing a
+sequence) or the stream reached EOF — which blocks the natural Esc-to-cancel gesture in a TUI.
+
+`next_event` resolves this with a bounded timeout. When the decoder's only pending state is a lone
+`ESC` and no more input arrives within the window, the `ESC` is flushed as `Key::Escape`; if bytes
+arrive first, they are decoded normally and may complete a real sequence (in which case no bare
+Escape is produced). The timeout applies **only** to a lone pending `ESC`: a partial CSI/OSC or a
+mid-character UTF-8 run keeps waiting for the bytes that finish it, exactly as before.
+
+The window is configurable with `set_esc_flush_timeout`, and its current value is readable with
+`esc_flush_timeout`:
+
+- `Some(d)` flushes a lone pending `ESC` as `Key::Escape` after `d`. The default is
+  `Some(Duration::from_millis(25))` — small enough to feel instant for a human Esc, yet comfortably
+  wider than the inter-byte gap of a real escape sequence on any transport.
+- `None` opts out entirely, restoring the wait-for-more-or-EOF behavior.
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::TokioTerminalSession;
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+
+// The default is Some(25ms); widen it, or opt out with None to never flush on a timeout.
+session.set_esc_flush_timeout(Some(Duration::from_millis(50)));
+
+session.leave().await
+# }
+```
+
+This policy is inert when the kitty keyboard protocol's disambiguate-escape-codes flag is active:
+in that mode Escape arrives unambiguously as `CSI 27 u`, never as a bare `0x1b`, so the timeout is
+exactly the right fallback for the non-kitty path and never interferes with the kitty path. It is
+also scoped to `next_event`; the live query helpers such as `request_cursor_position` carry their
+own timeout and are unaffected.
+
 ## Terminal Acquisition Observability
 
 On Unix, `TokioTerminalSession::open` reaches the controlling terminal through a three-branch

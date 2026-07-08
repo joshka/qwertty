@@ -90,6 +90,7 @@ const CR: u8 = 0x0d;
 const HT: u8 = 0x09;
 const BS: u8 = 0x08;
 const DEL: u8 = 0x7f;
+const ESC: u8 = 0x1b;
 
 /// A decoded semantic input event.
 ///
@@ -293,6 +294,49 @@ impl SemanticDecoder {
             && pending[0] >= 0x20
             && pending[0] != DEL
             && std::str::from_utf8(pending).is_ok()
+    }
+
+    /// Returns whether the decoder is holding **exactly** a lone pending `ESC` (`0x1b`) and nothing
+    /// else.
+    ///
+    /// A bare `ESC` is held pending because it may begin an escape sequence (an arrow key, a CSI,
+    /// an OSC): the parser cannot know until the next byte arrives. This returns `true` only for
+    /// that single-byte state — a partial CSI (`ESC [`), a partial OSC, an in-progress string, or a
+    /// mid-character UTF-8 run all return `false`, because those must keep waiting for the bytes
+    /// that finish them rather than being flushed as an Escape.
+    ///
+    /// A driver applying a lone-Escape timeout policy checks this to decide whether the pending
+    /// state is the one it is allowed to flush; see
+    /// [`flush_pending_escape`](Self::flush_pending_escape) and the Tokio session's
+    /// `next_event` read loop. Note that with kitty's disambiguate-escape-codes flag active,
+    /// Escape arrives as `CSI 27 u` rather than a bare `0x1b`, so this never reports `true` on
+    /// that path — the timeout policy is inert there.
+    #[must_use]
+    pub fn has_pending_lone_escape(&self) -> bool {
+        self.parser.pending_bytes() == [ESC]
+    }
+
+    /// Flushes a lone pending `ESC` as a [`Key::Escape`] event, if that is exactly the pending
+    /// state.
+    ///
+    /// Returns `Some(Event::Key(Key::Escape))` when — and only when —
+    /// [`has_pending_lone_escape`](Self::has_pending_lone_escape) holds, draining that single byte
+    /// through the parser's finish path. For every other state (ground, a partial CSI/OSC, an
+    /// in-progress string, a mid-character UTF-8 run) it returns `None` and leaves the decoder
+    /// untouched, so a genuine partial sequence is never prematurely resolved to an Escape.
+    ///
+    /// This is the mechanism a timing layer drives to honour a lone-Escape flush timeout without
+    /// disturbing any other pending decode. It applies no timing policy itself: the decision to
+    /// call it (after a timeout, at EOF, etc.) belongs to the layer above (design 02).
+    #[must_use]
+    pub fn flush_pending_escape(&mut self) -> Option<Event> {
+        if !self.has_pending_lone_escape() {
+            return None;
+        }
+        // The only pending byte is a lone ESC, so `finish` produces exactly the standalone-Escape
+        // key event (a bare `ESC` with no final byte maps to `Key::Escape`); there is nothing else
+        // buffered for it to flush.
+        self.finish().into_iter().next()
     }
 
     /// Returns the raw bytes the decoder is holding for a sequence that has not yet completed.

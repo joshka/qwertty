@@ -13,8 +13,8 @@
 //!
 //! # Scope
 //!
-//! The vocabulary is **pre-freeze until milestone M4 exit** (design 08: `event::` types change
-//! freely before publish and calcify at 0.1). The decoder maps:
+//! The `event::` vocabulary is **frozen for 0.1** (ADR 0019): these types are a stable input
+//! contract downstream code can build against. The decoder maps:
 //!
 //! - printable UTF-8 text to one [`KeyEvent`] per character, with the decoded character carried in
 //!   the event's [`TextPayload`];
@@ -44,9 +44,8 @@
 //! Legacy UTF-8 input decodes to **one key event per character** (design 02): a text run of `n`
 //! characters becomes `n` [`KeyEvent`] values, each carrying a single-character [`TextPayload`].
 //! Multi-codepoint text (decomposed accents, jamo runs, ZWJ clusters as one event) arrives only
-//! through the kitty `CSI u` associated-text field in milestone M4; the [`TextPayload`] type is
-//! multi-codepoint-capable so that path needs no vocabulary change, but this slice never emits more
-//! than one character per key.
+//! through the kitty `CSI u` associated-text field; the [`TextPayload`] type is
+//! multi-codepoint-capable, but the legacy text path never emits more than one character per key.
 //!
 //! # ESC timing
 //!
@@ -100,7 +99,8 @@ const ESC: u8 = 0x1b;
 /// [`Event::Syntax`] for every other complete token, preserving its bytes for a later layer or the
 /// application.
 ///
-/// The enum is `#[non_exhaustive]`; the vocabulary is pre-freeze until M4 exit (design 08).
+/// The enum is `#[non_exhaustive]`, so future variants add without breaking existing matches; the
+/// vocabulary is frozen for 0.1 (ADR 0019).
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Event {

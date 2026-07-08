@@ -1,10 +1,10 @@
 //! Typed terminal reports parsed from the lossless syntax layer.
 //!
 //! A report is a host-visible reply a terminal sends in answer to a query: a cursor position
-//! report, a device status report, and (in later slices) device attributes, mode reports, and
-//! colour reports. Each type here parses one complete [`ControlSequence`] — the CSI token from the
-//! [syntax layer](crate::SyntaxToken) — into a typed value, rejecting anything that is not exactly
-//! the report shape it recognizes.
+//! report, a device status report, primary device attributes, DEC private mode reports, an
+//! XTVERSION report, and OSC colour reports. Each type parses one complete syntax token — a CSI
+//! [`ControlSequence`], a DCS string, or an OSC payload from the [syntax layer](crate::SyntaxToken)
+//! — into a typed value, rejecting anything that is not exactly the report shape it recognizes.
 //!
 //! These parsers are **pure and side-effect-free**: they read a syntax token and return a typed
 //! value or `None`. They do not read a terminal, prove which request caused a report, or apply

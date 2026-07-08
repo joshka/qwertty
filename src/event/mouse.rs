@@ -3,7 +3,7 @@
 //! A [`MouseEvent`] is the typed shape of one terminal mouse report: what happened
 //! ([`MouseEventKind`]), which [`MouseButton`] it involved, where (1-based column and row), and the
 //! active [`Modifiers`]. The decoder here reads the modern SGR encoding (`CSI < b ; x ; y M/m`,
-//! DEC private mode 1006), the only mouse encoding this slice decodes to typed events; the legacy
+//! DEC private mode 1006), the only mouse encoding qwertty decodes to typed events; the legacy
 //! X10 and urxvt forms are tolerated without decoding (see [the decode entry point](decode_sgr) and
 //! design 02, FM-P13).
 //!

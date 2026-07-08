@@ -17,7 +17,7 @@
 //! Every [`Finding`] carries its [`Evidence`]: [`Evidence::Probed`] names the query/sequence that
 //! answered, [`Evidence::Inferred`] names the environment heuristic that guessed, and
 //! [`Evidence::Unknown`] means nothing answered and nothing inferred. A consumer that only reads
-//! `.value()` gets the same tri-state as M3-S1; a consumer that needs to tell "the terminal told us
+//! `.value()` gets the `Option<T>` tri-state; a consumer that needs to tell "the terminal told us
 //! no" apart from "we never asked" reads `.evidence()`.
 //!
 //! # Identity is a finding too (R-CAP-5)

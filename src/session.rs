@@ -53,9 +53,27 @@ use crate::{Event, SemanticDecoder};
 /// `leave`, drop, or the panic-safe [`RestoreHandle`] on Unix. Dropping an entered session still
 /// restores the terminal, but drop-time failures cannot be reported.
 ///
-/// The first session API is runtime-neutral and writes through the synchronous terminal-device
-/// boundary. Input is exposed as raw bytes; async input, query routing, and runtime-owned I/O
-/// belong to later session slices.
+/// This session is synchronous and runtime-neutral: it writes through the terminal-device boundary
+/// directly, reads input as raw bytes with [`read_input`](Self::read_input), and answers
+/// [`report`](crate::report) queries with a blocking poll loop. For decoded [`Event`](crate::Event)
+/// delivery and live query routing over an async runtime, use `TokioTerminalSession` (the `tokio`
+/// feature).
+///
+/// # What you can do
+///
+/// - **Output:** [`command`](Self::command), [`text`](Self::text), [`flush`](Self::flush).
+/// - **Input:** [`read_input`](Self::read_input) for one raw read;
+///   [`request_cursor_position`](Self::request_cursor_position) and
+///   [`request_terminal_status`](Self::request_terminal_status) for blocking queries.
+/// - **Modes:** [`enable_mouse`](Self::enable_mouse),
+///   [`enable_focus_events`](Self::enable_focus_events),
+///   [`enable_bracketed_paste`](Self::enable_bracketed_paste),
+///   [`enable_in_band_resize`](Self::enable_in_band_resize), and
+///   [`push_kitty_keyboard`](Self::push_kitty_keyboard) — each recorded in the ledger and undone on
+///   leave.
+/// - **Security:** [`set_clipboard`](Self::set_clipboard) behind the [`Policy`] gate
+///   ([`policy`](Self::policy) / [`set_policy`](Self::set_policy)).
+/// - **Lifecycle:** [`enter`](Self::enter) / [`leave`](Self::leave) cycle raw mode re-entrantly.
 ///
 /// # Example
 ///

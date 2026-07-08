@@ -1,53 +1,56 @@
-//! Encode terminal output without opening a terminal.
+//! Own the terminal on Unix, with explicit ownership, ordered output, and race-free queries.
 //!
-//! qwertty is growing in small slices. The current public surface can build the bytes a terminal
-//! would receive and, on Unix, open a terminal device for explicit byte output, raw-mode
-//! management, a small terminal session lifecycle, and raw terminal input bytes decoded through a
-//! total, lossless syntax layer and a semantic layer that maps its tokens to typed [`Event`]
-//! values, with typed cursor position and terminal status report parsing over that syntax layer.
-//! With the optional `tokio` feature on Unix, it also exposes a Tokio-backed session owner that
-//! drives the sans-io core (device, [`SemanticDecoder`], and query correlator) for runtime-backed
-//! reads, writes, decoded [`Event`] delivery, and explicit cleanup, including live cursor position
-//! and terminal status queries.
+//! qwertty is a library for building terminal applications. It takes ownership of the terminal on
+//! your behalf — raw mode, ordered output, and guaranteed restoration — and gives you typed layers
+//! over the raw byte stream in both directions: you build output as typed [`Command`] values, a
+//! session writes them in call order and restores the terminal on exit (including from a panic),
+//! input decodes losslessly into typed [`Event`] values, and terminal queries such as the cursor
+//! position are matched to their replies without mistaking a keystroke for an answer.
 //!
-//! The main types are:
+//! qwertty is async-first. A runtime-neutral, side-effect-free core — encoding, the input decoder,
+//! and the query correlator — is driven either by the asynchronous `TokioTerminalSession` (the
+//! `tokio` feature) or by the blocking [`TerminalSession`], so the same decode and query logic
+//! backs both. Live terminal ownership is Unix-only; the encode and decode layers compile
+//! everywhere.
 //!
-//! - [`Command`], a small envelope for encoded terminal command bytes.
-//! - [`CommandBuffer`], an ordered byte buffer for commands, raw bytes, and text.
-//! - [`ProtocolPosition`], a one-based terminal protocol coordinate.
-//! - [`Terminal`], a low-level terminal device owner.
-//! - [`TerminalDevice`], the substitutable device boundary session logic writes through.
-//! - [`DeviceMode`], the raw or cooked mode selected through a device.
-//! - `FakeDevice` and `FakeTerminal`, an in-process device pair for headless tests on Unix.
-//! - [`TerminalSession`], an application-facing owner for raw mode, ordered output, flushing, and
-//!   explicit leave cleanup.
-//! - [`Policy`] and [`PolicyGate`], the session security policy gating side-effecting and
-//!   exfiltrating features (clipboard write/read, notifications, file transfer, mux passthrough)
-//!   and the gate a [`PolicyDenied`](Error::PolicyDenied) error names.
-//! - [`KittyKeyboardFlags`] and [`KittyKeyboardGrant`], the caller-chosen kitty keyboard
-//!   progressive-enhancement request set and the granted result of the verify-after-push handshake.
-//! - `RestoreHandle`, a panic-safe emergency terminal-restore handle on Unix.
-//! - [`InputBytes`], raw terminal input bytes read through a session.
-//! - [`CursorPositionReport`], parsed `CSI row ; column R` cursor position reports.
-//! - [`TerminalStatusReport`] and [`TerminalStatus`], parsed `CSI 0 n` and `CSI 3 n` terminal
-//!   status reports.
-//! - [`SyntaxParser`], the total, lossless, bounded, stateful syntax tokenizer over input bytes.
-//! - [`SyntaxToken`], one classified byte-span in the syntax layer (text, control, CSI, OSC, DCS,
-//!   APC, PM, SOS, escape, or malformed).
-//! - [`SemanticDecoder`], the semantic layer over [`SyntaxParser`] that maps tokens to typed
-//!   [`Event`] values.
-//! - [`Event`], a semantic input event: a [`KeyEvent`] or lossless [`SyntaxToken`] passthrough.
-//! - [`KeyEvent`], a kitty-shaped key event with a [`Key`], [`Modifiers`], [`KeyEventKind`], and
-//!   optional [`TextPayload`].
-//! - [`Key`], [`Modifiers`], [`KeyEventKind`], and [`TextPayload`], the parts of a [`KeyEvent`].
-//! - [`TerminalSize`], terminal dimensions reported by the operating system.
-//! - `TokioTerminalSession`, a Tokio-backed session owner available with the `tokio` feature.
-//! - [`commands`], user-intent helpers that return [`Command`].
-//! - [`report`], the module home of the typed terminal reports parsed from the lossless syntax
-//!   layer. [`CursorPositionReport`], [`TerminalStatusReport`], and [`TerminalStatus`] are
-//!   re-exported at the crate root for convenience and also reachable as `report::` for a stable
-//!   module path (the ghostty-rs encode oracle uses the module path). These are the report parsers
-//!   the query correlator consumes.
+//! # The model
+//!
+//! Work flows through a few layers, each a typed view of the byte stream:
+//!
+//! - **Encode.** The [`commands`] modules build [`Command`] byte sequences (SGR styling, cursor and
+//!   screen control, OSC, terminal mode changes); a [`CommandBuffer`] collects them in order.
+//! - **Own.** A session enters raw mode through a mode ledger, writes output in call order, and
+//!   undoes exactly what it enabled on `leave`, on drop, or from a panic hook (the unix-only
+//!   [`RestoreHandle`]). [`TerminalSession`] is synchronous; `TokioTerminalSession` is its async
+//!   counterpart.
+//! - **Decode.** A [`SyntaxParser`] turns input bytes into lossless [`SyntaxToken`] spans, and a
+//!   [`SemanticDecoder`] maps those to typed [`Event`] values — [`KeyEvent`], mouse, focus, paste,
+//!   resize — passing anything it does not recognize through unchanged.
+//! - **Query.** A session writes a request and a correlator pairs the reply to it, surviving
+//!   interleaved typeahead, so the [`report`] parsers (such as [`CursorPositionReport`]) return the
+//!   answer to the right question. Capability probing and the security [`Policy`] build on this
+//!   path.
+//!
+//! # Feature flags
+//!
+//! - **default** (no features): encoding, the synchronous [`TerminalSession`] (raw mode, ordered
+//!   output, blocking cursor-position and terminal-status queries), the input decoders, and the
+//!   [`report`] parsers.
+//! - **`tokio`**: adds `TokioTerminalSession`, which drives the same sans-io core over Tokio
+//!   readiness — decoded [`Event`] delivery, live queries, capability probing, suspend/resume,
+//!   `$EDITOR` handoff, and signal and resize streams.
+//!
+//! # Where to start
+//!
+//! - Build output with [`Command`], [`CommandBuffer`], and the [`commands`] modules.
+//! - Own the terminal with [`TerminalSession`] (or `TokioTerminalSession` under the `tokio`
+//!   feature); both guarantee cleanup.
+//! - Read input through the [`SemanticDecoder`] and the [`Event`] / [`KeyEvent`] vocabulary, with
+//!   [`SyntaxParser`] and [`SyntaxToken`] as the lossless layer beneath.
+//! - Query and gate with the [`report`] parsers, the capability model in [`caps`], and the
+//!   [`Policy`] / [`PolicyGate`] security gate.
+//! - Test headlessly by driving a session over the [`TerminalDevice`] boundary (`FakeDevice` on
+//!   Unix), no real terminal required.
 //!
 //! # Example
 //!
@@ -63,8 +66,10 @@
 //! assert_eq!(output.as_bytes(), b"\x1b[2J\x1b[3;5HReady");
 //! ```
 //!
-//! Terminal protocol terms used by the first command helpers are introduced in the
-//! [terminal control reference](crate::docs).
+//! That builds bytes in memory without opening a terminal. Opening a live terminal is a session;
+//! the `examples/` directory has runnable programs for that — `session_status`,
+//! `tokio_terminal_queries`, and `panic_safe_restore` among them. Terminal protocol terms used by
+//! the command helpers are introduced in the [terminal control reference](crate::docs).
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 // docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables

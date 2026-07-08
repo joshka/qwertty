@@ -173,11 +173,32 @@ impl fmt::Display for TerminalAcquisition {
 /// mid-await loses nothing: a later call resumes from the same state. See
 /// [`next_event`](Self::next_event) and the query helpers for the specifics.
 ///
-/// # Re-entrancy
+/// # Lifecycle and hand-back
 ///
-/// `enter`/`leave` re-entrancy over this Tokio type (cycling raw mode without dropping the fd
-/// registration) is deferred to a later slice. [`leave`](Self::leave) here consumes the session for
-/// API continuity with the previous implementation; construct a fresh session to re-enter.
+/// [`open`](Self::open) enters raw mode and registers the terminal fd with Tokio;
+/// [`leave`](Self::leave) consumes the session and restores the terminal — the final teardown. To
+/// hand the terminal back *temporarily* without dropping the session, use
+/// [`suspend`](Self::suspend) / [`resume`](Self::resume) (Ctrl-Z job control) or
+/// [`run_detached`](Self::run_detached) (running a child such as `$EDITOR`): each restores the
+/// terminal and later re-enters over the same device fd.
+///
+/// # What you can do
+///
+/// - **Output:** [`command`](Self::command), [`text`](Self::text), [`flush`](Self::flush).
+/// - **Input:** [`next_event`](Self::next_event) for decoded [`Event`](crate::Event)s;
+///   [`read_input`](Self::read_input) for raw bytes.
+/// - **Queries:** [`request_cursor_position`](Self::request_cursor_position) and
+///   [`request_terminal_status`](Self::request_terminal_status); kitty keyboard via
+///   [`push_kitty_keyboard`](Self::push_kitty_keyboard) (set-only) or
+///   [`request_kitty_keyboard`](Self::request_kitty_keyboard) (verify-after-push).
+/// - **Capabilities and modes:** [`probe_capabilities`](Self::probe_capabilities) then
+///   [`capabilities`](Self::capabilities); the `enable_*` modes such as
+///   [`enable_mouse`](Self::enable_mouse); [`synchronized`](Self::synchronized) frames gated on
+///   mode 2026; [`set_esc_flush_timeout`](Self::set_esc_flush_timeout).
+/// - **Streams:** [`resize_stream`](Self::resize_stream) (SIGWINCH) and [`signals`](Self::signals)
+///   (SIGTSTP/CONT/TERM/INT), selected alongside `next_event`.
+/// - **Observability:** [`acquisition`](Self::acquisition) reports which branch reached the
+///   terminal.
 ///
 /// # Example
 ///

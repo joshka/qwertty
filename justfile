@@ -37,6 +37,18 @@ doc:
     # them.
     RUSTDOCFLAGS="-D warnings" cargo doc -p qwertty --no-deps
 
+# Build the docs the way docs.rs and a reader see them: all features, `--cfg docsrs` so
+# feature-gated items (like TokioTerminalSession) show their "Available on feature" badges. Use this
+# to browse, not the `doc` gate above (which ends on a default-feature build that omits the tokio
+# surface). Needs nightly for the badges.
+docs:
+    RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p qwertty --all-features --no-deps
+
+# Build the reader docs and serve them over HTTP so the rustdoc theme persists across pages (unlike
+# file://). Browse http://127.0.0.1:8347/qwertty/.
+docs-serve: docs
+    python3 -m http.server 8347 --bind 127.0.0.1 --directory target/doc
+
 loom:
     RUSTFLAGS="--cfg loom" cargo test --lib loom_
 

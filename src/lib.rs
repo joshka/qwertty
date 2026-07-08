@@ -70,6 +70,25 @@
 //! the `examples/` directory has runnable programs for that — `session_status`,
 //! `tokio_terminal_queries`, and `panic_safe_restore` among them. Terminal protocol terms used by
 //! the command helpers are introduced in the [terminal control reference](crate::docs).
+#![cfg_attr(feature = "tokio", doc = "# The `tokio` feature")]
+#![cfg_attr(feature = "tokio", doc = "")]
+#![cfg_attr(
+    feature = "tokio",
+    doc = "With `tokio` enabled, [`TokioTerminalSession`] is the async session owner that drives the same"
+)]
+#![cfg_attr(
+    feature = "tokio",
+    doc = "sans-io core as the synchronous [`TerminalSession`]: it delivers decoded [`Event`] values,"
+)]
+#![cfg_attr(
+    feature = "tokio",
+    doc = "answers live queries, probes terminal capabilities, and adds [`ResizeStream`] and [`SignalStream`]"
+)]
+#![cfg_attr(
+    feature = "tokio",
+    doc = "for `SIGWINCH` and job-control signals, plus [`TerminalAcquisition`] reporting how the"
+)]
+#![cfg_attr(feature = "tokio", doc = "controlling terminal was reached.")]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 // docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables

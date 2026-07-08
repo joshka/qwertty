@@ -393,6 +393,23 @@ impl<D: TerminalDevice> TerminalSession<D> {
         Ok(self)
     }
 
+    /// Returns the readable file descriptor behind the owned device, when one exists.
+    ///
+    /// This is the runtime-neutral readiness seam a synchronous, no-async-runtime caller needs: it
+    /// exposes the same descriptor [`TerminalDevice::as_fd`] reports, so a program can wait for the
+    /// terminal to become readable with its own poller (for example `rustix::event::poll`) instead
+    /// of blocking in [`read_input`](Self::read_input) or pulling in an async runtime. The session
+    /// keeps ownership of the device, its mode ledger, and its restore paths; the borrowed
+    /// descriptor lives only as long as the borrow of `self`.
+    ///
+    /// Returns `None` for a device with no pollable descriptor (for example a headless
+    /// `FakeDevice`), matching the trait's own contract.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn as_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
+        self.device.as_fd()
+    }
+
     /// Returns a shared reference to the owned device.
     ///
     /// A driver that registers the same device's descriptor with a runtime reactor (the Tokio

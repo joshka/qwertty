@@ -57,6 +57,30 @@ buffer and returns those bytes as `InputBytes`. It does not parse keys, UTF-8, E
 query responses, paste, mouse input, or vendor protocols. See the
 [terminal input reference](crate::docs) for the input byte contract.
 
+## One-Shot Query Without An Async Runtime
+
+A program that has a single question for the terminal — the current cursor position, the primary
+device attributes, one capability — does not need an async runtime to ask it. `TerminalSession`,
+the sans-io `SyntaxParser`, and the `report` parsers compose into a synchronous, default-feature
+recipe that writes one probe, waits for a bounded moment, and parses the reply.
+
+`TerminalSession::as_fd` is the runtime-neutral readiness seam this recipe needs. It returns the
+readable file descriptor behind the owned device (the same one `TerminalDevice::as_fd` reports), so
+a caller can wait for the terminal to become readable with its own poller — for example
+`rustix::event::poll` with a bounded timeout — instead of blocking in `read_input` or pulling in a
+reactor. The session keeps ownership of the device, its mode ledger, and its restore paths; the
+borrowed descriptor lives only as long as the borrow. A device with no pollable fd (a headless
+`FakeDevice`) returns `None`.
+
+The recipe's shape is: open the session (raw mode entered), write one probe, `poll` the fd under a
+budget, `read_input` once, feed the bytes to a `SyntaxParser`, and parse the matching `report`. A
+terminal that never answers times out cleanly and is reported as the unknown case (FM-C4), never as
+an error and never as a hang. Restoration is guaranteed on every exit path by the session's drop and
+the [panic-safe restore handle](#panic-safe-restore). See the `oneshot_background.rs` example for
+the fully commented recipe. This is the second, no-async consumer the sans-io decode split was
+designed for: the same decode core the [async query path](#async-boundary-and-live-queries) uses,
+driven by a hand-rolled synchronous poll loop.
+
 ## Flush And Leave
 
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible

@@ -51,6 +51,18 @@ point without scanning the repository tree.
   vocabulary — `KeyEvent` values for keys and lossless `Event::Syntax` passthrough for unmapped
   tokens.
 
+## One-Shot Query Without An Async Runtime
+
+- `oneshot_background.rs`: ask the terminal one question with no async runtime and default features
+  (no `tokio`). Opens a `TerminalSession`, writes a single `CSI 6 n` cursor-position probe, waits
+  for the session fd to become readable with `rustix::event::poll` under a bounded 150 ms budget,
+  reads the reply, and parses it through the sans-io `SyntaxParser` and
+  `report::CursorPositionReport`. A non-answering terminal times out cleanly and reports the FM-C4
+  *unknown* case rather than hanging; a `RestoreHandle` panic hook plus drop-time `leave` guarantee
+  cooked-mode restoration on every exit path. This is the "second consumer" the sans-io decode split
+  (design 04) was built for: the same decode core the async session uses, driven by a hand-rolled
+  synchronous poll loop.
+
 ## Tokio Session Basics
 
 - `tokio_terminal_queries.rs`: open a Tokio session, issue live terminal-status and
@@ -112,6 +124,8 @@ point without scanning the repository tree.
 
 ## Choosing An Example
 
+- Start with `oneshot_background.rs` when you have a single question for the terminal and do not
+  want an async runtime — one probe, one bounded wait, one answer, on default features.
 - Start with `tokio_terminal_queries.rs` when you want the smallest end-to-end Tokio ownership
   example.
 - Start with `tokio_input_events.rs` when you need decoded event delivery.

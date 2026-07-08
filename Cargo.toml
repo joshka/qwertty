@@ -39,7 +39,7 @@ pedantic = "warn"
 loom = "0.7"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs", "pty", "stdio", "termios"] }
+rustix = { version = "1", features = ["event", "fs", "pty", "stdio", "termios"] }
 tokio = { version = "1", optional = true, default-features = false, features = [
     "macros",
     "net",

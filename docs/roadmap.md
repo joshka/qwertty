@@ -2,6 +2,11 @@
 
 The project grows in reviewable slices.
 
+> **Current state and handoff:** see [`work/STATUS.md`](../work/STATUS.md). In short — 0.1.0 is staged
+> and gate-green in local jj, but nothing is pushed yet, so the `## Status` list below reflects the
+> published `main` branch, which is far behind the local work tracked in
+> [Forward Look](#forward-look-unpublished-work-in-progress).
+
 ## Status
 
 - Project standards and scaffold are on `main`.
@@ -48,8 +53,9 @@ The project grows in reviewable slices.
 - First published version ADR is on `main`.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
-- The next concrete slice is:
-  [Add release-blocking examples reference page](https://github.com/joshka/qwertty/issues/178).
+
+The local work has advanced well past this published list; the [Forward Look](#forward-look-unpublished-work-in-progress)
+below is the current milestone view, and [`work/STATUS.md`](../work/STATUS.md) is the live entry point.
 
 ## Slices
 
@@ -74,35 +80,38 @@ documentation in the right layer.
 > M9 — so the plan stays visible even where `main` has not caught up yet. Update this table as
 > milestones seal; it is deliberately concise, not a slice-by-slice log.
 
-| Milestone | Scope                                      | Status                              |
-| --------- | ------------------------------------------ | ----------------------------------- |
-| M0        | Device seam and lifecycle                  | Complete                            |
-| M1        | Syntax layer and events                    | Complete                            |
-| M2        | Query correlator                           | Complete                            |
-| M3        | Capabilities and policy                    | Nearly complete                     |
-| M4        | Full input vocabulary                      | Complete (frozen for 0.1, ADR 0019) |
-| M5        | Protocol-family commands                   | Complete                            |
-| M6        | Suspend, resume, handoff                   | In progress                         |
-| —         | Docs pass                                  | In progress (this slice)            |
-| M7        | Sequence database and capture              | Complete                            |
-| M8        | 0.1.0 publication gate                     | Not started                         |
-| M9        | Conformance runner and generated reference | Not started                         |
+| Milestone | Scope                                      | Status                               |
+| --------- | ------------------------------------------ | ------------------------------------ |
+| M0        | Device seam and lifecycle                  | Complete                             |
+| M1        | Syntax layer and events                    | Complete                             |
+| M2        | Query correlator                           | Complete                             |
+| M3        | Capabilities and policy                    | Complete                             |
+| M4        | Full input vocabulary                      | Complete (frozen for 0.1, ADR 0019)  |
+| M5        | Protocol-family commands                   | Complete                             |
+| M6        | Suspend, resume, handoff, signals          | Complete                             |
+| M7        | Sequence database and capture              | Complete                             |
+| —         | Release engineering and publish prep       | Complete                             |
+| —         | Docs pass and reference restructure        | Complete                             |
+| M8        | 0.1.0 publication gate                     | Staged; publish pending (maintainer) |
+| M9        | Conformance runner and generated reference | Not started                          |
 
 Milestone detail:
 
 - **M0** — device seam, mode ledger, panic-safe restore handle, re-entrant session.
 - **M1** — lossless syntax layer, fuzz targets, fixture corpus, semantic event layer.
 - **M2** — sans-io query correlator, Tokio session integration, real-emulator verification.
-- **M3** — capability probe bundle and the `Capabilities`/`Finding`/`Evidence` model are done;
-  the policy skeleton is in flight.
+- **M3** — capability probe bundle, the `Capabilities`/`Finding`/`Evidence` tri-state model, and the
+  `Policy`/`PolicyGate` layer are complete.
 - **M4** — kitty `CSI u` keys, mouse, focus, bracketed paste, resize; the vocabulary froze for 0.1
   (ADR 0019).
 - **M5** — SGR/style, alt-screen/cursor, OSC, synchronized output, scroll regions.
-- **M6** — suspend/resume (`SIGTSTP`/`SIGCONT`) is in a review workspace (M6-S1); handoff
-  (`run_detached`, M6-S2) and the optional signals stream (M6-S3) have not started.
-- **M8** — 0.1.0 publication gate: semver review, README/docs.rs polish, release-checklist rerun,
-  version bump, `publish = false` removal. Blocked on M6 and the docs pass; push, PR, and publish
-  are the maintainer's own act.
+- **M6** — complete: suspend/resume (`SIGTSTP`/`SIGCONT`), the `run_detached` `$EDITOR` handoff, and
+  the optional `signals`/resize streams all landed.
+- **M8** — 0.1.0 publication gate: semver review, docs pass, release-checklist rerun, version bump,
+  and `publish = false` removal are all done, and the release-engineering standard is in place. The
+  version is **staged** and gate-green in local jj; the remaining `git push`, first `cargo publish`,
+  and trusted-publisher setup are the maintainer's own manual act. See
+  [`work/STATUS.md`](../work/STATUS.md) for the publish sequence.
 - **M9** — generalizes the M7 capture harness into a full conformance runner (target-trait shape),
   produces a results-driven support matrix and a generated docs.rs reference, and adds
   width-behavior probes.

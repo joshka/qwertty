@@ -48,6 +48,12 @@ jobs:
       - name: Test examples
         run: cargo test --examples --workspace --all-features
 
+      # Default-feature doctests. The all-features run hides reference `rust` fences that only
+      # compile without the Tokio session, so a Tokio-only API in a default-feature doctest would
+      # break a real `cargo test -p qwertty` while passing above. This step enforces that they pass.
+      - name: Doctests (default features)
+        run: cargo test -p qwertty --doc
+
       - name: Database validate
         run: cargo run -p qdb -- validate
 

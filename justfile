@@ -15,6 +15,11 @@ metadata:
 test:
     cargo test --workspace --all-features
     cargo test --examples --workspace --all-features
+    # Also run the crate's doctests with DEFAULT features. The all-features run above hides doctests
+    # that only compile without the Tokio session (a default build legitimately lacks
+    # `TokioTerminalSession`), so a reference `rust` fence using a Tokio-only API would break a real
+    # default-feature `cargo test` while passing here. This closes that hole.
+    cargo test -p qwertty --doc
 
 clippy:
     cargo clippy --workspace --all-features --all-targets -- -D warnings

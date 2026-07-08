@@ -131,23 +131,9 @@ assert_eq!(report.position(), ProtocolPosition::new(12, 34));
 ```
 
 With the optional `tokio` feature on Unix, `TokioTerminalSession::request_cursor_position` writes
-the request, flushes output, waits for the matching report, and applies a caller-provided timeout:
-
-```rust,no_run
-use std::time::Duration;
-
-use qwertty::TokioTerminalSession;
-
-# async fn run() -> qwertty::Result<()> {
-let mut session = TokioTerminalSession::open()?;
-let report = session.request_cursor_position(Duration::from_secs(1)).await?;
-
-assert!(report.row() > 0);
-assert!(report.column() > 0);
-
-session.leave().await
-# }
-```
+the request, flushes output, waits for the matching report, and applies a caller-provided timeout.
+See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the runnable example,
+included with the `tokio` feature.
 
 Unrelated decoded events that arrive before the matching report remain available through
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
@@ -191,23 +177,9 @@ assert_eq!(report.status(), TerminalStatus::Ready);
 ```
 
 With the optional `tokio` feature on Unix, `TokioTerminalSession::request_terminal_status` writes
-the request, flushes output, waits for the matching report, and applies a caller-provided timeout:
-
-```rust,no_run
-use std::time::Duration;
-
-use qwertty::TokioTerminalSession;
-use qwertty::report::TerminalStatus;
-
-# async fn run() -> qwertty::Result<()> {
-let mut session = TokioTerminalSession::open()?;
-let report = session.request_terminal_status(Duration::from_secs(1)).await?;
-
-assert_eq!(report.status(), TerminalStatus::Ready);
-
-session.leave().await
-# }
-```
+the request, flushes output, waits for the matching report, and applies a caller-provided timeout.
+See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the runnable example,
+included with the `tokio` feature.
 
 Unrelated decoded events that arrive before the matching report remain available through
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet

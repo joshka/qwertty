@@ -1,5 +1,7 @@
 //! Reference documentation. Start with a topic:
 //!
+//! - [Why qwertty](why_qwertty) — what it adds over crossterm, termwiz, termion, and termina, and
+//!   where it deliberately does less.
 //! - [Terminal control](terminal_control) — building command bytes: cursor, screen, style, and OSC
 //!   helpers, plus the live query helpers under the `tokio` feature.
 //! - [Terminal device](terminal_device) — the low-level owner of a live terminal: raw/cooked mode,
@@ -33,6 +35,9 @@
 //! - [Bracketed paste](bracketed_paste) — telling pasted input apart from typed input.
 //! - [Kitty keyboard](kitty_keyboard) — progressive-enhancement key reporting and
 //!   verify-after-push.
+
+#[doc = include_str!("../docs/reference/why-qwertty.md")]
+pub mod why_qwertty {}
 
 #[doc = include_str!("../docs/reference/terminal-control.md")]
 // The two live query-helper examples from the control reference use `TokioTerminalSession`, so they

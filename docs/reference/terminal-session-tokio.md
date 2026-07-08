@@ -339,6 +339,72 @@ match session.next_event().await? {
 For a runnable Tokio example that suspends on a key and resumes on `SIGCONT`, see
 `examples/suspend_resume.rs` in the repository.
 
+## Detached Handoff
+
+Some applications hand the terminal to a foreground child rather than to the shell: an editor opened
+on `$EDITOR`, a pager, a subshell. `run_detached` is the sibling of suspend/resume for that case. It
+takes a synchronous `FnOnce` closure `f`, releases the terminal to whatever child `f` spawns and
+waits for, and reclaims it cleanly when `f` returns. The child is entirely the caller's business —
+`run_detached` runs it inside `f` and never inspects it — and whatever `f` returns is returned from
+`run_detached`, so the caller reads the child's `ExitStatus` directly.
+
+The closure is synchronous by design: the async session is quiescent for the whole handoff window,
+with no `.await` between releasing and reclaiming the terminal. That is what lets the child own a
+clean *blocking* terminal while the session sits idle, and it is fully usable again the moment `f`
+returns.
+
+Before `f`, `run_detached` restores the terminal to a clean state (replaying the mode ledger's
+resets while keeping the entries), disarms the panic-safe restore handle, and restores the original
+*blocking* fcntl flags on the shared open file description — a child does ordinary blocking reads on
+stdin, which would spuriously fail with `EAGAIN` if the session's non-blocking flag leaked onto the
+shared description. It then releases the async readiness registration entirely, holding the raw
+descriptor across the closure.
+
+After `f` returns, `run_detached` never trusts what the child left. It re-registers async readiness
+on the *same* descriptor with a fresh registration, re-asserts non-blocking, and re-enters raw mode
+and every recorded mode with the same bounded retry `resume` uses — a child like `vi` or `stty` may
+have left the terminal cooked, so the session re-asserts its own modes wholesale (FM-L9). Finally it
+queues a synthetic `Event::Resize` so the next `next_event` repaints at the current size, since the
+window may have changed while the child ran.
+
+### The Fresh Registration
+
+The reclaim takes a *fresh* async readiness registration rather than reusing the one held across the
+handoff, and this is a correctness requirement, not a convenience. The async reactor is
+edge-triggered: readiness arrives as a transition, notified once, after which the reactor waits for
+the next transition. While the synchronous child owns the terminal the runtime is not polling, yet
+the child freely reads and writes the descriptor — draining input the session had been notified
+about and generating new input it was not. A dormant registration kept across the handoff could
+therefore carry a stale readiness edge in either direction, so the first read after the handoff might
+miss input already waiting or spin on `WouldBlock` until a new edge arrives. Fully dropping the
+registration before the child and taking a fresh one after sidesteps the whole class: the new
+registration assesses the descriptor's current readiness, so the session resumes reading from the
+terminal's present state with no carried-over edge.
+
+```no_run
+use qwertty::{Event, Key, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+match session.next_event().await? {
+    Event::Key(key) if matches!(key.key(), Key::Char('e')) => {
+        // Hand the terminal to a synchronous child and reclaim it on return. The closure blocks;
+        // its `ExitStatus` is returned from `run_detached`.
+        let status = session
+            .run_detached(|| std::process::Command::new("vi").status())
+            .await?;
+        let _ = status;
+        // Back in raw mode with a fresh readiness registration and a synthetic resize queued.
+    }
+    _ => {}
+}
+# session.leave().await
+# }
+```
+
+For a runnable Tokio example that hands the terminal to `$EDITOR` and reclaims it, see
+`examples/editor_handoff.rs` in the repository.
+
 ## Query Routing Boundary
 
 Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal

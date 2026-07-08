@@ -206,7 +206,17 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// observed on either applies to both. Setting the dup non-blocking (required by [`AsyncFd`])
     /// therefore affects the shared description; [`original_flags`](Self::original_flags) captures
     /// what to put back on teardown.
-    readiness: AsyncFd<OwnedFd>,
+    ///
+    /// This is `Some` for the whole ordinary lifetime of the session: it is populated at
+    /// construction and every method reaches it through the `readiness` / `readiness_mut`
+    /// accessors, which expect `Some`. It goes momentarily `None`
+    /// only inside [`run_detached`](Self::run_detached), which pulls the registered [`OwnedFd`]
+    /// out of the [`AsyncFd`] (dropping the reactor registration) while a synchronous child
+    /// owns the terminal, then re-registers a fresh [`AsyncFd`] over the *same* fd before
+    /// returning. Holding the fd raw across the handoff — rather than keeping a dormant
+    /// registration — is what guarantees the post-handoff registration reads current readiness
+    /// with no stale edge-triggered notification carried over from before the child ran.
+    readiness: Option<AsyncFd<OwnedFd>>,
     /// The device status flags captured before this session set the descriptor non-blocking.
     ///
     /// Restored on every teardown path (leave and drop). This matters most for the
@@ -467,7 +477,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
 
         Ok(Self {
             session,
-            readiness,
+            readiness: Some(readiness),
             original_flags,
             decoder: SemanticDecoder::new(),
             correlator: Correlator::new(),
@@ -479,6 +489,30 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             stop_signal: StopSignal(Box::new(send_real_stop_signal)),
             esc_flush_timeout: Some(DEFAULT_ESC_FLUSH_TIMEOUT),
         })
+    }
+
+    /// Borrows the live Tokio readiness registration.
+    ///
+    /// The `readiness` field is `Some` for the whole ordinary lifetime of the session,
+    /// going `None` only for the brief handoff window inside
+    /// [`run_detached`](Self::run_detached), which never calls this. Every other method reaches
+    /// the registration through this accessor so the `Option` stays an internal detail rather than
+    /// rippling `expect`s across the read/write paths.
+    fn readiness(&self) -> &AsyncFd<OwnedFd> {
+        self.readiness.as_ref().expect(
+            "readiness registration is only absent inside run_detached, which never reads it",
+        )
+    }
+
+    /// Mutably borrows the live Tokio readiness registration.
+    ///
+    /// The mutable sibling of the `readiness` accessor, used by the read/write awaits that
+    /// need `&mut AsyncFd`. Same invariant: `Some` everywhere except the handoff window in
+    /// [`run_detached`](Self::run_detached).
+    fn readiness_mut(&mut self) -> &mut AsyncFd<OwnedFd> {
+        self.readiness.as_mut().expect(
+            "readiness registration is only absent inside run_detached, which never reads it",
+        )
     }
 
     /// Replaces the job-control stop-signal seam with a test stub (unit tests only).
@@ -571,7 +605,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         let mut bytes = bytes.as_ref();
         while !bytes.is_empty() {
             let mut guard = self
-                .readiness
+                .readiness_mut()
                 .writable()
                 .await
                 .map_err(terminal::Error::write_terminal)?;
@@ -631,7 +665,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
 
         loop {
             let mut guard = self
-                .readiness
+                .readiness_mut()
                 .readable()
                 .await
                 .map_err(terminal::Error::read_terminal)?;
@@ -1617,7 +1651,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     async fn read_events(&mut self) -> terminal::Result<Vec<Event>> {
         loop {
             let mut guard = self
-                .readiness
+                .readiness_mut()
                 .readable()
                 .await
                 .map_err(terminal::Error::read_terminal)?;
@@ -1808,6 +1842,151 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         Ok(())
     }
 
+    /// Hands the terminal to a synchronous child, runs it, and reclaims the terminal cleanly
+    /// afterward — the `$EDITOR`/pager/subshell handoff (design 01 §4, playbook M6-S2).
+    ///
+    /// This is the detached-handoff sibling of [`suspend`](Self::suspend)/[`resume`](Self::resume).
+    /// Where suspend/resume drop to the *shell* on `SIGTSTP` and come back on `SIGCONT`, this hands
+    /// the terminal to a child process the caller spawns and waits for **inside `f`**, with no
+    /// job-control stop. `f` is a synchronous `FnOnce`: the async session is quiescent for the
+    /// whole handoff window (there is no `.await` between releasing and reclaiming the
+    /// terminal), so the child owns a clean blocking terminal and this session is fully usable
+    /// again on return.
+    ///
+    /// # What `f` is
+    ///
+    /// The child is the caller's business. A typical `f` is
+    /// `|| std::process::Command::new(editor).status()`, or launching a pager or subshell —
+    /// anything that blocks the current thread while a foreground child owns the terminal.
+    /// Whatever `f` returns (`R`) is returned from `run_detached` on success, so the caller
+    /// inspects the child's `ExitStatus` (or any other result) directly.
+    ///
+    /// # Steps
+    ///
+    /// **Before `f` — release the terminal to the child:**
+    ///
+    /// 1. **Ledger undo, entries kept.** Replays the mode ledger's resets so the child sees a clean
+    ///    terminal and **disarms** the panic-safe restore handle, exactly as
+    ///    [`suspend`](Self::suspend) does (the re-entrant [`TerminalSession::leave`]). The entries
+    ///    are kept so the terminal can be re-entered afterward.
+    /// 2. **Restore the original blocking flags.** Puts the construction-time fcntl status flags
+    ///    back on the shared open file description, clearing the session's `O_NONBLOCK`. The child
+    ///    does ordinary *blocking* reads on stdin; without this its reads would spuriously hit
+    ///    `EAGAIN` from the non-blocking flag the session set on the shared description (FM-L
+    ///    class).
+    /// 3. **Release the reactor registration.** Pulls the registered [`OwnedFd`] out of the
+    ///    [`AsyncFd`] ([`AsyncFd::into_inner`]), dropping the Tokio readiness registration entirely
+    ///    and holding the fd raw across the closure.
+    ///
+    /// **Run `f()`** — call the closure and capture its `R`. It blocks; the caller's child runs
+    /// here.
+    ///
+    /// **After `f` returns — reclaim the terminal, never trusting what the child left:**
+    ///
+    /// 4. **Re-register.** Takes a **fresh** [`AsyncFd`] over the *same* fd ([`AsyncFd::try_new`]).
+    ///    Because the registration was fully released in step 3 and re-taken here, the reactor
+    ///    reads the descriptor's *current* readiness with no stale edge-triggered notification
+    ///    carried over from before the child ran — see below.
+    /// 5. **Termios + flags resync.** Re-asserts `O_NONBLOCK` on the readiness fd (the same
+    ///    `reassert_nonblocking` step [`resume`](Self::resume) uses) and re-enters the kept ledger
+    ///    with the same bounded retry through [`TerminalSession::enter`], which re-enters raw mode,
+    ///    re-applies every recorded mode, and **re-arms** the restore handle. This never trusts the
+    ///    termios the child left: a child like `vi` or `stty` may have left the terminal cooked,
+    ///    with wrong flags, or otherwise scrambled (FM-L9), so the session re-asserts its own modes
+    ///    wholesale.
+    /// 6. **Synthetic resize.** Queues an [`Event::Resize`] — the same synthetic-resize step
+    ///    [`resume`](Self::resume) uses — so the next [`next_event`](Self::next_event) reports the
+    ///    current geometry — the window may have been resized while the child owned it.
+    ///
+    /// Then it returns `Ok(f_result)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called outside a Tokio runtime: reclaiming the terminal re-registers the fd with
+    /// the current runtime's reactor ([`AsyncFd::try_new`]), which requires an active runtime, the
+    /// same requirement as [`open`](Self::open).
+    ///
+    /// # Why a fresh registration (the edge-triggered readiness concern)
+    ///
+    /// Tokio's [`AsyncFd`] registers the descriptor with an edge-triggered reactor (kqueue/epoll).
+    /// Readiness is delivered as *edges*: a transition to readable/writable notifies once, and the
+    /// reactor then waits for the next transition. While the synchronous child owns the terminal
+    /// the runtime is not polling this fd, yet the child freely reads and writes it — draining
+    /// input the session had been notified about, and generating new input the session was not.
+    /// If the session kept a dormant registration across the handoff, the reactor's cached
+    /// readiness could be stale in either direction: an edge that fired (or was consumed by the
+    /// child) before the child ran is not reliably re-delivered, so the first post-handoff
+    /// `readable()` could either miss input that is already waiting or believe the fd is ready
+    /// and then spin on `WouldBlock` until a *new* edge arrives — a wedged input path. Clearing
+    /// the guard's readiness (`clear_ready`) cannot fix this: it clears this session's view,
+    /// not a missed kernel-level edge. Fully dropping the registration (step 3) and taking a
+    /// fresh one (step 4) sidesteps the whole class: the new registration performs a fresh
+    /// readiness assessment on the same fd, so the session resumes reading from the terminal's
+    /// *current* state with no carried-over edge. The `O_NONBLOCK` restore in step 2 and
+    /// re-assert in step 5 keep the child's blocking reads and the reactor's non-blocking
+    /// requirement each correct on their own side of the handoff.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ledger undo fails, if the fresh [`AsyncFd`] cannot be registered
+    /// (surfaced as an open-terminal error, matching construction), if non-blocking cannot be
+    /// re-asserted, if the bounded-retry re-enter never succeeds, or if the current size cannot be
+    /// read for the synthetic resize. When re-registration fails the terminal has still been
+    /// restored to a clean blocking state by steps 1 and 2, so the failure leaves a usable terminal
+    /// for the caller even though this session can no longer drive it.
+    pub async fn run_detached<R>(&mut self, f: impl FnOnce() -> R) -> terminal::Result<R> {
+        // Step 1: undo the terminal state the re-entrant way (keeps the ledger entries) and disarm
+        // the restore handle — exactly what `suspend` does. `enter` in step 5 replays the kept
+        // entries and re-arms the handle.
+        self.session.leave()?;
+
+        // Step 2: restore the original (blocking) fcntl flags on the shared description so the
+        // child's blocking stdin reads do not hit EAGAIN from the session's O_NONBLOCK. Done while
+        // the readiness registration is still present, so `restore_flags` finds it.
+        self.restore_flags();
+
+        // Step 3: release the reactor registration by pulling the OwnedFd out of the AsyncFd, and
+        // hold it raw across the closure. `readiness` is guaranteed `Some` here: a session with no
+        // pollable fd is rejected at construction, so the only way it is ever `None` is inside this
+        // very window. Dropping the AsyncFd (via into_inner) tears down the edge-triggered
+        // registration so step 4 can take a guaranteed-fresh one.
+        let owned = self
+            .readiness
+            .take()
+            .expect("readiness is Some outside the run_detached window")
+            .into_inner();
+
+        // Run the child. It blocks; the caller spawns/waits their foreground process here. No
+        // `.await` runs while the registration is released, so the session stays quiescent and no
+        // read/write path can observe the `None`.
+        let result = f();
+
+        // Step 4: re-register a FRESH AsyncFd over the SAME fd. A fresh registration reads the
+        // descriptor's current readiness with no stale edge carried over from before the child ran
+        // (see the method docs' edge-triggered discussion). On failure the fd is dropped with the
+        // error's parts; the terminal is already clean (steps 1-2), so the caller keeps a usable
+        // terminal even though this session cannot continue.
+        let readiness = AsyncFd::try_new(owned).map_err(|err| {
+            let (_owned, err) = err.into_parts();
+            terminal::Error::open_terminal(err)
+        })?;
+        self.readiness = Some(readiness);
+
+        // Step 5: flags + termios resync. Re-assert non-blocking on the fresh registration (AsyncFd
+        // requires it), then re-enter the kept ledger with the bounded retry — re-entering raw
+        // mode, re-applying every recorded mode, and re-arming the restore handle. Never
+        // trust the termios the child left (FM-L9): the re-enter re-asserts the session's
+        // own modes wholesale.
+        self.reassert_nonblocking()?;
+        self.reenter_with_retry().await?;
+
+        // Step 6: queue a synthetic resize so the app repaints at whatever size the terminal is now
+        // (the window may have been resized while the child owned it).
+        self.queue_synthetic_resize()?;
+
+        Ok(result)
+    }
+
     /// Re-enters the mode ledger with a bounded retry, tolerating the shell racing for the
     /// terminal.
     ///
@@ -1844,7 +2023,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// current flags and sets non-blocking on top, so no other status flag the shell may have set
     /// is disturbed.
     fn reassert_nonblocking(&self) -> terminal::Result<()> {
-        let fd = self.readiness.get_ref();
+        let fd = self.readiness().get_ref();
         let flags = fcntl_getfl(fd)
             .map_err(io::Error::from)
             .map_err(terminal::Error::set_terminal_mode)?;
@@ -1861,7 +2040,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// output the session still owes is untouched.
     fn flush_pending_input(&self) -> terminal::Result<()> {
         rustix::termios::tcflush(
-            self.readiness.get_ref(),
+            self.readiness().get_ref(),
             rustix::termios::QueueSelector::IFlush,
         )
         .map_err(io::Error::from)
@@ -1941,8 +2120,13 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// flags on either restores them for both. This runs before the session teardown and again from
     /// drop, so every exit path puts the flags back (idempotent; a redundant set is harmless).
     fn restore_flags(&self) {
-        // Restore on the shared description via the readiness dup, which is guaranteed open here.
-        _ = fcntl_setfl(self.readiness.get_ref(), self.original_flags);
+        // Restore on the shared description via the readiness dup. Every caller of this method
+        // (leave, drop) holds a registered readiness, so it is `Some` here; the one path that owns
+        // the dup raw — `run_detached` during its handoff window — restores the flags on the held
+        // fd directly rather than through this accessor, so `None` here is a no-op by construction.
+        if let Some(readiness) = self.readiness.as_ref() {
+            _ = fcntl_setfl(readiness.get_ref(), self.original_flags);
+        }
     }
 }
 
@@ -2453,8 +2637,8 @@ mod tests {
 
         // Clear the non-blocking flag on the shared description, as a shell would after SIGCONT, so
         // the re-assert has something to fix.
-        let flags = fcntl_getfl(session.readiness.get_ref()).expect("getfl");
-        fcntl_setfl(session.readiness.get_ref(), flags & !OFlags::NONBLOCK)
+        let flags = fcntl_getfl(session.readiness().get_ref()).expect("getfl");
+        fcntl_setfl(session.readiness().get_ref(), flags & !OFlags::NONBLOCK)
             .expect("clear nonblock");
 
         peer.set_size(TerminalSize::new(132, 43));
@@ -2468,7 +2652,7 @@ mod tests {
         );
 
         // Non-blocking was re-asserted on the readiness fd (AsyncFd requires it).
-        let flags = fcntl_getfl(session.readiness.get_ref()).expect("getfl after resume");
+        let flags = fcntl_getfl(session.readiness().get_ref()).expect("getfl after resume");
         assert!(
             flags.contains(OFlags::NONBLOCK),
             "resume must re-assert O_NONBLOCK on the readiness fd",
@@ -2575,6 +2759,187 @@ mod tests {
             event,
             Event::Key(KeyEvent::new(Key::Char('k')).with_text('k')),
             "without flush, typeahead typed at the shell survives",
+        );
+    }
+
+    // --- detached handoff lifecycle (M6-S2) ------------------------------------------------------
+    //
+    // These drive `run_detached` over the same headless `FakeDevice` (and one PTY-backed session
+    // for the termios resync, which is only observable on a real tty). No real editor/child is
+    // ever spawned: the "child" is a synchronous closure that scrambles terminal state the way
+    // `vi`/`stty` would, so the reclaim mechanics are exercised without a subprocess. A real
+    // `$EDITOR` round-trip is owed to the attended/manual checklist (playbook M6-S2) — it
+    // cannot be shown headlessly.
+
+    #[tokio::test]
+    async fn run_detached_resets_before_the_child_and_reapplies_after_returning_r() {
+        let (mut session, peer, _calls) = fake_session_with_stub();
+
+        // Enable a byte-based mode so the ledger has an observable reset/enable pair on the wire.
+        session
+            .enable_mouse(MouseMode::Normal)
+            .await
+            .expect("mouse");
+        session.flush().await.expect("flush");
+
+        // The closure is the synchronous "child". It captures the terminal peer so it can (1) prove
+        // the ledger reset was written *before* it ran (the child sees a clean terminal), and (2)
+        // simulate a window resize during the handoff. It returns the peer back out alongside a
+        // sentinel `R`, so the test both recovers the peer and checks the `R` passthrough.
+        let sentinel = 1234u32;
+        let (mut peer, returned) = session
+            .run_detached(move || {
+                let mut peer = peer;
+                // Drain the enable bytes and the reset the leave in step 1 just wrote. The reset
+                // for Normal mouse mode (CSI ? 1000 l) must be present: the child
+                // got a clean terminal.
+                let before = peer.output().expect("drain output before child");
+                assert!(
+                    before.windows(8).any(|w| w == b"\x1b[?1000l"),
+                    "run_detached wrote the mouse reset before the child ran, got {before:?}",
+                );
+                // The window changed size while the child owned the terminal.
+                peer.set_size(TerminalSize::new(150, 50));
+                (peer, sentinel)
+            })
+            .await
+            .expect("run_detached");
+
+        // The closure's `R` is returned verbatim.
+        assert_eq!(
+            returned, sentinel,
+            "run_detached returns the closure's value"
+        );
+
+        // After returning, the ledger was re-entered: the mouse enable bytes are back on the wire.
+        let after = peer.output().expect("drain output after reclaim");
+        assert!(
+            after.windows(8).any(|w| w == b"\x1b[?1000h"),
+            "run_detached re-applied the mouse enable after the child, got {after:?}",
+        );
+
+        // Non-blocking was re-asserted on the fresh readiness registration (AsyncFd requires it).
+        let flags = fcntl_getfl(session.readiness().get_ref()).expect("getfl after reclaim");
+        assert!(
+            flags.contains(OFlags::NONBLOCK),
+            "run_detached must re-assert O_NONBLOCK on the fresh readiness fd",
+        );
+
+        // A synthetic resize carrying the current size is queued for next_event.
+        let event = session.next_event().await.expect("synthetic resize");
+        let resize = event.resize_event().expect("the queued event is a resize");
+        assert_eq!(resize.cells(), TerminalSize::new(150, 50));
+        assert_eq!(resize.pixels(), None, "a handoff resize carries no pixels");
+    }
+
+    #[tokio::test]
+    async fn run_detached_leaves_the_session_readable_afterward() {
+        // The session must be fully usable once the child returns: a fresh readiness registration
+        // is taken over the same fd, so input fed after the handoff decodes normally.
+        let (mut session, mut peer, _calls) = fake_session_with_stub();
+
+        session
+            .run_detached(|| {})
+            .await
+            .expect("run_detached with a no-op child");
+
+        // Drain the synthetic resize the reclaim queued.
+        let event = session.next_event().await.expect("synthetic resize first");
+        assert!(event.resize_event().is_some(), "resize is delivered first");
+
+        // Input arriving after the handoff is read through the fresh registration.
+        peer.feed_input(b"a").expect("feed post-handoff input");
+        let event = session.next_event().await.expect("post-handoff input");
+        assert_eq!(
+            event,
+            Event::Key(KeyEvent::new(Key::Char('a')).with_text('a')),
+            "the session reads correctly through the fresh readiness registration",
+        );
+    }
+
+    #[tokio::test]
+    async fn run_detached_restores_cooked_mode_for_a_child_that_scrambles_termios() {
+        use rustix::termios::{LocalModes, tcgetattr};
+
+        // FM-L9: a child like `vi`/`stty` can leave the terminal in cooked mode. The reclaim must
+        // resync termios wholesale (re-enter raw), not trust what the child left. This is only
+        // observable on a real tty, so it runs over a PTY; the child closure directly forces cooked
+        // mode on the slave to stand in for `stty sane`.
+        let Some((_master, slave_path, sized)) = open_test_pty_for_suspend() else {
+            return;
+        };
+        let mut session =
+            TokioTerminalSession::open_path(slave_path).expect("open PTY-backed session");
+
+        // Raw mode is entered at construction: ICANON/ECHO are cleared on the slave now.
+        let raw = tcgetattr(&sized).expect("tcgetattr before handoff");
+        assert!(
+            !raw.local_modes.contains(LocalModes::ICANON),
+            "session entered raw mode at construction (ICANON cleared)",
+        );
+
+        session
+            .run_detached(|| {
+                // The "child" scrambles termios back to cooked mode, as `vi` or `stty sane` would.
+                let mut attrs = tcgetattr(&sized).expect("child tcgetattr");
+                attrs.local_modes |= LocalModes::ICANON | LocalModes::ECHO;
+                rustix::termios::tcsetattr(&sized, rustix::termios::OptionalActions::Now, &attrs)
+                    .expect("child forces cooked mode");
+                // Confirm the child really left the terminal cooked before reclaim runs.
+                let cooked = tcgetattr(&sized).expect("child tcgetattr after set");
+                assert!(
+                    cooked.local_modes.contains(LocalModes::ICANON),
+                    "the child left the terminal in cooked mode",
+                );
+            })
+            .await
+            .expect("run_detached resyncs termios");
+
+        // FM-L9 proven: after reclaim the terminal is back in the session's raw state, not the
+        // cooked state the child left. The reclaim re-entered raw mode wholesale.
+        let after = tcgetattr(&sized).expect("tcgetattr after reclaim");
+        assert!(
+            !after.local_modes.contains(LocalModes::ICANON),
+            "run_detached must resync termios back to raw mode (FM-L9), ICANON must be cleared",
+        );
+        assert!(
+            !after.local_modes.contains(LocalModes::ECHO),
+            "run_detached must resync termios back to raw mode (FM-L9), ECHO must be cleared",
+        );
+    }
+
+    #[tokio::test]
+    async fn run_detached_disarms_during_the_child_and_rearms_after() {
+        // The restore-handle disarm/re-arm is only observable on a live-terminal session (a
+        // FakeDevice session carries no restore handle by design), so this uses a PTY-backed
+        // session. Mirrors the suspend/resume disarm/re-arm test.
+        let Some((_master, slave_path, _sized)) = open_test_pty_for_suspend() else {
+            return;
+        };
+        let mut session =
+            TokioTerminalSession::open_path(slave_path).expect("open PTY-backed session");
+
+        let handle = session.restore_handle();
+        // During the child the handle must be disarmed: the emergency hook must not fire while the
+        // child owns the terminal. Assert it from inside the closure.
+        let handle_for_child = session.restore_handle();
+        session
+            .run_detached(move || {
+                assert!(
+                    !handle_for_child.restore(),
+                    "run_detached must disarm the restore handle before the child runs",
+                );
+                // `restore()` disarmed it as a side effect of the probe; re-arm so the reclaim's
+                // re-arm below is the observable transition, not this probe.
+                handle_for_child.arm();
+            })
+            .await
+            .expect("run_detached");
+
+        // After reclaim the handle is armed again: panic-safe teardown is live once more.
+        assert!(
+            handle.restore(),
+            "run_detached must re-arm the restore handle so panic-safe teardown is live again",
         );
     }
 

@@ -104,6 +104,12 @@ point without scanning the repository tree.
   fd's non-blocking flag, optionally `tcflush` stale input via the `flush_input` parameter, and
   queue a synthetic `Event::Resize`); qwertty installs no signal handler, so the app owns the
   `SIGTSTP`/`SIGCONT` wiring (design 01 §4).
+- `editor_handoff.rs`: hand the terminal to `$EDITOR` (a pager, a subshell — any synchronous child)
+  and reclaim it with `TokioTerminalSession::run_detached` — restore a clean blocking terminal and
+  disarm the panic-safe handle before the child, then re-enter raw mode (resyncing termios the child
+  may have left cooked, FM-L9), re-register async readiness on the same fd, and queue a synthetic
+  `Event::Resize` after; the closure is a synchronous `FnOnce` whose return value (the child's
+  `ExitStatus`) is returned from `run_detached` (design 01 §4).
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to

@@ -43,6 +43,11 @@ loom:
 markdown:
     markdownlint-cli2 "**/*.md"
 
+# Spell-check the tree with typos (config in typos.toml). Pure, fast, and a plain `cargo install
+# typos-cli` away, so it joins the `check` chain. CI installs it via taiki-e/install-action.
+typos:
+    typos
+
 # Validate the sequence database: id format, unique ids, ref resolution, fixture existence and
 # header/direction agreement, replay class, reply linkage, non-empty descriptions. Pure and fast,
 # so it joins the `check` chain.
@@ -102,4 +107,58 @@ check-cross:
     cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
     cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 
-check: metadata fmt-check test loom clippy doc markdown qdb-validate qdb-generate-check
+# Supply-chain and dependency-hygiene recipes mirroring the new CI jobs. Each needs a cargo plugin
+# that is not guaranteed locally, so — like `verify-emulators` and `capture` — they skip cleanly
+# with an install hint when the tool is absent rather than failing the run. CI installs the tools
+# via taiki-e/install-action, so there they always execute. Kept OUT of the `check` chain for the
+# same reason; run them individually or via `check-supply-chain`.
+
+# License / advisory / bans / sources policy (deny.toml). Install: cargo install cargo-deny.
+deny:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-deny >/dev/null; then
+        echo 'cargo-deny not installed; skipping (cargo install cargo-deny)'; exit 0
+    fi
+    cargo deny check advisories
+    cargo deny check bans licenses sources
+
+# Gate the public API against breaking changes vs the published baseline. qwertty is pre-publish, so
+# with no baseline this is a no-op today. Install: cargo install cargo-semver-checks.
+semver-checks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-semver-checks >/dev/null; then
+        echo 'cargo-semver-checks not installed; skipping (cargo install cargo-semver-checks)'; exit 0
+    fi
+    # Pre-publish tolerance: no crates.io baseline yet means "not found in registry"; treat that
+    # single case as a skip. Any real breaking change (once a baseline exists) still fails.
+    output=$(cargo semver-checks check-release -p qwertty 2>&1) && status=0 || status=$?
+    echo "$output"
+    if [ "$status" -ne 0 ] && echo "$output" | grep -q "not found in registry"; then
+        echo 'qwertty not yet published; no semver baseline. Skipping.'; exit 0
+    fi
+    exit "$status"
+
+# Verify dependency lower bounds are accurate. Install: cargo install cargo-minimal-versions cargo-hack.
+minimal-versions:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-minimal-versions >/dev/null; then
+        echo 'cargo-minimal-versions not installed; skipping (cargo install cargo-minimal-versions cargo-hack)'; exit 0
+    fi
+    cargo minimal-versions check --direct --workspace --all-features
+
+# Detect unused dependencies. Install: cargo install cargo-machete.
+machete:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-machete >/dev/null; then
+        echo 'cargo-machete not installed; skipping (cargo install cargo-machete)'; exit 0
+    fi
+    cargo machete
+
+# Run every supply-chain / dependency-hygiene recipe. Each skips cleanly if its tool is absent.
+check-supply-chain: deny semver-checks minimal-versions machete
+
+check: metadata fmt-check typos test loom clippy doc markdown qdb-validate qdb-generate-check

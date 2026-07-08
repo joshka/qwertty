@@ -1,0 +1,24 @@
+[files]
+extend-exclude = [
+    "**/CHANGELOG.md",
+    "target/**",
+    # Fuzz corpora are captured random/near-text byte inputs, not prose; spell-checking them is
+    # meaningless and produces thousands of false positives.
+    "fuzz/corpus/**",
+]
+
+[default.extend-words]
+qwertty = "qwertty"
+# `ratatui` is the project this library shadows in its docs; typos otherwise "corrects" it to
+# "ratatouille". Both cases appear in prose.
+ratatui = "ratatui"
+Ratatui = "Ratatui"
+# Terminal emulator and protocol names that appear throughout the docs and fixtures.
+betamax = "betamax"
+ghostty = "ghostty"
+kitty = "kitty"
+xterm = "xterm"
+# `fo` is a literal RFC 4648 base64 test vector (`encode_base64(b"fo")`), not a typo.
+fo = "fo"
+# `BROWSEABLE` is a deliberate uppercase rule-name token in the agent rules docs.
+BROWSEABLE = "BROWSEABLE"

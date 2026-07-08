@@ -6,132 +6,325 @@ on:
     branches:
       - main
 
+# Ensure the workflow only runs once per ref; new pushes to a PR cancel the in-flight run.
+# See https://docs.github.com/en/actions/using-jobs/using-concurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Set the token permissions to the minimum and grant per-job what is needed.
+# See https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions
+permissions: {}
+
 jobs:
+  # Fast lint jobs run first so simple failures (formatting, typos, clippy, dependency policy)
+  # surface before the heavier test/cross matrix.
+
   metadata:
+    name: Metadata
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
       - name: Cargo metadata
         run: cargo metadata --format-version 1 --no-deps
 
   fmt:
+    name: Format
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install nightly rustfmt
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          persist-credentials: false
+      - name: Install nightly rustfmt
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
           components: rustfmt
-
-      - name: Format
+      - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
-  test:
+  typos:
+    name: Typos
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install typos
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: typos-cli
+      - name: Check spelling
+        run: typos
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Clippy (workspace, all features)
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+      # Default-feature clippy. The all-targets, all-features pass above compiles the library with
+      # Tokio and with test cfg, hiding dead code that only a default-feature, non-test build would
+      # surface. This lints the library exactly as a default-feature dependency sees it.
+      - name: Clippy (default features)
+        run: cargo clippy -p qwertty -- -D warnings
 
-      - name: Test
+  doc:
+    name: Docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Docs (workspace, all features)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+      # Default-feature docs. The all-features run above hides default-feature doc breakage (for
+      # example an intra-doc link that only resolves under `tokio`). This enforces that `cargo doc`
+      # is clean for a default-feature consumer of the crate.
+      - name: Docs (default features)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc -p qwertty --no-deps
+
+  markdown:
+    name: Markdown
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install markdownlint
+        run: npm install --global markdownlint-cli2
+      - name: Lint Markdown
+        run: markdownlint-cli2 "**/*.md"
+
+  # Check for disallowed dependencies due to license / security issues.
+  # See <https://github.com/EmbarkStudios/cargo-deny>
+  cargo-deny:
+    name: Dependency check (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-deny
+      - name: Run cargo-deny
+        run: cargo deny check ${{ matrix.checks }}
+
+  # Check for unused dependencies. See <https://github.com/bnjbvr/cargo-machete>
+  cargo-machete:
+    name: Unused dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Run cargo-machete
+        uses: bnjbvr/cargo-machete@ac30a525c0a8d163a92d727b3ff079ee3f6ecb08 # v0.9.2
+
+  # Check that dependency lower bounds are accurate.
+  minimal-versions:
+    name: Minimal versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - name: Install cargo-minimal-versions
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-minimal-versions,cargo-hack
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check minimal versions
+        run: cargo minimal-versions check --direct --workspace --all-features
+
+  # Gate PRs against unintended breaking changes in the public API. qwertty is at 0.1.0; once the
+  # first version is published, cargo-semver-checks compares the PR against that crates.io baseline.
+  # Until then it is a no-op with no baseline, so it never blocks the pre-publish period.
+  semver-checks:
+    name: Semver checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-semver-checks
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # Pre-publish tolerance: with no crates.io baseline yet, cargo-semver-checks errors with
+      # "not found in registry". Treat that one case as a skip so the gate is green until the first
+      # publish, after which the real baseline comparison kicks in automatically. All other
+      # failures (an actual breaking change once a baseline exists) still fail the job.
+      - name: Check semver
+        run: |
+          output=$(cargo semver-checks check-release -p qwertty 2>&1) && status=0 || status=$?
+          echo "$output"
+          if [ "$status" -ne 0 ] && echo "$output" | grep -q "not found in registry"; then
+            echo "::notice::qwertty is not yet published; no semver baseline. Skipping."
+            exit 0
+          fi
+          exit "$status"
+
+  # Build and test on the minimum supported Rust version. Policy is stable N-1 (one release behind
+  # current stable); that toolchain is pinned in Cargo.toml's `rust-version` and duplicated here.
+  # Bump both together when the stable-N-1 target advances.
+  msrv:
+    name: MSRV (Rust 1.85)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: "1.85"
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build on MSRV
+        run: cargo build --workspace --all-features
+      - name: Test on MSRV
         run: cargo test --workspace --all-features
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Test
+        run: cargo test --workspace --all-features
       - name: Test examples
         run: cargo test --examples --workspace --all-features
-
       # Default-feature doctests. The all-features run hides reference `rust` fences that only
       # compile without the Tokio session, so a Tokio-only API in a default-feature doctest would
-      # break a real `cargo test -p qwertty` while passing above. This step enforces that they pass.
+      # break a real `cargo test -p qwertty` while passing above. This step enforces they pass.
       - name: Doctests (default features)
         run: cargo test -p qwertty --doc
-
       - name: Database validate
         run: cargo run -p qdb -- validate
-
       - name: Database caniuse matrix up to date
         run: cargo run -p qdb -- generate --check matrix
-
       - name: Loom models
         run: cargo test --lib loom_
         env:
           RUSTFLAGS: --cfg loom
 
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
-
-  doc:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Docs
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-
-      # Default-feature docs. The all-features run above hides doc breakage that only affects a
-      # default build (for example an intra-doc link that only resolves under `tokio`), the same
-      # gate-hole class already closed for default clippy and default doctests. This step enforces
-      # that `cargo doc` is clean for a default-feature consumer of the crate.
-      - name: Docs (default features)
-        run: RUSTDOCFLAGS="-D warnings" cargo doc -p qwertty --no-deps
-
-  markdown:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install markdownlint
-        run: npm install --global markdownlint-cli2
-
-      - name: Markdown
-        run: markdownlint-cli2 "**/*.md"
-
+  # Each syntax-layer invariant gets a short nightly cargo-fuzz smoke run per push; deep runs stay
+  # local or scheduled.
   fuzz:
+    name: Fuzz
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@nightly
-
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
-
-      # Each syntax-layer invariant gets a short run per push; deep runs stay local or scheduled.
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-fuzz
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Fuzz reconstruction
         run: cargo +nightly fuzz run syntax_reconstruction -- -max_total_time=30 -rss_limit_mb=1024
-
       - name: Fuzz split-equivalence
         run: cargo +nightly fuzz run syntax_split_equivalence -- -max_total_time=30 -rss_limit_mb=1024
-
       - name: Fuzz no-panic bounded
         run: cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
-
       - name: Fuzz correlator properties
         run: cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
 
@@ -140,19 +333,24 @@ jobs:
   # cfg-gated out here; what remains is the whole cross-platform core, executed — not just
   # cross-compiled — so decode/vocabulary logic is proven on Windows on every push.
   windows:
+    name: Windows
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
           components: clippy
-
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Test (platform-neutral core)
         run: cargo test -p qwertty
-
       - name: Clippy
         run: cargo clippy -p qwertty --all-targets -- -D warnings
 
@@ -160,31 +358,43 @@ jobs:
   # catches any Unix type leaking into the platform-neutral surface before it reaches a real
   # Windows build (design 07: the encode/decode/database-consuming layers build everywhere).
   cross:
+    name: Cross
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
           targets: x86_64-pc-windows-msvc, wasm32-unknown-unknown
-
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check Windows target
         run: cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
-
       - name: Check wasm target
         run: cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 
   required:
+    name: Required
     runs-on: ubuntu-latest
     needs:
       - metadata
       - fmt
-      - test
+      - typos
       - clippy
       - doc
       - markdown
+      - cargo-deny
+      - cargo-machete
+      - minimal-versions
+      - semver-checks
+      - msrv
+      - test
       - fuzz
       - windows
       - cross

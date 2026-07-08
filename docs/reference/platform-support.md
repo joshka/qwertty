@@ -8,7 +8,7 @@ platforms, but live terminal operations that are not implemented yet return
 
 This page is the durable place to understand that boundary without reading implementation files.
 The corresponding maintainer-facing decision is
-[ADR 0013: Platform Support Policy](../adr/0013-platform-support-policy.md).
+[ADR 0013: Platform Support Policy](https://github.com/joshka/qwertty/blob/main/docs/adr/0013-platform-support-policy.md).
 
 ## What Works Today
 
@@ -103,7 +103,8 @@ that the type surface stays honest on those targets, not evidence of live termin
 
 ## Related References
 
-- [Terminal Device Reference](crate::docs#terminal-device-reference)
-- [Terminal Session Reference](crate::docs#terminal-session-reference)
-- [Terminal Input Reference](crate::docs#terminal-input-reference)
-- [Tokio Input Ownership And Query Handoff](crate::docs#tokio-input-ownership-and-query-handoff)
+- [Terminal Device](crate::docs::terminal_device)
+- [Terminal Session](crate::docs::terminal_session)
+- [Terminal Input](crate::docs::terminal_input)
+- Tokio Input Ownership And Query Handoff (`crate::docs::tokio_input_ownership`, with the `tokio`
+  feature enabled)

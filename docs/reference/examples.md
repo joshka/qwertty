@@ -13,22 +13,22 @@ point without scanning the repository tree.
   truecolor colors, an underline substyle, and underline color — then reset with
   `commands::style::reset_all`, all without opening a terminal.
 - `osc_families.rs`: build ordered OSC command bytes with `CommandBuffer` — a sanitized window
-  title (`commands::osc::set_title`, stripping an embedded bidi-override character per FM-X3), an
-  OSC 8 hyperlink open/close pair, and an OSC 52 clipboard write (`commands::osc::set_clipboard`,
-  documented as an FM-X4 exfiltration surface a session must policy-gate) — all without opening a
+  title (`commands::osc::set_title`, stripping an embedded bidi-override character), an OSC 8
+  hyperlink open/close pair, and an OSC 52 clipboard write (`commands::osc::set_clipboard`,
+  documented as an exfiltration surface a session must policy-gate) — all without opening a
   terminal.
 - `scroll_region.rs`: build a synchronized-output frame (`commands::screen::begin_synchronized_update`/
   `end_synchronized_update`, mode 2026) around a scroll-region insert-and-scroll sequence
   (`set_scroll_region`, `insert_lines`, `scroll_up`, `reset_scroll_region`, DECSTBM/IL/SU) with
-  `CommandBuffer`, all without opening a terminal — and documents why neither mode 2026 (FM-V4) nor
-  DECSTBM (FM-V2) emission is gated at this layer.
+  `CommandBuffer`, all without opening a terminal — and documents why neither mode 2026 nor DECSTBM
+  emission is gated at this layer.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore
   cooked mode on leave.
 - `alternate_screen.rs`: enter the alternate screen (`enter_alternate_screen`, `CSI ? 1049 h` plus
-  an explicit clear — R-OUT-3) and hide the cursor (`hide_cursor`), write a frame, then `leave` to
-  restore the primary screen and show the cursor again through the mode ledger.
+  an explicit clear) and hide the cursor (`hide_cursor`), write a frame, then `leave` to restore the
+  primary screen and show the cursor again through the mode ledger.
 - `panic_safe_restore.rs`: install a panic hook with `RestoreHandle` so a panic restores the
   terminal before the backtrace prints.
 - `session_cycles.rs`: cycle the re-entrant session enter/leave lifecycle headless, the way a
@@ -37,7 +37,7 @@ point without scanning the repository tree.
 - `clipboard_policy.rs`: gate an OSC 52 clipboard write behind the session security policy
   (`TerminalSession::set_clipboard`) headless over a `FakeDevice` — a `trusted()` policy allows the
   write, a hand-built restricted policy with clipboard write off denies it, and the denial is a
-  typed `Error::PolicyDenied` naming the gate (FM-X4).
+  typed `Error::PolicyDenied` naming the gate.
 - `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
   input and asserting output without opening a terminal.
 
@@ -57,19 +57,18 @@ point without scanning the repository tree.
   (no `tokio`). Opens a `TerminalSession`, writes a single `CSI 6 n` cursor-position probe, waits
   for the session fd to become readable with `rustix::event::poll` under a bounded 150 ms budget,
   reads the reply, and parses it through the sans-io `SyntaxParser` and
-  `report::CursorPositionReport`. A non-answering terminal times out cleanly and reports the FM-C4
+  `report::CursorPositionReport`. A non-answering terminal times out cleanly and reports the
   *unknown* case rather than hanging; a `RestoreHandle` panic hook plus drop-time `leave` guarantee
-  cooked-mode restoration on every exit path. This is the "second consumer" the sans-io decode split
-  (design 04) was built for: the same decode core the async session uses, driven by a hand-rolled
-  synchronous poll loop.
+  cooked-mode restoration on every exit path. This is a second, no-async consumer of the same
+  decode core the async session uses, driven by a hand-rolled synchronous poll loop.
 - `sync_cursor_query.rs`: the same round-trip through the typed convenience
   `TerminalSession::request_cursor_position` instead of a hand-rolled loop. One call registers the
   query with the sans-io correlator, writes `CSI 6 n`, and drives a blocking poll/read/decode loop
   until the reply completes, returning `Ok(Some(report))` on an answer, `Ok(None)` on timeout (the
-  FM-C4 *unknown* case), and `Err(..)` only on a genuine I/O failure. Typeahead the user sent before
-  the terminal answered survives for the next `read_input` (FM-Q1). This drives the *same*
-  correlator the async session uses, with no Tokio — the sans-io split's payoff. Reach for
-  `oneshot_background.rs` when you want the raw loop; reach for this when you want the typed helper.
+  *unknown* case), and `Err(..)` only on a genuine I/O failure. Typeahead the user sent before the
+  terminal answered survives for the next `read_input`. This drives the *same* correlator the async
+  session uses, with no Tokio required for the synchronous path. Reach for `oneshot_background.rs`
+  when you want the raw loop; reach for this when you want the typed helper.
 
 ## Tokio Session Basics
 
@@ -83,13 +82,13 @@ point without scanning the repository tree.
 - `probe_capabilities.rs`: probe the terminal with one DA1-fenced query bundle
   (`TokioTerminalSession::probe_capabilities`) and print each finding as yes/no/unknown alongside
   its evidence (probed/inferred/unknown) plus the derived `TerminalIdentity` — a single write, one
-  deadline, with an unknown finding meaning *unknown, not unsupported* (FM-C4). See [Capability
-  Model](crate::docs#capability-model-evidence-identity-and-environment-inference) for the
-  `Finding`/`Evidence`/identity/env-heuristic model.
+  deadline, with an unknown finding meaning *unknown, not unsupported*. See
+  [Capabilities](crate::docs::capabilities) for the `Finding`/`Evidence`/identity/env-heuristic
+  model.
 - `synchronized_frame.rs`: probe for synchronized output, then draw a capability-gated frame with
   `TokioTerminalSession::synchronized` — it emits the mode-2026 wrap only when the probe answered
-  supported, and runs the same frame un-batched otherwise (FM-V4: never the 2026 bytes into a
-  terminal that did not answer). See [Terminal Control](terminal-control.md) for the gating rule.
+  supported, and runs the same frame un-batched otherwise, never the 2026 bytes into a terminal
+  that did not answer. See [Terminal Control](crate::docs::terminal_control) for the gating rule.
 - `mouse_and_paste.rs`: enable SGR mouse (`enable_mouse`), focus (`enable_focus_events`), and
   bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
   and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control
@@ -103,19 +102,19 @@ point without scanning the repository tree.
   (`resume` — re-enter raw mode and recorded modes with a bounded retry, re-assert the readiness
   fd's non-blocking flag, optionally `tcflush` stale input via the `flush_input` parameter, and
   queue a synthetic `Event::Resize`); qwertty installs no signal handler, so the app owns the
-  `SIGTSTP`/`SIGCONT` wiring (design 01 §4).
+  `SIGTSTP`/`SIGCONT` wiring.
 - `editor_handoff.rs`: hand the terminal to `$EDITOR` (a pager, a subshell — any synchronous child)
   and reclaim it with `TokioTerminalSession::run_detached` — restore a clean blocking terminal and
   disarm the panic-safe handle before the child, then re-enter raw mode (resyncing termios the child
-  may have left cooked, FM-L9), re-register async readiness on the same fd, and queue a synthetic
+  may have left cooked), re-register async readiness on the same fd, and queue a synthetic
   `Event::Resize` after; the closure is a synchronous `FnOnce` whose return value (the child's
-  `ExitStatus`) is returned from `run_detached` (design 01 §4).
+  `ExitStatus`) is returned from `run_detached`.
 - `signal_handling.rs`: `select!` the opt-in terminal-signals stream (`TokioTerminalSession::signals`
   — yielding typed `TerminalSignal::Suspend`/`Continue`/`Terminate`/`Interrupt` for
   `SIGTSTP`/`SIGCONT`/`SIGTERM`/`SIGINT`) alongside `next_event` and the `SIGWINCH` `resize_stream`,
   responding with `suspend` on `Suspend`, `resume` on `Continue`, and a graceful exit on
   `Terminate`/`Interrupt`; qwertty installs no handler and never auto-acts — the stream only reports,
-  the app owns the response (design 01), and `SIGWINCH` stays with `resize_stream`.
+  the app owns the response, and `SIGWINCH` stays with `resize_stream`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to

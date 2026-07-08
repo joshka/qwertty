@@ -132,8 +132,9 @@ assert_eq!(report.position(), ProtocolPosition::new(12, 34));
 
 With the optional `tokio` feature on Unix, `TokioTerminalSession::request_cursor_position` writes
 the request, flushes output, waits for the matching report, and applies a caller-provided timeout.
-See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the runnable example,
-included with the `tokio` feature.
+<!-- markdownlint-disable-next-line MD051 -- heading lives in a companion include on this page -->
+See [Live Query Helpers (Tokio)](#live-query-helpers-tokio) for the runnable example, included with
+the `tokio` feature.
 
 Unrelated decoded events that arrive before the matching report remain available through
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
@@ -178,8 +179,9 @@ assert_eq!(report.status(), TerminalStatus::Ready);
 
 With the optional `tokio` feature on Unix, `TokioTerminalSession::request_terminal_status` writes
 the request, flushes output, waits for the matching report, and applies a caller-provided timeout.
-See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the runnable example,
-included with the `tokio` feature.
+<!-- markdownlint-disable-next-line MD051 -- heading lives in a companion include on this page -->
+See [Live Query Helpers (Tokio)](#live-query-helpers-tokio) for the runnable example, included with
+the `tokio` feature.
 
 Unrelated decoded events that arrive before the matching report remain available through
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
@@ -282,8 +284,8 @@ assert_eq!(frame.as_bytes(), b"\x1b[>q\x1b[?2026$p\x1b[c");
 turning on the requested progressive-enhancement reporting and pushing the previous set onto the
 terminal's flags stack; `pop_kitty_keyboard_flags()` emits `CSI < 1 u`, the exact undo of one push.
 `query_kitty_keyboard_flags()` emits `CSI ? u`, asking for the currently active (granted) flags —
-the read half of the verify-after-push handshake (design 06), since a terminal may grant only a
-subset of what was pushed:
+the read half of the verify-after-push handshake, since a terminal may grant only a subset of what
+was pushed:
 
 ```rust
 use qwertty::commands::terminal;
@@ -300,8 +302,8 @@ frame
 assert_eq!(frame.as_bytes(), b"\x1b[>1u\x1b[?u\x1b[<1u");
 ```
 
-See [Input Modes](crate::docs#input-modes) in the session reference for how `TerminalSession`
-records these as reversible ledger entries instead of raw one-off writes.
+See [Input Modes](crate::docs::terminal_session#input-modes) in the session reference for how
+`TerminalSession` records these as reversible ledger entries instead of raw one-off writes.
 
 ### Typed Reports
 
@@ -396,14 +398,14 @@ frame
 assert_eq!(frame.as_bytes(), b"\x1b[?1049h\x1b[?1049l");
 ```
 
-These helpers only build the enter and leave bytes. `TerminalSession::enter_alternate_screen`
-(R-OUT-3) pairs the enter bytes with an **explicit clear** (`commands::screen::clear`,
-`CSI 2 J`) immediately after entry, and tracks the pair in the session's mode ledger so `leave`
+These helpers only build the enter and leave bytes. `TerminalSession::enter_alternate_screen` pairs
+the enter bytes with an **explicit clear** (`commands::screen::clear`, `CSI 2 J`) immediately after
+entry, and tracks the pair in the session's mode ledger so `leave`
 restores the primary screen automatically. The explicit clear exists because mode 1049 does not
 clear the alternate buffer implicitly on every host: mosh does not, and helix works around exactly
 this by clearing right after entering, so qwertty follows that evidence rather than trusting the
 terminal's own 1049 behavior. See [Screen And Cursor
-Lifecycle](crate::docs#screen-and-cursor-lifecycle) for the session-level API.
+Lifecycle](crate::docs::terminal_session#screen-and-cursor-lifecycle) for the session-level API.
 
 Upstream references:
 
@@ -428,20 +430,20 @@ frame
 assert_eq!(frame.as_bytes(), b"\x1b[?2026hframe contents\x1b[?2026l");
 ```
 
-**This pair must be detection-gated (FM-V4).** `commands::screen` only builds bytes; it does not
-probe whether a terminal understands mode 2026. codex found mode-2026-adjacent sequences leaking
-raw onto consoles that do not support them because it emitted unconditionally (codex#24543) — a
-caller should probe for mode 2026 support before writing these bytes to a real terminal. Wrap
-exactly one full frame per `begin`/`end` pair.
+**This pair must be detection-gated.** `commands::screen` only builds bytes; it does not probe
+whether a terminal understands mode 2026. codex found mode-2026-adjacent sequences leaking raw onto
+consoles that do not support them because it emitted unconditionally (codex#24543) — a caller should
+probe for mode 2026 support before writing these bytes to a real terminal. Wrap exactly one full
+frame per `begin`/`end` pair.
 
 #### Capability-Gated Synchronized Output
 
 The encode-only `begin`/`end` pair above must be detection-gated by the caller. With the optional
 `tokio` feature on Unix, `TokioTerminalSession::synchronized` performs that gate — it wraps a frame
-in mode 2026 **only when the terminal probed the capability as supported** (R-CAP-4), degrading to an
-un-batched frame otherwise, never emitting the 2026 bytes into a terminal that did not answer
-(FM-V4). See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the gated helper
-and its example.
+in mode 2026 only when the terminal probed the capability as supported, degrading to an un-batched
+frame otherwise, and never emitting the 2026 bytes into a terminal that did not answer.
+<!-- markdownlint-disable-next-line MD051 -- heading lives in a companion include on this page -->
+See [Live Query Helpers (Tokio)](#live-query-helpers-tokio) for the gated helper and its example.
 
 Upstream references:
 
@@ -472,16 +474,15 @@ assert_eq!(frame.as_bytes(), b"\x1b[2;10r\x1b[1L\x1b[1S\x1b[r");
 SU, SD, IL, and DL all write their count parameter explicitly even at the ECMA-48 default of 1 —
 `scroll_up(1)` emits `b"\x1b[1S"`, not the parameter-omitted form.
 
-**DECSTBM is not portable (FM-V2).** It is the core primitive ratatui-shaped `insert_before`
-inline-viewport consumers need (R-OUT-6) — the scroll-region-plus-reverse-index shape codex uses to
-insert history above a live viewport — but it is *known* to misbehave on some hosts: codex's tui2
-postmortem found scroll-region history insertion could drop or duplicate content depending on the
-terminal, and xterm.js-based terminals (notably VS Code's integrated terminal) permanently drop
-scrollback when a scroll region is set (codex#27644). `commands::screen` builds the bytes only; it
-has no capability model and cannot refuse to emit on a host known to be unsafe. Per R-OUT-6,
-callers should gate scroll-region emission on an `inline_insertion_safe` capability — backed by the
-conformance matrix's per-terminal scroll-region/clear semantics — that a later session/capability
-slice adds, rather than assuming DECSTBM is safe everywhere it parses.
+**DECSTBM is not portable.** It is the core primitive ratatui-shaped `insert_before` inline-viewport
+consumers need — the scroll-region-plus-reverse-index shape codex uses to insert history above a
+live viewport — but it is *known* to misbehave on some hosts: codex's tui2 postmortem found
+scroll-region history insertion could drop or duplicate content depending on the terminal, and
+xterm.js-based terminals (notably VS Code's integrated terminal) permanently drop scrollback when a
+scroll region is set (codex#27644). `commands::screen` builds the bytes only; it has no capability
+model and cannot refuse to emit on a host known to be unsafe. Callers should gate scroll-region
+emission on a capability that captures per-terminal scroll-region/clear safety, rather than assuming
+DECSTBM is safe everywhere it parses.
 
 Upstream references:
 
@@ -551,13 +552,13 @@ assert_eq!(frame.as_bytes(), b"\x1b[6 q");
 `commands::cursor::reset_shape` emits the same bytes as `set_shape(CursorShape::Default)`
 (`CSI 0 SP q`) under a name that documents restore intent at call sites.
 
-Cursor shape is a plain command, not a session-tracked mode. Per FM-L3 (helix#10089, open;
-libvaxis#10, #98), no single DECSCUSR value is a universal reset: `Ps` = 0 asks for "the terminal
-profile's own default," which is not guaranteed to match whatever shape was active before an
-application changed it — helix builds its own restore recipe from terminfo `Se` plus `cnorm` plus
-`CSI 0 SP q` rather than trusting one value. qwertty does not pretend otherwise: an application
-that changes the cursor shape and needs to restore the exact prior shape should track and restore
-it explicitly. See [Screen And Cursor Lifecycle](crate::docs#screen-and-cursor-lifecycle) for how
+Cursor shape is a plain command, not a session-tracked mode. No single DECSCUSR value is a
+universal reset (helix#10089, open; libvaxis#10, #98): `Ps` = 0 asks for "the terminal profile's own
+default," which is not guaranteed to match whatever shape was active before an application changed
+it — helix builds its own restore recipe from terminfo `Se` plus `cnorm` plus `CSI 0 SP q` rather
+than trusting one value. qwertty does not pretend otherwise: an application that changes the cursor
+shape and needs to restore the exact prior shape should track and restore it explicitly. See
+[Screen And Cursor Lifecycle](crate::docs::terminal_session#screen-and-cursor-lifecycle) for how
 this differs from the ledger-tracked alternate screen and cursor visibility.
 
 Upstream references:
@@ -597,11 +598,10 @@ assert_eq!(
 Named colors emit the classic ECMA-48 range (`30`-`37` foreground, `40`-`47` background) or the
 widely supported xterm-derived bright range (`90`-`97` foreground, `100`-`107` background).
 Indexed and RGB colors always use the semicolon form (`38;5;n`, `38;2;r;g;b`, and the background
-and underline-color equivalents), never the colon-subparameter form. The audited failure-mode
-survey (FM-W6) found colon-form 8-bit SGR fails in PowerShell/conhost, and non-default underline
-color specifically has caused rendering bugs on Windows Terminal and hard failures on Windows 7
-hosts serious enough that crossterm feature-gates it — so every color helper here, including
-underline color, uses the one widely-supported spelling.
+and underline-color equivalents), never the colon-subparameter form: colon-form 8-bit SGR fails in
+PowerShell/conhost, and non-default underline color specifically has caused rendering bugs on
+Windows Terminal and hard failures on Windows 7 hosts serious enough that crossterm feature-gates
+it — so every color helper here, including underline color, uses the one widely-supported spelling.
 
 `commands::style::reset_foreground`, `reset_background`, and `reset_underline_color` (SGR 39, 49,
 59) restore the terminal default for each slot independently.

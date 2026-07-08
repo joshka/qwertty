@@ -1,11 +1,11 @@
-# Live Query Helpers (Tokio)
+<!-- markdownlint-disable-next-line MD041 -- appended into the parent page, not standalone -->
+## Live Query Helpers (Tokio)
 
-The [Terminal Control Reference](crate::docs#terminal-control-reference) documents the encode-only
-command helpers that build query request bytes. With the optional `tokio` feature on Unix,
-`TokioTerminalSession` turns those requests into live query helpers that write the request, flush
-output, wait for the matching report, and apply a caller-provided timeout. This section is included
-only when the `tokio` feature is enabled, so its `TokioTerminalSession` examples compile only in that
-configuration.
+The sections above document the encode-only command helpers that build query request bytes. With
+the optional `tokio` feature on Unix, `TokioTerminalSession` turns those requests into live query
+helpers that write the request, flush output, wait for the matching report, and apply a
+caller-provided timeout. This section is included only when the `tokio` feature is enabled, so its
+`TokioTerminalSession` examples compile only in that configuration.
 
 `TokioTerminalSession::request_cursor_position` pairs with `commands::cursor::request_position`:
 
@@ -47,15 +47,14 @@ Unrelated decoded events that arrive before the matching report remain available
 `TokioTerminalSession::next_event`. This is still not a general query router: qwertty does not yet
 support multiple simultaneous live queries, capability probing, or query registration. See
 [Terminal Session: Async Boundary And Live
-Queries](crate::docs#terminal-session-async-boundary-and-live-queries) and [Tokio Input Ownership
-And Query Handoff](crate::docs#tokio-input-ownership-and-query-handoff) for the session-owned model.
+Queries](crate::docs::terminal_session#async-boundary-and-live-queries) and [Tokio Input Ownership
+And Query Handoff](crate::docs::tokio_input_ownership) for the session-owned model.
 
-## Capability-Gated Synchronized Output
+### Capability-Gated Synchronized Output
 
-`TokioTerminalSession::synchronized` gates the mode-2026 synchronized-output wrap (R-CAP-4). It reads
-the session's capability snapshot — populated by `probe_capabilities` and returned by
-`capabilities()` — and wraps the frame in mode 2026 **only when the terminal probed the capability as
-supported**:
+`TokioTerminalSession::synchronized` gates the mode-2026 synchronized-output wrap. It reads the
+session's capability snapshot — populated by `probe_capabilities` and returned by `capabilities()`
+— and wraps the frame in mode 2026 **only when the terminal probed the capability as supported**:
 
 ```rust,no_run
 use std::time::Duration;
@@ -77,7 +76,6 @@ session
 
 When `synchronized_output` is a known-`true` finding this emits `begin` before the frame and `end`
 after; when it is unknown, known-`false`, or the session was never probed, the frame runs **without**
-the wrap — graceful degradation, never the 2026 bytes into a terminal that did not answer (FM-V4).
-Degrading is not an error. To force the wrap regardless of the probe (an out-of-band escape hatch),
-drive `commands::screen::begin_synchronized_update`/`end_synchronized_update` through `command`
-directly.
+the wrap — graceful degradation, never the 2026 bytes into a terminal that did not answer. Degrading
+is not an error. To force the wrap regardless of the probe (an out-of-band escape hatch), drive
+`commands::screen::begin_synchronized_update`/`end_synchronized_update` through `command` directly.

@@ -86,24 +86,24 @@ caller-owned deadline. It never runs implicitly.
 
 Two rules make it correct:
 
-- **The DA1 fence (FM-Q7).** Terminals answer queries in order, so DA1's reply arriving means every
-  earlier reply that was coming has arrived. When the DA1 expectation completes, the probe resolves
-  every other still-pending expectation as *no-reply* — but only *after the entire current decode
-  batch has been fed to the correlator*, so a DA1 reply and a slower reply landing in the same
-  `read()` both land before the fence acts. A fully silent terminal (no DA1 either) costs one
-  timeout total, not one per query.
-- **Unknown is not unsupported (FM-C4).** Every DECRQM/query-backed `Capabilities` field is a
-  `Finding<T>` whose `.value()` is `Option<T>`; `None` means *unknown*, never *unsupported*. A
-  silent terminal, or a multiplexer that swallowed the queries, yields an all-unknown result. DA1
-  is a fence, not a feature oracle — its presence proves nothing about features, and its silence
-  means the whole probe is unknown. A DECRQM "mode not recognized" answer is also `None` value for
-  that field, though its `.evidence()` is still `Probed` (the terminal did answer, just in the
-  negative-unknown way DECRQM allows) — see [Capability Model: Evidence,
-  Identity, And Environment Inference](crate::docs#capability-model-evidence-identity-and-environment-inference)
-  for the full evidence/identity/env-inference model this probe populates.
+- **The DA1 fence.** Terminals answer queries in order, so DA1's reply arriving means every earlier
+  reply that was coming has arrived. When the DA1 expectation completes, the probe resolves every
+  other still-pending expectation as *no-reply* — but only *after the entire current decode batch
+  has been fed to the correlator*, so a DA1 reply and a slower reply landing in the same `read()`
+  both land before the fence acts. A fully silent terminal (no DA1 either) costs one timeout total,
+  not one per query.
+- **Unknown is not unsupported.** Every DECRQM/query-backed `Capabilities` field is a `Finding<T>`
+  whose `.value()` is `Option<T>`; `None` means *unknown*, never *unsupported*. A silent terminal,
+  or a multiplexer that swallowed the queries, yields an all-unknown result. DA1 is a fence, not a
+  feature oracle — its presence proves nothing about features, and its silence means the whole
+  probe is unknown. A DECRQM "mode not recognized" answer is also `None` value for that field,
+  though its `.evidence()` is still `Probed` (the terminal did answer, just in the negative-unknown
+  way DECRQM allows) — see [Capability Model: Evidence, Identity, And Environment
+  Inference](crate::docs::capabilities) for the full evidence/identity/env-inference model this
+  probe populates.
 
 Typeahead typed during the probe is preserved: non-reply input passes through as ordinary events
-buffered for later `next_event` delivery, in arrival order. A probe never eats typeahead (FM-Q1).
+buffered for later `next_event` delivery, in arrival order. A probe never eats typeahead.
 
 For a runnable example see `examples/probe_capabilities.rs` in the repository.
 
@@ -125,8 +125,8 @@ session.leave().await
 # }
 ```
 
-See [Checked-In Examples](crate::docs#checked-in-examples) for a durable index of the runnable
-Tokio ownership and query-routing examples shipped with the crate.
+See [Examples](crate::docs::examples) for a durable index of the runnable Tokio ownership and
+query-routing examples shipped with the crate.
 
 For a small checked-in example that waits for a live query helper and then reads preserved
 unrelated input through `next_event`, see `examples/tokio_preserved_unrelated_input.rs` in the
@@ -175,8 +175,8 @@ in the delivery queue, `next_event` collapses them to one `Event::Resize` carryi
 geometry: a front resize is dropped whenever a later resize is still queued behind it, so a resize
 storm delivers exactly one event (the last, in its position) while every non-resize event keeps its
 order and identity (`R1 K1 R2 K2 R3` delivers `K1 K2 R3`). Mouse and scroll events are **never**
-coalesced (FM-V6): a burst of wheel ticks delivers every tick, because per-terminal tick ratios
-carry information the application must see. Only resize collapses.
+coalesced: a burst of wheel ticks delivers every tick, because per-terminal tick ratios carry
+information the application must see. Only resize collapses.
 
 For a checked-in example that enables in-band resize and selects it against the `SIGWINCH` fallback,
 see `examples/resize_events.rs` in the repository.
@@ -314,8 +314,8 @@ qwertty does not yet provide:
 
 - multiple simultaneous live queries;
 - a public generic query registry;
-- Escape-timeout policy;
 - subprocess helpers that reopen sessions automatically;
 - non-Tokio async runtime support.
 
-Those later slices should extend this guide only when the public API actually grows.
+This guide will extend to cover those areas only once the public API actually grows to support
+them.

@@ -21,9 +21,9 @@ Adding an async method that only wraps a blocking file read would make the publi
 without proving the event boundary. Runtime-agnostic async traits are also deferred until the Tokio
 owner proves behavior that another runtime can share.
 
-See [Tokio Input Ownership And Query Handoff](
-crate::docs#tokio-input-ownership-and-query-handoff) for the session-owned event loop and live
-query model above this decoding layer.
+With the `tokio` feature enabled, see the Tokio Input Ownership And Query Handoff page
+(`crate::docs::tokio_input_ownership`) for the session-owned event loop and live query model above
+this decoding layer.
 
 ## Reading Bytes
 
@@ -112,9 +112,9 @@ The first router boundary is internal to the Tokio session owner. qwertty does n
 generic query router, multiple simultaneous live queries, capability probing, or a runtime-agnostic
 async query trait.
 
-The [Tokio Input Ownership And Query Handoff](
-crate::docs#tokio-input-ownership-and-query-handoff) guide explains how applications should treat
-that session-owned routing boundary.
+With the `tokio` feature enabled, the Tokio Input Ownership And Query Handoff page
+(`crate::docs::tokio_input_ownership`) explains how applications should treat that session-owned
+routing boundary.
 
 When no cursor position report is present, the match result contains no report and all events remain
 available.
@@ -164,9 +164,8 @@ Because bytes `0x80..=0x9f` are both C1 controls and UTF-8 continuation bytes, a
 as an introducer only at a position where a new character starts, never inside an in-progress UTF-8
 sequence.
 
-The semantic layer that turns these tokens into typed key, mouse, paste, and report events builds on
-`SyntaxParser`. Its first slice, the key-event vocabulary, is described in [Key Events](#key-events)
-below.
+The semantic layer that turns these tokens into typed key, mouse, paste, and report events builds
+on `SyntaxParser`. The key-event vocabulary is described in [Key Events](#key-events) below.
 
 ### Fuzzing
 
@@ -185,9 +184,10 @@ push, and `just fuzz` runs them locally.
 
 ## Key Events
 
-The `Event` vocabulary and the command families are **frozen for 0.1** (ADR 0019): their shape is
-stable to build against, breaking changes are maintainer-gated, and additive growth stays open
-because the enums are `#[non_exhaustive]`.
+The `Event` vocabulary and the command families are **frozen for 0.1**
+([ADR 0019](https://github.com/joshka/qwertty/blob/main/docs/adr/0019-input-and-command-vocabulary-freeze.md)):
+their shape is stable to build against, and additive growth stays open because the enums are
+`#[non_exhaustive]`.
 
 `SemanticDecoder` is qwertty's semantic input layer. It owns a `SyntaxParser` and maps its lossless
 tokens to the typed `Event` vocabulary applications consume. Feed input chunks with
@@ -261,7 +261,7 @@ modified-key CSI forms over the syntax layer, and passes everything else through
   Shift/Alt/Ctrl `Modifiers`; the 1-based `(column, row)` is the wire position, unchanged. **Scroll
   events are never coalesced** — every wheel tick the terminal sends is one event, because
   physical-tick-to-event ratios vary per terminal with no protocol signal, so an application builds
-  its own normalization from the raw stream (FM-V6). The legacy X10 (`CSI M` + three bytes) and
+  its own normalization from the raw stream. The legacy X10 (`CSI M` + three bytes) and
   urxvt (`CSI b;x;y M`) encodings are tolerated without decoding: their non-SGR shape does not match
   the SGR decoder and passes through as lossless syntax rather than panicking or misdecoding.
 - **Focus events.** `CSI I` and `CSI O` (DEC 1004) decode to `Event::Focus(FocusEvent)` with
@@ -273,17 +273,16 @@ modified-key CSI forms over the syntax layer, and passes everything else through
   not decode) passes through as lossless `Event::Syntax` rather than a fake resize. **Resize events
   coalesce in the async session's delivery**, deliberately opposite to the never-coalesce scroll
   policy: a resize storm collapses to one `Event::Resize` carrying the final geometry while every
-  non-resize event keeps its order and identity (see
-  [tokio-input-ownership](tokio-input-ownership.md)).
+  non-resize event keeps its order and identity (see `crate::docs::tokio_input_ownership`, with the
+  `tokio` feature enabled).
 - **Bracketed paste.** A `ESC [ 200 ~ … ESC [ 201 ~` span (DEC 2004) is captured **at the syntax
   layer** as opaque payload — the bytes between the brackets are *data*, so embedded escape
   sequences are kept verbatim and never tokenized — and decodes to `Event::Paste(PasteEvent)`. Line
   endings normalize to LF (CRLF and lone CR both become `\n`, across segment boundaries), and
-  `PasteEvent::contains_control` flags a payload carrying control bytes for paste hygiene (R-SEC-3).
-  A paste is delivered losslessly regardless of size: a large one arrives as several bounded
-  segments with the last flagged `is_final`, and a missing end bracket flushes a final,
-  non-`terminated` segment rather than hanging (FM-A8/FM-P12). See [Bracketed Paste
-  Capture](#bracketed-paste-capture).
+  `PasteEvent::contains_control` flags a payload carrying control bytes for paste hygiene. A paste
+  is delivered losslessly regardless of size: a large one arrives as several bounded segments with
+  the last flagged `is_final`, and a missing end bracket flushes a final, non-`terminated` segment
+  rather than hanging. See [Bracketed Paste Capture](#bracketed-paste-capture).
 - **Standalone Escape.** A bare Escape, flushed by the layer above and surfaced by the parser as a
   lone `SyntaxToken::Esc`, maps to `Key::Escape`. The Escape-versus-sequence timing policy stays in
   the layer above this decoder; the decoder only ever sees a bare Escape once that layer has
@@ -329,11 +328,8 @@ with the last flagged final; an unterminated one streams bounded segments and fl
 non-`terminated` segment at end of input — never an unbounded buffer, never a hang, and never a
 dropped paste byte.
 
-### What Arrives Later In Milestone M4
-
-The remaining M4 input work adds **resize** events (in-band mode 2048 and the SIGWINCH fallback,
-coalesced in the session). Until then `Event` carries `Key`, `Mouse`, `Focus`, `Paste`, and
-`Syntax`; the enum is non-exhaustive so the resize variant adds without a vocabulary change.
+`Event` carries `Key`, `Mouse`, `Focus`, `Paste`, `Resize`, and `Syntax`; the enum is
+non-exhaustive, so future variants can be added without a breaking vocabulary change.
 
 ## Typed Reports
 
@@ -358,10 +354,10 @@ that arrives after its query timed out, was cancelled, or hit EOF is never match
 through; and a `CSI c` Primary Device Attributes reply acts as a shape-tolerant fence. One report
 shape is deliberately ambiguous: `CSI 1 ; modifier R` is both a row-1 cursor report and a modified-F3
 key report, so the cursor matcher refuses that form and lets it pass through rather than guess. The
-correlator is currently an internal (`pub(crate)`) building block; the sessions that drive it arrive
-in a later slice. Applications that need to read an arbitrary reply the typed methods do not cover
-still get it losslessly through the ordinary event stream as an `Event::Syntax` passthrough, so
-nothing is stolen or reordered.
+correlator is an internal (`pub(crate)`) building block driven by `TerminalSession` and
+`TokioTerminalSession`. Applications that need to read an arbitrary reply the typed methods do not
+cover still get it losslessly through the ordinary event stream as an `Event::Syntax` passthrough,
+so nothing is stolen or reordered.
 
 ## What Is Not Yet Decoded Semantically
 
@@ -370,14 +366,13 @@ token to a typed high-level event. It does not yet interpret:
 
 - terminal query responses other than cursor position, terminal status, and kitty keyboard flags
   reports;
-- CSI meanings other than the arrow, kitty `CSI u`, legacy modified-key, and those three report
-  shapes;
-- paste boundaries;
-- mouse, focus, graphics, clipboard, or vendor extension protocols.
+- CSI meanings other than the arrow, kitty `CSI u`, legacy modified-key, mouse, focus, and in-band
+  resize forms, and the cursor-position/terminal-status/kitty-flags report shapes;
+- graphics, clipboard, or vendor extension protocols.
 
-Those behaviors belong to the milestone M4 semantic slices. Until then such input still reaches the
-application losslessly through `Event::Syntax`, carrying its `SyntaxToken`, so callers that need
-richer interpretation can inspect the token at the application boundary without losing bytes.
+Such input still reaches the application losslessly through `Event::Syntax`, carrying its
+`SyntaxToken`, so callers that need richer interpretation can inspect the token at the application
+boundary without losing bytes.
 
 ## Cleanup
 
@@ -390,5 +385,4 @@ errors can be reported. Drop remains a best-effort fallback through the underlyi
 The live terminal implementation currently supports Unix. Unsupported platforms expose the same
 public types where possible and return `Error::Unsupported` for live terminal operations.
 
-See [Platform Support](crate::docs#platform-support) for the durable user-facing summary of that
-boundary.
+See [Platform Support](crate::docs::platform) for the durable user-facing summary of that boundary.

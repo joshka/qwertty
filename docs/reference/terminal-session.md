@@ -10,9 +10,12 @@ Use `TerminalSession::open` for the current controlling terminal, or `TerminalSe
 when embedding code or tests have already opened the terminal device.
 
 Starting a session enters raw mode. Raw mode disables canonical input processing and local echo at
-the operating-system terminal boundary. The first session slice does not enter the alternate screen,
-hide the cursor, enable mouse tracking, enable bracketed paste, write graphics, touch the clipboard,
-or change vendor-specific protocol state.
+the operating-system terminal boundary. Opening a session does not itself enter the alternate
+screen, hide the cursor, enable mouse tracking, or enable bracketed paste — those are opt-in
+through the methods described in [Input Modes](#input-modes) and [Screen And Cursor
+Lifecycle](#screen-and-cursor-lifecycle). qwertty does not yet write graphics, touch the clipboard
+beyond the policy-gated write in [Security Policy](#security-policy), or change other
+vendor-specific protocol state.
 
 ## Output Ordering
 
@@ -74,22 +77,24 @@ borrowed descriptor lives only as long as the borrow. A device with no pollable 
 
 The recipe's shape is: open the session (raw mode entered), write one probe, `poll` the fd under a
 budget, `read_input` once, feed the bytes to a `SyntaxParser`, and parse the matching `report`. A
-terminal that never answers times out cleanly and is reported as the unknown case (FM-C4), never as
-an error and never as a hang. Restoration is guaranteed on every exit path by the session's drop and
+terminal that never answers times out cleanly and is reported as the unknown case, never as an
+error and never as a hang. Restoration is guaranteed on every exit path by the session's drop and
 the [panic-safe restore handle](#panic-safe-restore). See the `oneshot_background.rs` example for
 the fully commented recipe. This is the second, no-async consumer the sans-io decode split was
-designed for: the same decode core the [async query path](#async-boundary-and-live-queries) uses,
-driven by a hand-rolled synchronous poll loop.
+designed for: the same decode core the
+<!-- markdownlint-disable-next-line MD051 -- heading lives in a companion include on this page -->
+[async query path](#async-boundary-and-live-queries) uses, driven by a hand-rolled synchronous poll
+loop.
 
 On Unix, `TerminalSession` also ships the recipe as a typed convenience so a caller does not have to
 hand-roll the loop at all. `request_cursor_position(timeout)` writes `CSI 6 n`, drives the same
 poll/read/decode loop against the sans-io correlator, and returns `Ok(Some(report))` on an answer,
-`Ok(None)` on timeout (the FM-C4 unknown case, never an error and never a hang), and `Err(..)` only
-on a genuine I/O failure. `request_terminal_status(timeout)` is the same shape for `CSI 5 n`. Both
-drive the *same* correlator the async session uses — this is what the sans-io split buys: one query
-core, two drivers, no Tokio required for the synchronous one. Typeahead the user sent before the
-terminal answered is never swallowed: bytes read while the query waits that are not the reply are
-buffered on the session and returned by the next `read_input`, in arrival order (FM-Q1). The raw
+`Ok(None)` on timeout (the unknown case, never an error and never a hang), and `Err(..)` only on a
+genuine I/O failure. `request_terminal_status(timeout)` is the same shape for `CSI 5 n`. Both drive
+the *same* correlator the async session uses — this is what the sans-io split buys: one query core,
+two drivers, no Tokio required for the synchronous one. Typeahead the user sent before the terminal
+answered is never swallowed: bytes read while the query waits that are not the reply are buffered
+on the session and returned by the next `read_input`, in arrival order. The raw
 seams stay reachable underneath — `command`, `read_input`, and `as_fd` are unchanged — so the typed
 helper is a convenience over them, not a replacement. See the `sync_cursor_query.rs` example.
 
@@ -101,9 +106,9 @@ before later application work continues.
 `TerminalSession::leave` replays the session's mode ledger: every reversible state change the
 session made is undone in reverse enablement order, every step is attempted even after a failure,
 and the first error is reported. The replay ends with a flush so restoration bytes never sit in a
-buffer. The ledger holds raw-mode restoration and the input-mode enables described in [Input
-Modes](#input-modes); alternate screen, cursor visibility, and vendor protocol cleanup join it in
-later slices.
+buffer. The ledger holds raw-mode restoration, the input-mode enables described in [Input
+Modes](#input-modes), and the alternate-screen and cursor-visibility state described in [Screen And
+Cursor Lifecycle](#screen-and-cursor-lifecycle); vendor protocol cleanup is not yet part of it.
 
 ## Input Modes
 
@@ -117,9 +122,9 @@ panic teardown turns the modes back off, not just an orderly `leave`. `enable_mo
 the chosen tracking mode (1000/1002/1003) with SGR extended coordinates (1006), and re-recording a
 different `MouseMode` replaces the entry in place so switching tracking modes never leaves a stale
 one enabled. `enable_in_band_resize()` turns on mode 2048 the same way, so the terminal reports
-size changes in band as `Event::Resize` (design 01) instead of requiring `SIGWINCH`. The same
-methods are available on the Tokio session (`TokioTerminalSession`), which writes the enable bytes
-through its readiness path before recording the ledger entry.
+size changes in band as `Event::Resize` instead of requiring `SIGWINCH`. The same methods are
+available on the Tokio session (`TokioTerminalSession`), which writes the enable bytes through its
+readiness path before recording the ledger entry.
 
 Kitty keyboard follows the narrow-primitive rule. `push_kitty_keyboard(flags)` is the set-only
 primitive: it writes `CSI > flags u` and records the pop for teardown, with **no** query — the
@@ -127,8 +132,8 @@ kitty protocol is a progressive enhancement, so the terminal may grant only a su
 readback yourself (`commands::terminal::query_kitty_keyboard_flags` plus the reply parsers) at your
 own timing, or use the Tokio session's `request_kitty_keyboard(flags, timeout)` — the opt-in
 verify-after-push convenience that pushes, queries, and records the *granted* set, degrading to an
-unknown grant when the terminal never answers (FM-C4). The set-only push is available on both the
-sync and Tokio sessions.
+unknown grant when the terminal never answers. The set-only push is available on both the sync and
+Tokio sessions.
 
 The lifecycle is re-entrant: `leave` does not consume the session, and
 `TerminalSession::enter` re-applies the recorded state afterwards. A line-editor-shaped caller
@@ -142,8 +147,8 @@ Sessions also run headless over any `TerminalDevice` through `TerminalSession::f
 Some terminal features do more than paint the grid: they reach the system clipboard, pull data back
 from the terminal, transfer files, raise desktop notifications, or wrap sequences for a multiplexer
 to pass through. Those are exactly the operations an attacker who controls a program's *output*
-wants to reach — a log line that quietly writes the clipboard (FM-X4) is an exfiltration primitive,
-not a formatting choice. The session carries a `Policy` value that gates them (R-SEC-1).
+wants to reach — a log line that quietly writes the clipboard is an exfiltration primitive, not a
+formatting choice. The session carries a `Policy` value that gates them.
 
 A new session starts at `Policy::restricted()`, the safe default. Read it with
 `TerminalSession::policy` (which returns a `Copy` value) and change it with
@@ -160,14 +165,14 @@ The presets form a ladder from safe-by-default to fully trusted:
 | `trusted()`     | on              | on             | on            | on            | on              |
 
 `Default` returns `restricted()`. Clipboard **write** is on even in `restricted` because the
-terminal itself gates the sensitive paste-back direction (FM-X4, kitty#9428), so a write here cannot
+terminal itself gates the sensitive paste-back direction (kitty#9428), so a write here cannot
 silently reach the user. The surfaces that *read* or *exfiltrate* — clipboard read, file transfer —
 open only at `trusted`; `interactive` widens `restricted` with notifications and mux passthrough for
 a locally-trusted interactive app, but not those reads.
 
 Gated session methods consult the policy through `Policy::allows(PolicyGate)` before emitting. When
-a gate is off, the method returns `Error::PolicyDenied { gate }` — a teachable error naming the gate
-(OQ-4) — **without writing anything**. The generic `command`, `bytes`, and `text` methods stay
+a gate is off, the method returns `Error::PolicyDenied { gate }` — a teachable error naming the
+gate — **without writing anything**. The generic `command`, `bytes`, and `text` methods stay
 ungated: they write exactly what the caller encoded.
 
 `set_clipboard(selection, data)` is the first wired gate. It checks `PolicyGate::ClipboardWrite`,
@@ -214,11 +219,11 @@ ledger entry's apply action (`ModeKind::AlternateScreen`), so a later `enter` re
 The undo action is the plain leave sequence, `CSI ? 1049 l`, written on `leave`/drop/emergency —
 never a matching clear, since the primary screen was never touched while alternate.
 
-The explicit clear is deliberate, not decorative (R-OUT-3, design 01 evidence): mode 1049 usually
-clears the alternate buffer implicitly, but mosh does not, and helix works around exactly this by
-emitting its own clear right after entering. Without it, a host that skips the implicit clear can
-show stale content through the new alternate buffer until the application's first frame overwrites
-every cell. qwertty follows that evidence rather than trusting the terminal's own 1049 behavior.
+The explicit clear is deliberate, not decorative: mode 1049 usually clears the alternate buffer
+implicitly, but mosh does not, and helix works around exactly this by emitting its own clear right
+after entering. Without it, a host that skips the implicit clear can show stale content through the
+new alternate buffer until the application's first frame overwrites every cell. qwertty follows
+that evidence rather than trusting the terminal's own 1049 behavior.
 
 ```rust,no_run
 use qwertty::TerminalSession;
@@ -233,20 +238,19 @@ session.leave()
 
 `hide_cursor()` writes `CSI ? 25 l` and records a ledger entry (`ModeKind::CursorVisibility`)
 whose undo shows the cursor again (`CSI ? 25 h`) on `leave`/drop/emergency. Hiding is the tracked
-state (FM-L3): a session that hides the cursor is guaranteed to show it again on every exit path,
-whether or not the application calls `show_cursor` itself. `show_cursor()` writes `CSI ? 25 h`
-immediately and is **not** itself ledger-tracked — the visible cursor is the safe default state,
-so there is nothing to undo on leave; calling it after `hide_cursor()` makes the cursor visible
-right away, and the still-present hide entry writes one more redundant, harmless show on the next
-`leave`.
+state: a session that hides the cursor is guaranteed to show it again on every exit path, whether
+or not the application calls `show_cursor` itself. `show_cursor()` writes `CSI ? 25 h` immediately
+and is **not** itself ledger-tracked — the visible cursor is the safe default state, so there is
+nothing to undo on leave; calling it after `hide_cursor()` makes the cursor visible right away, and
+the still-present hide entry writes one more redundant, harmless show on the next `leave`.
 
 Cursor shape (DECSCUSR, `commands::cursor::set_shape`) is a plain command, not a ledger-tracked
-mode: a shape change has no single universal reset (FM-L3 — helix#10089, libvaxis#10/#98; no one
-DECSCUSR value restores every terminal profile's prior shape). `commands::cursor::reset_shape()`
-emits `CSI 0 SP q`, the terminal-profile-default request, but an application that changes the
-cursor shape and cares about restoring the exact prior shape should track and restore it
-explicitly rather than rely on `reset_shape` alone. See [Cursor
-Shape](crate::docs#cursor-shape).
+mode: a shape change has no single universal reset (helix#10089, libvaxis#10/#98; no one DECSCUSR
+value restores every terminal profile's prior shape). `commands::cursor::reset_shape()` emits
+`CSI 0 SP q`, the terminal-profile-default request, but an application that changes the cursor
+shape and cares about restoring the exact prior shape should track and restore it explicitly
+rather than rely on `reset_shape` alone. See [Cursor
+Shape](crate::docs::terminal_control#cursor-shape).
 
 Both are available on the Tokio session (`TokioTerminalSession`) with the same names and the same
 ledger semantics, writing through its readiness path before recording the ledger entry. See the
@@ -285,20 +289,21 @@ state changes, so the hook only writes bytes and restores the captured terminal 
 bounded, so a stalled terminal cannot hang the hook. A panic hook covers unwinding panics on any
 thread; it does not run on `abort` or fatal signals. See the `panic_safe_restore.rs` example.
 
-## Async Boundary And Live Queries
+## Async Boundary
 
 The runtime-neutral session above is the whole default-feature surface. The async boundary —
 `TokioTerminalSession`, the event loop, and the live cursor-position, terminal-status, and
-capability-probe query helpers — lives in [Terminal Session: Async Boundary And Live
-Queries](crate::docs#terminal-session-async-boundary-and-live-queries), included with the
-optional `tokio` feature. See also [Tokio Input Ownership And Query Handoff](
-crate::docs#tokio-input-ownership-and-query-handoff) for the single-owner model and handoff
-pattern.
+capability-probe query helpers — is documented below under
+<!-- markdownlint-disable-next-line MD051 -- heading lives in a companion include on this page -->
+[Async Boundary And Live Queries](#async-boundary-and-live-queries), included with the optional
+`tokio` feature. See also the Tokio Input Ownership And Query Handoff page
+(`crate::docs::tokio_input_ownership`, with the `tokio` feature enabled) for the single-owner model
+and handoff pattern.
 
 ## Platform Support
 
 The live terminal implementation currently supports Unix. Unsupported platforms expose the same
 public types where possible and return `Error::Unsupported` for live terminal operations.
 
-See [Platform Support](crate::docs#platform-support) for the current Unix-first support boundary
-and the documented unsupported behavior on other platforms.
+See [Platform Support](crate::docs::platform) for the current Unix-first support boundary and the
+documented unsupported behavior on other platforms.

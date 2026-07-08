@@ -1,10 +1,9 @@
-# Terminal Session: Async Boundary And Live Queries
+<!-- markdownlint-disable-next-line MD041 -- appended into the parent page, not standalone -->
+## Async Boundary And Live Queries
 
-This is the Tokio-backed tail of the [Terminal Session Reference](crate::docs#terminal-session-reference).
-It documents `TokioTerminalSession`, the async session owner behind the optional `tokio` Cargo
-feature on Unix, so it is included in the crate docs only when that feature is enabled.
-
-## Async Boundary
+This is the Tokio-backed tail of the terminal session reference above. It documents
+`TokioTerminalSession`, the async session owner behind the optional `tokio` Cargo feature on Unix,
+so it is included in the crate docs only when that feature is enabled.
 
 qwertty is an async-first terminal library, but `TerminalSession` stays runtime-neutral. It does
 not add async methods that only wrap synchronous file reads or writes.
@@ -17,12 +16,11 @@ unrelated input, and documents cancellation at the event-delivery boundary.
 Keeping this boundary explicit avoids making every user compile Tokio and avoids adding a
 runtime-agnostic async trait before one real runtime implementation proves the shape.
 
-See [Tokio Input Ownership And Query Handoff](
-crate::docs#tokio-input-ownership-and-query-handoff) for the single-owner model, query/event
-interaction, timeout behavior, and orderly handoff pattern.
+See [Tokio Input Ownership And Query Handoff](crate::docs::tokio_input_ownership) for the
+single-owner model, query/event interaction, timeout behavior, and orderly handoff pattern.
 
-See [Checked-In Examples](crate::docs#checked-in-examples) for a durable index of the runnable
-session, input, and query-routing examples shipped with the crate.
+See [Examples](crate::docs::examples) for a durable index of the runnable session, input, and
+query-routing examples shipped with the crate.
 
 Enable the feature in `Cargo.toml`:
 
@@ -67,12 +65,11 @@ session.leave().await
 
 If a task waiting in `next_event` is canceled before another terminal read completes, the session
 remains usable. Events already decoded from earlier reads stay queued for later calls. The Tokio
-session enables and tears down mouse, focus, and bracketed-paste modes (see
-[Input Modes](crate::docs#input-modes)) and alternate screen and cursor visibility (see [Screen And
-Cursor Lifecycle](crate::docs#screen-and-cursor-lifecycle)); it does not yet add graphics,
-clipboard, or vendor protocol policy.
+session enables and tears down mouse, focus, and bracketed-paste modes and alternate screen and
+cursor visibility (see Input Modes and Screen And Cursor Lifecycle in the terminal session
+reference above); it does not yet add graphics, clipboard, or vendor protocol policy.
 
-## Lone-Escape Flush Timing
+### Lone-Escape Flush Timing
 
 A bare `ESC` (`0x1b`) is ambiguous: it may be a standalone Escape keypress, or it may be the first
 byte of an escape sequence (an arrow key, a CSI, an OSC). The decoder cannot tell until the next
@@ -115,7 +112,7 @@ exactly the right fallback for the non-kitty path and never interferes with the 
 also scoped to `next_event`; the live query helpers such as `request_cursor_position` carry their
 own timeout and are unaffected.
 
-## Terminal Acquisition Observability
+### Terminal Acquisition Observability
 
 On Unix, `TokioTerminalSession::open` reaches the controlling terminal through a three-branch
 fallback. It prefers duplicating the inherited read-write standard input (the robust primary, and
@@ -142,7 +139,7 @@ session.leave().await
 # }
 ```
 
-## Live Cursor Position Query
+### Live Cursor Position Query
 
 `TokioTerminalSession::request_cursor_position` is the first live query helper. It writes the
 cursor position Device Status Report request, flushes output, and reads decoded events until it
@@ -284,13 +281,13 @@ queries, capability probing, or query registration.
 For a small checked-in Tokio example that matches live query success, timeout, and terminal read
 failure explicitly, see `examples/tokio_query_error_handling.rs` in the repository.
 
-## Suspend And Resume Lifecycle
+### Suspend And Resume Lifecycle
 
 A full-screen application should drop cleanly to the shell on `Ctrl-Z` and repaint correctly when
 brought back with `fg`. `TokioTerminalSession` exposes the two halves of that lifecycle as explicit
 operations the application drives from its own job-control integration. qwertty installs no signal
 handler of its own, so the application owns the `SIGTSTP`/`SIGCONT` wiring and decides exactly when
-to call each method (design 01 §4).
+to call each method.
 
 `suspend` restores the terminal to a clean cooked state (replaying the mode ledger's resets while
 keeping the entries so resume can re-apply them), disarms the panic-safe restore handle so the
@@ -298,7 +295,7 @@ emergency hook cannot fire while the process is stopped, then sends `SIGTSTP` to
 group so the controlling shell regains the terminal. Before signalling it checks the process group
 defensively: a session leader with no job-control shell to resume it is a degenerate group, and
 `suspend` returns `Error::DegenerateProcessGroup` rather than stopping into a state nothing will
-continue (FM-G7).
+continue.
 
 `resume` re-establishes terminal state the shell may have scrambled, in a fixed order — termios
 resync first, then flags resync. It re-enters raw mode and every recorded mode with a bounded retry
@@ -307,7 +304,7 @@ non-blocking flag (the shell may have cleared it, and the async reactor requires
 flushes stale input, and queues a synthetic `Event::Resize` so the application repaints at whatever
 size the terminal is now — the window may have been resized while the process was stopped.
 
-### The `flush_input` Choice
+#### The `flush_input` Choice
 
 `resume` takes a `flush_input` flag, so dropping stale typeahead is the caller's decision rather
 than a fixed policy. While the process is stopped a user may type at the shell; those bytes sit in
@@ -339,7 +336,7 @@ match session.next_event().await? {
 For a runnable Tokio example that suspends on a key and resumes on `SIGCONT`, see
 `examples/suspend_resume.rs` in the repository.
 
-## Detached Handoff
+### Detached Handoff
 
 Some applications hand the terminal to a foreground child rather than to the shell: an editor opened
 on `$EDITOR`, a pager, a subshell. `run_detached` is the sibling of suspend/resume for that case. It
@@ -363,11 +360,11 @@ descriptor across the closure.
 After `f` returns, `run_detached` never trusts what the child left. It re-registers async readiness
 on the *same* descriptor with a fresh registration, re-asserts non-blocking, and re-enters raw mode
 and every recorded mode with the same bounded retry `resume` uses — a child like `vi` or `stty` may
-have left the terminal cooked, so the session re-asserts its own modes wholesale (FM-L9). Finally it
-queues a synthetic `Event::Resize` so the next `next_event` repaints at the current size, since the
-window may have changed while the child ran.
+have left the terminal cooked, so the session re-asserts its own modes wholesale. Finally it queues
+a synthetic `Event::Resize` so the next `next_event` repaints at the current size, since the window
+may have changed while the child ran.
 
-### The Fresh Registration
+#### The Fresh Registration
 
 The reclaim takes a *fresh* async readiness registration rather than reusing the one held across the
 handoff, and this is a correctness requirement, not a convenience. The async reactor is
@@ -405,7 +402,7 @@ match session.next_event().await? {
 For a runnable Tokio example that hands the terminal to `$EDITOR` and reclaims it, see
 `examples/editor_handoff.rs` in the repository.
 
-## Signal Handling
+### Signal Handling
 
 Beyond `SIGWINCH` (handled by the `resize_stream` fallback), a full-screen application cares about a
 handful of other process signals: `SIGTSTP` (`Ctrl-Z`), `SIGCONT` (resumed with `fg`), `SIGTERM`
@@ -415,8 +412,8 @@ method returns an opt-in `SignalStream` that reports these as typed `TerminalSig
 `next_event` and `resize_stream`.
 
 The stream is consistent with the rest of the design: qwertty installs no signal handler at session
-construction and never auto-acts (design 01). The four listeners are installed only when `signals`
-is called — the application owns registration by calling it — and the stream only *reports*. The
+construction and never auto-acts. The four listeners are installed only when `signals` is called —
+the application owns registration by calling it — and the stream only *reports*. The
 recommended responses are `suspend` on `Suspend`, `resume` on `Continue`, and a graceful exit on
 `Terminate`/`Interrupt`, but nothing forces them: a REPL may treat `Interrupt` as "cancel the
 current line" instead. `SIGWINCH` is deliberately excluded — that is `resize_stream`'s job — so an
@@ -447,7 +444,7 @@ loop {
 For a runnable Tokio example that selects on the signal stream alongside input and resize, see
 `examples/signal_handling.rs` in the repository.
 
-## Query Routing Boundary
+### Query Routing Boundary
 
 Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal
 write, flush, runtime-backed read, decoder state, timeout, and preserved event queue needed for
@@ -461,6 +458,5 @@ An internal session-owned router may share mechanics between those helpers, but 
 yet expose a generic query router, concurrent query registry, capability probing API, or
 runtime-agnostic async query trait.
 
-The [Tokio Input Ownership And Query Handoff](
-crate::docs#tokio-input-ownership-and-query-handoff) guide shows how this boundary fits into a
-real event loop and child-process handoff.
+The [Tokio Input Ownership And Query Handoff](crate::docs::tokio_input_ownership) guide shows how
+this boundary fits into a real event loop and child-process handoff.

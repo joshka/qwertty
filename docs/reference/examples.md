@@ -98,6 +98,12 @@ point without scanning the repository tree.
   coalesced `Event::Resize` delivery against the `SIGWINCH` fallback stream (`resize_stream`) — a
   resize storm collapses to one event carrying the final geometry, while scroll and mouse events
   never coalesce; the session resets mode 2048 on `leave`.
+- `suspend_resume.rs`: suspend to the shell on a key (`TokioTerminalSession::suspend` — restore the
+  terminal, disarm the panic-safe handle, and `SIGTSTP` the process group) and resume on `SIGCONT`
+  (`resume` — re-enter raw mode and recorded modes with a bounded retry, re-assert the readiness
+  fd's non-blocking flag, optionally `tcflush` stale input via the `flush_input` parameter, and
+  queue a synthetic `Event::Resize`); qwertty installs no signal handler, so the app owns the
+  `SIGTSTP`/`SIGCONT` wiring (design 01 §4).
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to

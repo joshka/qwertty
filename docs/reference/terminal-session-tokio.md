@@ -241,6 +241,61 @@ queries, capability probing, or query registration.
 For a small checked-in Tokio example that matches live query success, timeout, and terminal read
 failure explicitly, see `examples/tokio_query_error_handling.rs` in the repository.
 
+## Suspend And Resume Lifecycle
+
+A full-screen application should drop cleanly to the shell on `Ctrl-Z` and repaint correctly when
+brought back with `fg`. `TokioTerminalSession` exposes the two halves of that lifecycle as explicit
+operations the application drives from its own job-control integration. qwertty installs no signal
+handler of its own, so the application owns the `SIGTSTP`/`SIGCONT` wiring and decides exactly when
+to call each method (design 01 §4).
+
+`suspend` restores the terminal to a clean cooked state (replaying the mode ledger's resets while
+keeping the entries so resume can re-apply them), disarms the panic-safe restore handle so the
+emergency hook cannot fire while the process is stopped, then sends `SIGTSTP` to the whole process
+group so the controlling shell regains the terminal. Before signalling it checks the process group
+defensively: a session leader with no job-control shell to resume it is a degenerate group, and
+`suspend` returns `Error::DegenerateProcessGroup` rather than stopping into a state nothing will
+continue (FM-G7).
+
+`resume` re-establishes terminal state the shell may have scrambled, in a fixed order — termios
+resync first, then flags resync. It re-enters raw mode and every recorded mode with a bounded retry
+(the shell races the returning process for the terminal), re-asserts the readiness descriptor's
+non-blocking flag (the shell may have cleared it, and the async reactor requires it), optionally
+flushes stale input, and queues a synthetic `Event::Resize` so the application repaints at whatever
+size the terminal is now — the window may have been resized while the process was stopped.
+
+### The `flush_input` Choice
+
+`resume` takes a `flush_input` flag, so dropping stale typeahead is the caller's decision rather
+than a fixed policy. While the process is stopped a user may type at the shell; those bytes sit in
+the terminal's input queue. Passing `flush_input: true` `tcflush`es them so they are not delivered
+to the application as if typed into it — the usual choice for a full-screen editor. Passing
+`false` keeps them, which a REPL replaying a partially typed command buffer may prefer. Only the
+input queue is affected; queued output the session still owes is untouched.
+
+```no_run
+use qwertty::{Event, Key, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+match session.next_event().await? {
+    Event::Key(key) if matches!(key.key(), Key::Char('z')) => {
+        // Restore the terminal, disarm the emergency hook, and stop the process group. This call
+        // returns once the process is continued again (a SIGCONT the app waits for elsewhere).
+        session.suspend().await?;
+        // On return, re-enter modes, re-assert non-blocking, drop stale shell typeahead, and queue
+        // a synthetic resize so the next `next_event` repaints at the current size.
+        session.resume(true).await?;
+    }
+    _ => {}
+}
+# session.leave().await
+# }
+```
+
+For a runnable Tokio example that suspends on a key and resumes on `SIGCONT`, see
+`examples/suspend_resume.rs` in the repository.
+
 ## Query Routing Boundary
 
 Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal

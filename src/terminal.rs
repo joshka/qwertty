@@ -154,6 +154,18 @@ pub enum Error {
         /// Platform family that rejected the operation.
         platform: &'static str,
     },
+    /// The process group is degenerate, so a job-control stop signal would be surprising or unsafe.
+    ///
+    /// `TokioTerminalSession::suspend` sends `SIGTSTP` to the whole process group
+    /// so the shell resumes cleanly. That only makes sense under a shell that owns job control: a
+    /// session leader whose process-group id equals its session id has no job-control parent to
+    /// hand control back to, so stopping it would drop the process into a state nothing will resume
+    /// (FM-G7). Rather than do something surprising, `suspend` reports this typed error and leaves
+    /// the terminal untouched. The `reason` names the degeneracy that was detected.
+    DegenerateProcessGroup {
+        /// Human-readable description of the degeneracy that blocked the stop signal.
+        reason: &'static str,
+    },
     /// The session's [`Policy`](crate::Policy) denied a gated operation.
     ///
     /// A side-effecting or exfiltrating feature (clipboard write/read, notifications, file
@@ -212,6 +224,11 @@ impl Error {
             platform,
         }
     }
+
+    #[cfg(all(feature = "tokio", unix))]
+    pub(crate) const fn degenerate_process_group(reason: &'static str) -> Self {
+        Self::DegenerateProcessGroup { reason }
+    }
 }
 
 impl fmt::Display for Error {
@@ -235,6 +252,9 @@ impl fmt::Display for Error {
             } => {
                 write!(f, "{operation} is not supported on {platform}")
             }
+            Self::DegenerateProcessGroup { reason } => {
+                write!(f, "cannot send a job-control stop signal: {reason}")
+            }
             Self::PolicyDenied { gate } => {
                 write!(f, "operation denied by policy: {gate}")
             }
@@ -254,6 +274,7 @@ impl error::Error for Error {
             Self::InvalidTerminalSize { .. }
             | Self::QueryTimeout { .. }
             | Self::Unsupported { .. }
+            | Self::DegenerateProcessGroup { .. }
             | Self::PolicyDenied { .. } => None,
         }
     }

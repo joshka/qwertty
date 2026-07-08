@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+use rustix::process::{Pid, Signal as ProcessSignal, getpgrp, getsid, kill_process_group};
 use tokio::io::unix::AsyncFd;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::time::{Instant, timeout_at};
@@ -85,6 +86,13 @@ enum CapabilityField {
 
 const DEV_TTY: &str = "/dev/tty";
 const READ_BUFFER_LEN: usize = 1024;
+
+/// How many times [`resume`](TokioTerminalSession::resume) retries the ledger re-enter before
+/// giving up, tolerating the shell racing the returning process for the terminal (FM-G4). Ten tries
+/// at [`RESUME_REENTER_RETRY_DELAY`] apart is the helix/neovim pattern (~half a second total).
+const RESUME_REENTER_RETRIES: u32 = 10;
+/// How long [`resume`](TokioTerminalSession::resume) waits between re-enter attempts.
+const RESUME_REENTER_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 /// Which of the controlling-terminal fallback branches produced a session's device.
 ///
@@ -247,6 +255,41 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// controlling terminal, so no fallback branch was taken. Read-only observability; exposed
     /// through [`acquisition`](Self::acquisition).
     acquisition: Option<TerminalAcquisition>,
+    /// The injectable job-control stop-signal seam used by [`suspend`](Self::suspend).
+    ///
+    /// This is the sans-io seam that keeps [`suspend`](Self::suspend) testable without stopping
+    /// the test process. The default is [`send_real_stop_signal`], which checks the process
+    /// group defensively (FM-G7) and then sends `SIGTSTP` to the whole group so the shell
+    /// resumes cleanly. Tests swap in a stub that records the call and returns `Ok(())`, so
+    /// every mechanic around the signal — ledger undo, restore-handle disarm, flags/mode
+    /// resync, synthetic resize — runs while no real `SIGTSTP` is ever delivered to the runner
+    /// (a CI-safety requirement, not just a test convenience). The closure returns a typed
+    /// error for a degenerate process group.
+    stop_signal: StopSignal,
+}
+
+/// The injectable job-control stop-signal seam a [`TokioTerminalSession`] holds.
+///
+/// Boxing the send behind a trait object is what makes [`suspend`](TokioTerminalSession::suspend)
+/// sans-io: the real send (`SIGTSTP` to the process group) is one implementation, and a test stub
+/// that records the call without signalling is another. The closure performs the whole
+/// check-then-send so the FM-G7 process-group guard and the raw `kill` stay behind the same seam.
+/// The wrapper carries a manual [`fmt::Debug`] so the session can keep deriving `Debug` even though
+/// a boxed closure is not itself `Debug`.
+struct StopSignal(Box<dyn FnMut() -> terminal::Result<()> + Send>);
+
+impl StopSignal {
+    /// Invokes the seam: checks the process group (FM-G7) and sends the stop signal, or records the
+    /// call in a test stub.
+    fn send(&mut self) -> terminal::Result<()> {
+        (self.0)()
+    }
+}
+
+impl fmt::Debug for StopSignal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StopSignal(..)")
+    }
 }
 
 impl TokioTerminalSession<Terminal> {
@@ -411,7 +454,22 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             active_probe: Vec::new(),
             capabilities: None,
             acquisition,
+            stop_signal: StopSignal(Box::new(send_real_stop_signal)),
         })
+    }
+
+    /// Replaces the job-control stop-signal seam with a test stub (unit tests only).
+    ///
+    /// This is how the suspend/resume unit tests exercise every mechanic — ledger undo, restore
+    /// disarm, flags/mode resync, synthetic resize — while `SIGTSTP` is stubbed out, so no test
+    /// ever stops the test runner (a CI-safety requirement). It is not part of the public API.
+    #[cfg(test)]
+    fn with_stop_signal(
+        mut self,
+        stop_signal: impl FnMut() -> terminal::Result<()> + Send + 'static,
+    ) -> Self {
+        self.stop_signal = StopSignal(Box::new(stop_signal));
+        self
     }
 
     /// Returns the current terminal size.
@@ -1546,6 +1604,187 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         self.session.leave()
     }
 
+    /// Suspends the process to the shell, leaving the terminal clean, then requests a job-control
+    /// stop (design 01 §4, playbook M6-S1).
+    ///
+    /// This is the `SIGTSTP` half of the suspend/resume lifecycle. It performs, in order:
+    ///
+    /// 1. **Ledger undo, entries kept.** It replays the composed session's mode ledger in reverse —
+    ///    cooked mode, the mode-offs (mouse, paste, focus, in-band resize, alternate screen, cursor
+    ///    show) — so the shell the user drops to sees a clean terminal, but **keeps** the ledger
+    ///    entries so [`resume`](Self::resume) can re-apply them. This is exactly the re-entrant
+    ///    [`TerminalSession::leave`], which also **disarms** the panic-safe restore handle: a
+    ///    suspended process must not have its emergency hook fire while it sits stopped.
+    /// 2. **Process-group guard (FM-G7).** Before signalling, it checks the process group
+    ///    defensively. A degenerate group — a session leader whose process-group id equals its
+    ///    session id, so there is no job-control shell to hand control back to — returns
+    ///    [`terminal::Error::DegenerateProcessGroup`] rather than stopping a process nothing will
+    ///    resume. The terminal has already been restored to cooked mode at this point, so a guard
+    ///    rejection still leaves a usable terminal.
+    /// 3. **Stop signal.** It sends `SIGTSTP` to the whole process group (not to self — FM-G3) so
+    ///    the shell regains the terminal and the process stops. The send runs through an injectable
+    ///    seam so tests exercise every mechanic above without stopping the test runner.
+    ///
+    /// The caller drives this from its own `SIGTSTP` integration (qwertty installs no signal
+    /// handler); on `SIGCONT` it calls [`resume`](Self::resume). After the guard passes and the
+    /// signal is sent the process is stopped, so this call returns only once the process is
+    /// continued again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::DegenerateProcessGroup`] when the process group cannot safely be
+    /// stopped, or a terminal-mode restoration error if the ledger undo fails. A stop-signal send
+    /// error is surfaced as-is.
+    #[expect(
+        clippy::unused_async,
+        reason = "suspend is synchronous today (ledger undo + a signal send), but stays an async \
+                  fn for API symmetry with the awaited resume and the async lifecycle boundary — \
+                  and to leave room for an awaited stop-signal seam later"
+    )]
+    pub async fn suspend(&mut self) -> terminal::Result<()> {
+        // Step 1: undo the terminal state the re-entrant way (keeps the ledger entries for resume)
+        // and disarm the restore handle — both are exactly what the inner `leave` does. The fcntl
+        // status flags are intentionally *not* restored here: resume re-asserts non-blocking
+        // itself, and the shared-description flags are the shell's concern only on a full
+        // teardown.
+        self.session.leave()?;
+
+        // Steps 2 and 3: the FM-G7 guard and the `SIGTSTP` send, both behind the injectable seam.
+        self.stop_signal.send()
+    }
+
+    /// Resumes the session after a `SIGCONT`, re-establishing terminal state the shell may have
+    /// scrambled (design 01 §4, playbook M6-S1).
+    ///
+    /// This is the `SIGCONT` half of the lifecycle. The order matters — **termios resync first,
+    /// then flags resync** — because raw mode and the readiness fd's non-blocking flag are separate
+    /// pieces of terminal state the shell can each have reset, and the input path only works once
+    /// both are back. It performs:
+    ///
+    /// 1. **Termios resync (re-enter raw mode).** It replays the kept mode ledger through the
+    ///    composed [`TerminalSession::enter`], re-entering raw mode and re-applying every recorded
+    ///    mode, and **re-arms** the panic-safe restore handle. This never trusts a cached termios:
+    ///    the shell may have left the terminal cooked, so the session re-asserts its own modes
+    ///    (codex's disable→enable discipline). Because the shell races the returning process for
+    ///    the terminal (FM-G4), the re-enter is retried with a bounded budget (~10 tries × 50 ms,
+    ///    the helix/neovim pattern) before giving up.
+    /// 2. **Flags resync (re-assert non-blocking).** It re-applies the `O_NONBLOCK` status flag on
+    ///    the readiness descriptor. The session set the descriptor non-blocking at construction,
+    ///    but the shell the process returned from may have cleared it on the shared open file
+    ///    description; [`AsyncFd`] requires non-blocking, so this must be re-asserted after
+    ///    `SIGCONT`, after the termios resync.
+    /// 3. **Optional input flush.** When `flush_input` is `true`, it `tcflush`es the pending input
+    ///    so stale bytes the user typed at the shell (or a partially typed line) are dropped rather
+    ///    than fed to the application as if typed into it. This is the caller's choice: an editor
+    ///    usually wants the flush; a REPL replaying a command buffer may not.
+    /// 4. **Synthetic resize.** It reads the current terminal size and queues an [`Event::Resize`]
+    ///    so the next [`next_event`](Self::next_event) reports it — the window may have been
+    ///    resized while the process was stopped, and this makes the application repaint at the size
+    ///    the terminal is now, without waiting for a `SIGWINCH` or an in-band report.
+    ///
+    /// # Errors
+    ///
+    /// Returns a terminal-mode error if the bounded-retry re-enter never succeeds, if the readiness
+    /// flag cannot be re-asserted, if the optional flush fails, or if the current size cannot be
+    /// read for the synthetic resize.
+    pub async fn resume(&mut self, flush_input: bool) -> terminal::Result<()> {
+        // Step 1: termios resync — re-enter the kept ledger (raw mode + recorded modes) with a
+        // bounded retry, since the shell races the returning process for the terminal (FM-G4).
+        self.reenter_with_retry().await?;
+
+        // Step 2: flags resync — re-assert non-blocking on the readiness fd. The shell may have
+        // cleared it on the shared description after SIGCONT; AsyncFd requires it. This is done
+        // *after* the termios resync, so the ordering the playbook mandates holds.
+        self.reassert_nonblocking()?;
+
+        // Step 3: optional stale-input flush. The caller decides whether typeahead at the shell is
+        // dropped (`tcflush` of the input queue) or kept.
+        if flush_input {
+            self.flush_pending_input()?;
+        }
+
+        // Step 4: queue a synthetic resize so the app repaints at whatever size the terminal is now
+        // (the window may have been resized while suspended). Read through the same size ladder and
+        // enqueue an Event::Resize on the pending queue next_event drains.
+        self.queue_synthetic_resize()?;
+
+        Ok(())
+    }
+
+    /// Re-enters the mode ledger with a bounded retry, tolerating the shell racing for the
+    /// terminal.
+    ///
+    /// The first re-enter after `SIGCONT` can fail transiently while the shell still holds the
+    /// terminal (FM-G4). This retries up to [`RESUME_REENTER_RETRIES`] times with
+    /// [`RESUME_REENTER_RETRY_DELAY`] between attempts — the helix/neovim ~10×50 ms pattern —
+    /// before surfacing the last error. Each retry re-runs the same idempotent ledger replay; a
+    /// re-enter that partially applied is safe to replay because the ledger entries are unchanged.
+    async fn reenter_with_retry(&mut self) -> terminal::Result<()> {
+        let mut last_error = None;
+        for attempt in 0..RESUME_REENTER_RETRIES {
+            match self.session.enter() {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error);
+                    // The inner `enter` is a no-op once it has marked itself entered, so a retry
+                    // needs the session to be left again before it will replay. Leaving is
+                    // idempotent and keeps the ledger, so this cycles cleanly for the next attempt.
+                    _ = self.session.leave();
+                    if attempt + 1 < RESUME_REENTER_RETRIES {
+                        tokio::time::sleep(RESUME_REENTER_RETRY_DELAY).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("the retry loop runs at least once, so an error was recorded"))
+    }
+
+    /// Re-asserts the readiness descriptor's non-blocking flag after a `SIGCONT`.
+    ///
+    /// [`AsyncFd`] requires the registered descriptor to be non-blocking. The session set it so at
+    /// construction, but the shell the process returned from may have cleared `O_NONBLOCK` on the
+    /// shared open file description while it owned the terminal, so resume re-asserts it. Reads the
+    /// current flags and sets non-blocking on top, so no other status flag the shell may have set
+    /// is disturbed.
+    fn reassert_nonblocking(&self) -> terminal::Result<()> {
+        let fd = self.readiness.get_ref();
+        let flags = fcntl_getfl(fd)
+            .map_err(io::Error::from)
+            .map_err(terminal::Error::set_terminal_mode)?;
+        fcntl_setfl(fd, flags | OFlags::NONBLOCK)
+            .map_err(io::Error::from)
+            .map_err(terminal::Error::set_terminal_mode)
+    }
+
+    /// Drops pending input on the terminal (`tcflush` of the input queue).
+    ///
+    /// Called by [`resume`](Self::resume) only when the caller passes `flush_input: true`. This
+    /// discards stale bytes typed at the shell while the process was stopped so they are not
+    /// delivered to the application as if typed into it. It flushes the *input* queue only; queued
+    /// output the session still owes is untouched.
+    fn flush_pending_input(&self) -> terminal::Result<()> {
+        rustix::termios::tcflush(
+            self.readiness.get_ref(),
+            rustix::termios::QueueSelector::IFlush,
+        )
+        .map_err(io::Error::from)
+        .map_err(terminal::Error::set_terminal_mode)
+    }
+
+    /// Reads the current terminal size and enqueues a synthetic [`Event::Resize`] for delivery.
+    ///
+    /// The window may have been resized while the process was stopped, so resume enqueues one
+    /// cell-geometry resize (a `SIGCONT` carries no pixel geometry, matching the `SIGWINCH`
+    /// fallback) onto the same `pending` queue [`next_event`](Self::next_event) drains. The app
+    /// then repaints at the size the terminal is now without waiting for a `SIGWINCH` or an
+    /// in-band report.
+    fn queue_synthetic_resize(&mut self) -> terminal::Result<()> {
+        let size = self.session.size()?;
+        let resize = ResizeEvent::new(size, None);
+        self.pending.push_back(Event::Resize(resize));
+        Ok(())
+    }
+
     /// Returns an awaitable [`ResizeStream`] that yields a synthetic resize on every `SIGWINCH`.
     ///
     /// This is the **fallback** resize source, for terminals that do not support in-band resize
@@ -1704,6 +1943,56 @@ fn fd_write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
 /// reason as [`fd_write`].
 fn fd_read(fd: &OwnedFd, buffer: &mut [u8]) -> io::Result<usize> {
     rustix::io::read(fd, buffer).map_err(io::Error::from)
+}
+
+/// The default job-control stop-signal seam: guards the process group (FM-G7), then sends
+/// `SIGTSTP` to the whole group.
+///
+/// This is what a session holds until a test swaps in a stub. It reads the process group and
+/// session ids, rejects a degenerate group through [`process_group_is_suspendable`], and — when the
+/// group is safe — sends `SIGTSTP` to the whole process group (not to self, FM-G3) so the
+/// controlling shell regains the terminal and the process stops.
+///
+/// # Errors
+///
+/// Returns [`terminal::Error::DegenerateProcessGroup`] when the group is a session leader with no
+/// job-control parent, or a read/write error if the id queries or the signal send fail.
+fn send_real_stop_signal() -> terminal::Result<()> {
+    let pgrp = getpgrp();
+    // A `getsid(None)` failure is treated as "cannot prove the group is safe", which is itself the
+    // degenerate case: refuse rather than stop into an unknown job-control state.
+    let sid = getsid(None)
+        .ok()
+        .and_then(|sid| Pid::from_raw(sid.as_raw_pid()));
+    process_group_is_suspendable(pgrp, sid)?;
+
+    kill_process_group(pgrp, ProcessSignal::TSTP)
+        .map_err(io::Error::from)
+        .map_err(terminal::Error::write_terminal)
+}
+
+/// The FM-G7 process-group guard: decides whether a job-control stop signal is safe to send.
+///
+/// `pgrp` is the caller's process group; `sid` is its session id (or `None` when the session id
+/// could not be determined). A stop signal is *unsafe* when the process is a session leader whose
+/// process-group id equals its session id: such a process has no job-control shell to hand the
+/// terminal back to, so `SIGTSTP` would drop it into a stopped state nothing will continue. This
+/// case, and an undeterminable session id, both yield [`terminal::Error::DegenerateProcessGroup`].
+///
+/// Kept as a pure function of the two ids so the guard is unit-testable without depending on the
+/// test process's real process group: a test passes the ids it wants to exercise.
+fn process_group_is_suspendable(pgrp: Pid, sid: Option<Pid>) -> terminal::Result<()> {
+    let Some(sid) = sid else {
+        return Err(terminal::Error::degenerate_process_group(
+            "the session id could not be determined",
+        ));
+    };
+    if pgrp.as_raw_pid() == sid.as_raw_pid() {
+        return Err(terminal::Error::degenerate_process_group(
+            "the process is a session leader with no job-control shell to resume it",
+        ));
+    }
+    Ok(())
 }
 
 /// Returns whether a terminal error is a read error whose source is `UnexpectedEof`.
@@ -1986,5 +2275,324 @@ mod tests {
     #[test]
     fn an_empty_queue_yields_nothing() {
         assert_eq!(drain(VecDeque::new()), Vec::<Event>::new());
+    }
+
+    // --- suspend/resume lifecycle (M6-S1) --------------------------------------------------------
+    //
+    // These drive the real suspend/resume mechanics over a headless `FakeDevice` (and one
+    // PTY-backed session for the restore-handle disarm/re-arm, which only exists on a live
+    // terminal). The actual `SIGTSTP` send is stubbed through the injectable seam so NO test
+    // ever stops the test runner — a CI-safety requirement, not just a convenience (see the
+    // module's `StopSignal`). A real TSTP/CONT signal round-trip is owed to the attended/manual
+    // checklist (playbook M6-S1); it cannot be exercised headlessly without stopping the
+    // harness, so we test every mechanic around the signal directly and leave the raw signal
+    // delivery to the attended run.
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tokio::time::timeout;
+
+    use crate::{FakeDevice, FakeTerminal};
+
+    /// Opens a fake-device Tokio session whose stop-signal seam is a counter-recording stub.
+    ///
+    /// Returns the session, the terminal peer for byte assertions, and the shared counter the stub
+    /// increments on each `suspend` — so a test asserts the (stubbed) stop signal fired exactly
+    /// once without a real `SIGTSTP`.
+    fn fake_session_with_stub() -> (
+        TokioTerminalSession<FakeDevice>,
+        FakeTerminal,
+        Arc<AtomicUsize>,
+    ) {
+        let (device, peer) = FakeDevice::open().expect("open fake device");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        let session = TokioTerminalSession::from_device(device)
+            .expect("open Tokio session over fake device")
+            .with_stop_signal(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            });
+        (session, peer, calls)
+    }
+
+    #[tokio::test]
+    async fn suspend_writes_mode_resets_and_invokes_the_stop_signal_once() {
+        let (mut session, mut peer, calls) = fake_session_with_stub();
+
+        // Enable a byte-based mode so the ledger undo has an observable reset to write.
+        session
+            .enable_mouse(MouseMode::Normal)
+            .await
+            .expect("mouse");
+        session.flush().await.expect("flush");
+        _ = peer.output().expect("drain enable bytes");
+
+        session.suspend().await.expect("suspend");
+
+        // The ledger undo wrote the mouse reset (CSI ? 1006 l CSI ? 1000 l) so the shell is clean.
+        let undo = peer.output().expect("read suspend output");
+        assert!(
+            undo.windows(8).any(|w| w == b"\x1b[?1000l"),
+            "suspend wrote the mouse reset, got {undo:?}",
+        );
+
+        // The (stubbed) stop signal fired exactly once — no real SIGTSTP touched the runner.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn resume_reapplies_modes_reasserts_nonblocking_and_queues_a_resize() {
+        let (mut session, mut peer, _calls) = fake_session_with_stub();
+
+        session
+            .enable_mouse(MouseMode::Normal)
+            .await
+            .expect("mouse");
+        session.flush().await.expect("flush");
+        session.suspend().await.expect("suspend");
+        _ = peer.output().expect("drain suspend bytes");
+
+        // Clear the non-blocking flag on the shared description, as a shell would after SIGCONT, so
+        // the re-assert has something to fix.
+        let flags = fcntl_getfl(session.readiness.get_ref()).expect("getfl");
+        fcntl_setfl(session.readiness.get_ref(), flags & !OFlags::NONBLOCK)
+            .expect("clear nonblock");
+
+        peer.set_size(TerminalSize::new(132, 43));
+        session.resume(false).await.expect("resume");
+
+        // Re-enter replayed the ledger: the mouse enable bytes are back on the wire.
+        let reenter = peer.output().expect("read resume output");
+        assert!(
+            reenter.windows(8).any(|w| w == b"\x1b[?1000h"),
+            "resume re-applied the mouse enable, got {reenter:?}",
+        );
+
+        // Non-blocking was re-asserted on the readiness fd (AsyncFd requires it).
+        let flags = fcntl_getfl(session.readiness.get_ref()).expect("getfl after resume");
+        assert!(
+            flags.contains(OFlags::NONBLOCK),
+            "resume must re-assert O_NONBLOCK on the readiness fd",
+        );
+
+        // A synthetic resize carrying the current size is queued for next_event.
+        let event = session.next_event().await.expect("synthetic resize");
+        let resize = event.resize_event().expect("the queued event is a resize");
+        assert_eq!(resize.cells(), TerminalSize::new(132, 43));
+        assert_eq!(resize.pixels(), None, "a SIGCONT resize carries no pixels");
+    }
+
+    #[tokio::test]
+    async fn resume_with_flush_drops_stale_typeahead() {
+        use std::io::Write;
+
+        // `tcflush` is a real-tty operation (it errors on a socketpair), so the flush path is
+        // tested over a PTY. The master writes stale typeahead into the slave's input
+        // queue; resume's `tcflush(IFlush)` drops it, and a fresh sentinel confirms the
+        // stale bytes are gone. The stop signal is still stubbed — no SIGTSTP is sent.
+        let Some((mut master, slave_path, _sized)) = open_test_pty_for_suspend() else {
+            return;
+        };
+        set_pty_nonblocking(&master);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        let mut session = TokioTerminalSession::open_path(slave_path)
+            .expect("open PTY-backed session")
+            .with_stop_signal(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            });
+
+        session.suspend().await.expect("suspend");
+
+        // The user typed at the shell while stopped: stale bytes sit in the slave's input queue.
+        // Write them, then drain any bytes the cooked-mode pty echoed back to the master so the
+        // master's buffer cannot backpressure the session's next re-enter.
+        master.write_all(b"stale").expect("write stale typeahead");
+        master.flush().expect("flush master");
+        // Let the bytes land in the slave's input queue before the flush, then clear the echo.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drain_master(&master);
+
+        session.resume(true).await.expect("resume with flush");
+        drain_master(&master);
+
+        // The synthetic resize is delivered first (queued by resume). Then a sentinel: if the stale
+        // bytes had survived, they would arrive before it.
+        let event = timeout(Duration::from_secs(1), session.next_event())
+            .await
+            .expect("next_event did not hang")
+            .expect("synthetic resize first");
+        assert!(event.resize_event().is_some(), "resize is delivered first");
+
+        master.write_all(b"z").expect("write sentinel");
+        master.flush().expect("flush sentinel");
+        let event = timeout(Duration::from_secs(1), session.next_event())
+            .await
+            .expect("next_event did not hang")
+            .expect("read after flush");
+        assert_eq!(
+            event,
+            Event::Key(KeyEvent::new(Key::Char('z')).with_text('z')),
+            "stale typeahead must be dropped by the flush; only the sentinel remains",
+        );
+    }
+
+    /// Sets a PTY master non-blocking so the test's own reads never block. Best-effort.
+    fn set_pty_nonblocking(master: &std::fs::File) {
+        if let Ok(flags) = fcntl_getfl(master) {
+            _ = fcntl_setfl(master, flags | OFlags::NONBLOCK);
+        }
+    }
+
+    /// Drains and discards whatever the pty has queued toward the master (echoed input, session
+    /// output), so an undrained master buffer cannot backpressure the session's blocking writes.
+    /// Best-effort; the master is non-blocking, so this returns as soon as it would block.
+    fn drain_master(mut master: &std::fs::File) {
+        use std::io::Read;
+
+        let mut sink = [0u8; 1024];
+        while let Ok(read) = master.read(&mut sink) {
+            if read == 0 {
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn resume_without_flush_keeps_typeahead() {
+        // The mirror of the flush test: with flush_input=false, stale bytes survive resume.
+        let (mut session, mut peer, _calls) = fake_session_with_stub();
+        session.suspend().await.expect("suspend");
+        peer.feed_input(b"k").expect("feed typeahead");
+
+        session.resume(false).await.expect("resume without flush");
+
+        // Resize first (queued by resume), then the preserved keystroke.
+        let event = session.next_event().await.expect("synthetic resize first");
+        assert!(event.resize_event().is_some());
+        let event = session.next_event().await.expect("preserved typeahead");
+        assert_eq!(
+            event,
+            Event::Key(KeyEvent::new(Key::Char('k')).with_text('k')),
+            "without flush, typeahead typed at the shell survives",
+        );
+    }
+
+    #[test]
+    fn fm_g7_guard_rejects_a_session_leader_process_group() {
+        // A degenerate group: the process is a session leader, so pgrp == sid. Stopping it would
+        // leave nothing to resume it — the guard must reject with a typed error. The ids are
+        // injected, so this never depends on the test's real process group (and never signals).
+        let leader = Pid::from_raw(4321).expect("nonzero pid");
+        let result = process_group_is_suspendable(leader, Some(leader));
+        assert!(
+            matches!(result, Err(terminal::Error::DegenerateProcessGroup { .. })),
+            "a session-leader group must be rejected, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn fm_g7_guard_rejects_an_undeterminable_session_id() {
+        // When the session id cannot be read, the guard cannot prove the group is safe, so it
+        // refuses rather than stopping into an unknown job-control state.
+        let pgrp = Pid::from_raw(4321).expect("nonzero pid");
+        let result = process_group_is_suspendable(pgrp, None);
+        assert!(matches!(
+            result,
+            Err(terminal::Error::DegenerateProcessGroup { .. })
+        ));
+    }
+
+    #[test]
+    fn fm_g7_guard_allows_a_normal_job_controlled_group() {
+        // A process running under a job-control shell has pgrp != sid (the shell is the session
+        // leader). The guard allows the stop signal in that ordinary case.
+        let pgrp = Pid::from_raw(4321).expect("nonzero pgrp");
+        let sid = Pid::from_raw(1000).expect("nonzero sid");
+        assert!(process_group_is_suspendable(pgrp, Some(sid)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn suspend_disarms_and_resume_rearms_the_restore_handle() {
+        // The restore-handle disarm/re-arm is only observable on a live-terminal session (a
+        // FakeDevice session carries no restore handle by design), so this uses a PTY-backed
+        // session. The stop signal is still stubbed — no SIGTSTP is sent.
+        let Some((_master, slave_path, _sized)) = open_test_pty_for_suspend() else {
+            return;
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        let mut session = TokioTerminalSession::open_path(slave_path)
+            .expect("open PTY-backed session")
+            .with_stop_signal(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            });
+
+        let handle = session.restore_handle();
+        session.suspend().await.expect("suspend");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "stop signal fired once");
+
+        // After suspend the handle is disarmed: a restore call finds nothing armed to restore.
+        assert!(
+            !handle.restore(),
+            "suspend must disarm the restore handle so the emergency hook cannot fire while stopped",
+        );
+        // Re-arm it (restore() disarmed it as a side effect of the probe), so resume's re-arm is
+        // the observable transition below, independent of that probe.
+        handle.arm();
+
+        session.resume(false).await.expect("resume");
+
+        // After resume the handle is armed again: a restore now performs restoration.
+        assert!(
+            handle.restore(),
+            "resume must re-arm the restore handle so panic-safe teardown is live again",
+        );
+    }
+
+    /// Opens a PTY for the live-terminal suspend tests, or `None` when a PTY is unavailable (some
+    /// sandboxes), mirroring the integration harness's skip behavior.
+    ///
+    /// Returns the master, the slave path the session opens, and a **held-open** slave fd carrying
+    /// an 80x24 window size. The caller must keep that fd alive for the test's duration: on macOS a
+    /// pty's winsize resets to 0x0 once every slave fd closes, so holding one open is what lets
+    /// resume's synthetic-resize `size()` read a non-degenerate geometry instead of the 0x0 an
+    /// unsized pty reports.
+    fn open_test_pty_for_suspend() -> Option<(std::fs::File, PathBuf, std::fs::File)> {
+        use std::os::unix::ffi::OsStringExt;
+
+        use rustix::pty::{grantpt, ptsname, unlockpt};
+        use rustix::termios::{Winsize, tcsetwinsize};
+
+        let master = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/ptmx")
+            .ok()?;
+        grantpt(&master).ok()?;
+        unlockpt(&master).ok()?;
+        let slave = ptsname(&master, Vec::new()).ok()?;
+        let slave = PathBuf::from(OsString::from_vec(slave.into_bytes()));
+
+        let sized = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&slave)
+            .ok()?;
+        tcsetwinsize(
+            &sized,
+            Winsize {
+                ws_row: 24,
+                ws_col: 80,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .ok()?;
+        Some((master, slave, sized))
     }
 }

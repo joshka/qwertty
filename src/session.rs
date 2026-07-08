@@ -490,7 +490,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write the enable bytes.
     pub fn enable_mouse(&mut self, mode: MouseMode) -> terminal::Result<&mut Self> {
-        self.record_mode(
+        self.enable_mode(
             ModeKind::Mouse,
             &commands::terminal::enable_mouse(mode),
             &commands::terminal::disable_mouse(mode),
@@ -507,7 +507,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write the enable bytes.
     pub fn enable_focus_events(&mut self) -> terminal::Result<&mut Self> {
-        self.record_mode(
+        self.enable_mode(
             ModeKind::Focus,
             &commands::terminal::enable_focus_events(),
             &commands::terminal::disable_focus_events(),
@@ -525,7 +525,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write the enable bytes.
     pub fn enable_bracketed_paste(&mut self) -> terminal::Result<&mut Self> {
-        self.record_mode(
+        self.enable_mode(
             ModeKind::BracketedPaste,
             &commands::terminal::enable_bracketed_paste(),
             &commands::terminal::disable_bracketed_paste(),
@@ -544,7 +544,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write the enable bytes.
     pub fn enable_in_band_resize(&mut self) -> terminal::Result<&mut Self> {
-        self.record_mode(
+        self.enable_mode(
             ModeKind::InBandResize,
             &commands::terminal::enable_in_band_resize(),
             &commands::terminal::disable_in_band_resize(),
@@ -576,7 +576,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
         // Apply now so the alternate screen is active for the caller's next write.
         self.device.write_all(&apply)?;
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::AlternateScreen,
             apply,
             &commands::screen::leave_alternate_screen(),
@@ -595,7 +595,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write the hide bytes.
     pub fn hide_cursor(&mut self) -> terminal::Result<&mut Self> {
-        self.record_mode(
+        self.enable_mode(
             ModeKind::CursorVisibility,
             &commands::cursor::hide(),
             &commands::cursor::show(),
@@ -621,9 +621,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
         })
     }
 
-    /// Records a byte-based mode entry, writing its enable bytes now and refreshing the emergency
-    /// blob so its reset bytes are covered even before the next `enter`.
-    fn record_mode(
+    /// Enables a byte-based mode: writes its enable bytes now, then
+    /// [`track_mode`](Self::track_mode) records the entry and refreshes the emergency blob so
+    /// its reset bytes are covered even before the next `enter`. This is the sync path — it
+    /// owns the write. The Tokio driver instead writes through its own readiness path and calls
+    /// `track_mode` directly, so the two never differ on *what* is recorded, only on *who
+    /// writes*.
+    fn enable_mode(
         &mut self,
         kind: ModeKind,
         enable: &Command,
@@ -634,19 +638,19 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
         // Apply now so the mode is active for the caller's next read.
         self.device.write_all(&apply)?;
-        self.record_mode_entry(kind, apply, disable);
+        self.track_mode(kind, apply, disable);
         Ok(self)
     }
 
-    /// Records a byte-based mode entry in the ledger and refreshes the emergency blob, **without**
-    /// writing the enable bytes.
+    /// Records an already-applied byte-based mode entry in the ledger and refreshes the emergency
+    /// blob, **without** writing the enable bytes — the caller has already written them.
     ///
-    /// The sync path writes through the device before calling this; the Tokio driver writes the
-    /// enable bytes through its own readiness path and then calls this so the ledger and emergency
-    /// blob learn the entry without a second, unordered write. `apply` is the already-encoded
-    /// enable bytes (replayed by a later `enter`); `disable` is encoded here for the undo
-    /// action.
-    fn record_mode_entry(&mut self, kind: ModeKind, apply: Vec<u8>, disable: &Command) {
+    /// [`enable_mode`](Self::enable_mode) (the sync path) writes through the device and then calls
+    /// this; the Tokio driver writes the enable bytes through its own readiness path and then calls
+    /// this so the ledger and emergency blob learn the entry without a second, unordered write.
+    /// `apply` is the already-encoded enable bytes (replayed by a later `enter`); `disable` is
+    /// encoded here for the undo action.
+    fn track_mode(&mut self, kind: ModeKind, apply: Vec<u8>, disable: &Command) {
         let mut undo = Vec::new();
         disable.encode(&mut undo);
         self.ledger.record(
@@ -678,7 +682,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     pub(crate) fn record_mouse_enabled(&mut self, mode: MouseMode) {
         let mut apply = Vec::new();
         commands::terminal::enable_mouse(mode).encode(&mut apply);
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::Mouse,
             apply,
             &commands::terminal::disable_mouse(mode),
@@ -696,7 +700,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     pub(crate) fn record_focus_events_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_focus_events().encode(&mut apply);
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::Focus,
             apply,
             &commands::terminal::disable_focus_events(),
@@ -714,7 +718,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     pub(crate) fn record_bracketed_paste_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_bracketed_paste().encode(&mut apply);
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::BracketedPaste,
             apply,
             &commands::terminal::disable_bracketed_paste(),
@@ -732,7 +736,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     pub(crate) fn record_in_band_resize_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_in_band_resize().encode(&mut apply);
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::InBandResize,
             apply,
             &commands::terminal::disable_in_band_resize(),
@@ -756,7 +760,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
         let mut apply = Vec::new();
         commands::screen::enter_alternate_screen().encode(&mut apply);
         commands::screen::clear().encode(&mut apply);
-        self.record_mode_entry(
+        self.track_mode(
             ModeKind::AlternateScreen,
             apply,
             &commands::screen::leave_alternate_screen(),
@@ -778,7 +782,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
     pub(crate) fn record_cursor_hidden(&mut self) {
         let mut apply = Vec::new();
         commands::cursor::hide().encode(&mut apply);
-        self.record_mode_entry(ModeKind::CursorVisibility, apply, &commands::cursor::show());
+        self.track_mode(ModeKind::CursorVisibility, apply, &commands::cursor::show());
     }
 
     /// Undoes the mode ledger in reverse enablement order, reporting the first error.

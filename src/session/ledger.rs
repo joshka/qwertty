@@ -8,7 +8,7 @@
 use crate::DeviceMode;
 
 /// The kitty keyboard full-reset (pop-all) sequence `CSI < u`, used in the emergency blob.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg(unix)]
 pub(crate) const KITTY_KEYBOARD_EMERGENCY_RESET: &[u8] = b"\x1b[<u";
 
 /// One terminal state action a ledger entry can apply or undo.
@@ -135,7 +135,7 @@ impl ModeLedger {
     /// pushed entry (`CSI < 1 u`), the emergency blob emits the full pop-all reset `CSI < u` so a
     /// panic teardown clears the terminal's whole keyboard-flags stack regardless of how deep it
     /// grew, rather than trusting the stack depth mid-panic.
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg(unix)]
     pub(crate) fn protocol_undo_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         for entry in self.entries.iter().rev() {
@@ -194,6 +194,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn emergency_blob_contains_only_protocol_bytes() {
         let mut ledger = ModeLedger::new();
@@ -211,6 +212,7 @@ mod tests {
         assert_eq!(ledger.protocol_undo_bytes(), b"\x1b[?1049l");
     }
 
+    #[cfg(unix)]
     #[test]
     fn kitty_keyboard_emergency_blob_is_the_full_pop_all_reset() {
         let mut ledger = ModeLedger::new();

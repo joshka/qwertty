@@ -72,13 +72,15 @@ pub mod caps;
 mod command;
 pub mod commands;
 // The correlator is sans-io core, deliberately not feature-gated: design 04 keeps it
-// runtime-independent so the planned blocking one-shot driver (OQ-1) can drive it without Tokio.
-// Only the Tokio session consumes it today, so a build without that session has no consumer.
+// runtime-independent so both consumers can drive it: the Tokio session and the synchronous,
+// no-Tokio query driver on `TerminalSession` (review-02 §2). Both are Unix-gated, so on Unix the
+// correlator now always has a consumer regardless of the `tokio` feature. It is dead only on
+// non-Unix targets, where neither driver exists (no live terminal, no `poll` readiness seam).
 #[cfg_attr(
-    not(all(feature = "tokio", unix)),
+    not(unix),
     expect(
         dead_code,
-        reason = "sans-io correlator (design 04); only the tokio+unix session drives it today"
+        reason = "sans-io correlator (design 04); its drivers (Tokio + sync query) are Unix-only"
     )
 )]
 pub(crate) mod correlate;

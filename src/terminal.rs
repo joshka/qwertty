@@ -203,7 +203,9 @@ impl Error {
         Self::QueryTimeout { operation, timeout }
     }
 
-    #[cfg(any(not(unix), all(feature = "tokio", unix)))]
+    // Used on every target now: the non-unix device stub constructs it for every operation, and on
+    // Unix both the Tokio driver and the synchronous query driver (review-02 §2) construct it for a
+    // device with no pollable fd. No build is left without a caller, so it needs no cfg gate.
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
             operation,

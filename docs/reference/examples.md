@@ -62,6 +62,14 @@ point without scanning the repository tree.
   cooked-mode restoration on every exit path. This is the "second consumer" the sans-io decode split
   (design 04) was built for: the same decode core the async session uses, driven by a hand-rolled
   synchronous poll loop.
+- `sync_cursor_query.rs`: the same round-trip through the typed convenience
+  `TerminalSession::request_cursor_position` instead of a hand-rolled loop. One call registers the
+  query with the sans-io correlator, writes `CSI 6 n`, and drives a blocking poll/read/decode loop
+  until the reply completes, returning `Ok(Some(report))` on an answer, `Ok(None)` on timeout (the
+  FM-C4 *unknown* case), and `Err(..)` only on a genuine I/O failure. Typeahead the user sent before
+  the terminal answered survives for the next `read_input` (FM-Q1). This drives the *same*
+  correlator the async session uses, with no Tokio — the sans-io split's payoff. Reach for
+  `oneshot_background.rs` when you want the raw loop; reach for this when you want the typed helper.
 
 ## Tokio Session Basics
 
@@ -124,8 +132,11 @@ point without scanning the repository tree.
 
 ## Choosing An Example
 
-- Start with `oneshot_background.rs` when you have a single question for the terminal and do not
-  want an async runtime — one probe, one bounded wait, one answer, on default features.
+- Start with `sync_cursor_query.rs` when you have a single question for the terminal, want the
+  typed convenience, and do not want an async runtime — one call, one bounded wait, one answer, on
+  default features.
+- Start with `oneshot_background.rs` when you want the same no-runtime query but hand-rolled — the
+  raw `poll`/`read_input`/parse loop spelled out, for when you need to shape the loop yourself.
 - Start with `tokio_terminal_queries.rs` when you want the smallest end-to-end Tokio ownership
   example.
 - Start with `tokio_input_events.rs` when you need decoded event delivery.

@@ -81,6 +81,18 @@ the fully commented recipe. This is the second, no-async consumer the sans-io de
 designed for: the same decode core the [async query path](#async-boundary-and-live-queries) uses,
 driven by a hand-rolled synchronous poll loop.
 
+On Unix, `TerminalSession` also ships the recipe as a typed convenience so a caller does not have to
+hand-roll the loop at all. `request_cursor_position(timeout)` writes `CSI 6 n`, drives the same
+poll/read/decode loop against the sans-io correlator, and returns `Ok(Some(report))` on an answer,
+`Ok(None)` on timeout (the FM-C4 unknown case, never an error and never a hang), and `Err(..)` only
+on a genuine I/O failure. `request_terminal_status(timeout)` is the same shape for `CSI 5 n`. Both
+drive the *same* correlator the async session uses — this is what the sans-io split buys: one query
+core, two drivers, no Tokio required for the synchronous one. Typeahead the user sent before the
+terminal answered is never swallowed: bytes read while the query waits that are not the reply are
+buffered on the session and returned by the next `read_input`, in arrival order (FM-Q1). The raw
+seams stay reachable underneath — `command`, `read_input`, and `as_fd` are unchanged — so the typed
+helper is a convenience over them, not a replacement. See the `sync_cursor_query.rs` example.
+
 ## Flush And Leave
 
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible

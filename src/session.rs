@@ -14,16 +14,27 @@ mod ledger;
 #[cfg(unix)]
 mod restore;
 
+#[cfg(unix)]
+use std::collections::VecDeque;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
+
 pub use kitty::{KittyKeyboardFlags, KittyKeyboardGrant};
 #[cfg(unix)]
 pub use restore::RestoreHandle;
 
 use crate::commands::terminal::MouseMode;
+#[cfg(unix)]
+use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::policy::{Policy, PolicyGate};
+#[cfg(unix)]
+use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::session::ledger::{ModeKind, ModeLedger, StateAction};
 use crate::{
     Command, DeviceMode, InputBytes, Terminal, TerminalDevice, TerminalSize, commands, terminal,
 };
+#[cfg(unix)]
+use crate::{Event, SemanticDecoder};
 
 /// An active terminal session over a [`TerminalDevice`].
 ///
@@ -71,6 +82,66 @@ pub struct TerminalSession<D: TerminalDevice = Terminal> {
     policy: Policy,
     #[cfg(unix)]
     restore: Option<RestoreHandle>,
+    /// The sans-io query state driven by the synchronous query helpers (design 04, review-02 §2).
+    ///
+    /// This is the second, no-Tokio consumer of the sans-io correlator: the blocking query helpers
+    /// (for example [`request_cursor_position`](Self::request_cursor_position)) register an
+    /// `Expectation` here, poll the device fd, decode bytes into [`Event`]s, and feed them
+    /// through the correlator until the reply completes. It is only built on Unix, where the
+    /// `poll`-based readiness seam ([`as_fd`](Self::as_fd)) and live terminal I/O exist.
+    #[cfg(unix)]
+    query: QueryState,
+}
+
+/// The synchronous query driver's sans-io state (design 04, review-02 §2).
+///
+/// Owns the decoder and correlator the blocking query helpers drive, plus the raw bytes of any
+/// input that arrived during a query but was **not** the reply. That leftover-byte buffer is what
+/// keeps typeahead safe: input read while waiting for a reply is not swallowed by the query — the
+/// next [`read_input`](TerminalSession::read_input) returns it first, in arrival order, before
+/// touching the device again (FM-Q1). The state mirrors the Tokio driver's
+/// `decoder`/`correlator`/`pending`/`active_query`, minus the reactor; the only shape difference is
+/// that this driver returns **raw bytes** from `read_input` (the narrow-primitive rule), so it
+/// buffers raw typeahead bytes rather than decoded events.
+#[cfg(unix)]
+#[derive(Debug)]
+struct QueryState {
+    /// The semantic decoder turning each read's raw bytes into typed events (design 02).
+    ///
+    /// Held across queries so a reply split over two reads still assembles: the decoder is the
+    /// same stateful parser the Tokio driver keeps on its session.
+    decoder: SemanticDecoder,
+    /// Raw bytes fed to the decoder that have not yet completed an event, carried across reads.
+    ///
+    /// The decoder holds bytes across read boundaries (a parked text run, a half-finished
+    /// sequence), so its raw carry is tracked here in lockstep: it prefixes the next read's
+    /// bytes so a completed event's full raw byte span is known for byte-accurate typeahead
+    /// attribution.
+    decoder_carry: Vec<u8>,
+    /// The sans-io correlator matching query replies to expectations (design 03).
+    correlator: Correlator,
+    /// Raw bytes read during a query that did not carry the reply, awaiting a later `read_input`.
+    ///
+    /// A query buffers each non-reply event's raw bytes here (in arrival order) so the unrelated
+    /// input stays deliverable as ordinary bytes — typeahead is never consumed or misattributed by
+    /// the query (FM-Q1). Drained front-first by [`read_input`](TerminalSession::read_input).
+    typeahead: VecDeque<u8>,
+    /// The id of the single in-flight query expectation, if any; swept before the next query.
+    active_query: Option<ExpectationId>,
+}
+
+#[cfg(unix)]
+impl QueryState {
+    /// Creates empty query state (no decoder progress, no expectations, no buffered typeahead).
+    fn new() -> Self {
+        Self {
+            decoder: SemanticDecoder::new(),
+            decoder_carry: Vec::new(),
+            correlator: Correlator::new(),
+            typeahead: VecDeque::new(),
+            active_query: None,
+        }
+    }
 }
 
 impl TerminalSession<Terminal> {
@@ -110,6 +181,8 @@ impl TerminalSession<Terminal> {
             policy: Policy::default(),
             #[cfg(unix)]
             restore,
+            #[cfg(unix)]
+            query: QueryState::new(),
         };
         session.record_initial_state();
         session.enter()?;
@@ -152,6 +225,8 @@ impl<D: TerminalDevice> TerminalSession<D> {
             policy: Policy::default(),
             #[cfg(unix)]
             restore: None,
+            #[cfg(unix)]
+            query: QueryState::new(),
         };
         session.record_initial_state();
         session.enter()?;
@@ -368,12 +443,31 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// In raw mode, the returned bytes are the foundation for later event and query-routing
     /// layers. A zero-length buffer returns an empty input value without reading from the terminal.
     ///
+    /// # Typeahead from a blocking query (Unix)
+    ///
+    /// On Unix, a blocking query helper such as
+    /// [`request_cursor_position`](Self::request_cursor_position) may read input that is **not**
+    /// the reply while it waits — typeahead the user sent before the terminal answered. Those
+    /// bytes are not consumed by the query; they are buffered on the session and returned here
+    /// first, in arrival order, before any new device read. This method therefore drains that
+    /// buffer ahead of touching the terminal, so a query never swallows a keystroke (FM-Q1).
+    ///
     /// # Errors
     ///
     /// Returns an error when the terminal device cannot read input.
     pub fn read_input(&mut self, buffer: &mut [u8]) -> terminal::Result<InputBytes> {
         if buffer.is_empty() {
             return Ok(InputBytes::default());
+        }
+
+        // Deliver buffered typeahead from a prior query before reading the device again, so
+        // unrelated input a query saw but did not match is never lost (FM-Q1). Only when the buffer
+        // is empty do we perform a real read.
+        #[cfg(unix)]
+        if !self.query.typeahead.is_empty() {
+            let take = self.query.typeahead.len().min(buffer.len());
+            let drained: Vec<u8> = self.query.typeahead.drain(..take).collect();
+            return Ok(InputBytes::new(drained));
         }
 
         let len = self.device.read(buffer)?;
@@ -813,6 +907,384 @@ impl<D: TerminalDevice> TerminalSession<D> {
     }
 }
 
+/// The number of bytes one query read pulls from the terminal at a time.
+///
+/// A single reply is tiny (`CSI row ; column R` is under a dozen bytes), so this only needs to be
+/// large enough that a reply plus a little interleaved typeahead arrive in one read.
+#[cfg(unix)]
+const QUERY_READ_BUFFER_LEN: usize = 1024;
+
+/// The synchronous, no-Tokio query driver over the sans-io correlator (design 04, review-02 §2).
+///
+/// These helpers are the second consumer of the correlator the async session drives: they register
+/// an `Expectation`, write the request, then poll the device fd → read → decode → feed the
+/// correlator until the reply completes, all without an async runtime. The narrow-primitive pieces
+/// stay reachable — [`command`](Self::command), [`read_input`](Self::read_input), and
+/// [`as_fd`](Self::as_fd) are unchanged — so this typed helper is a convenience over them, not a
+/// replacement.
+#[cfg(unix)]
+impl<D: TerminalDevice> TerminalSession<D> {
+    /// Requests and reads the current terminal cursor position, blocking without an async runtime.
+    ///
+    /// This is the synchronous mirror of the Tokio session's
+    /// [`request_cursor_position`](crate::TokioTerminalSession::request_cursor_position): it writes
+    /// the Device Status Report request `CSI 6 n`, flushes, and drives the sans-io correlator with
+    /// a hand-rolled poll/read/decode loop until a `CSI row ; column R` cursor-position report
+    /// completes the query. It uses no Tokio and no signal handler — only the runtime-neutral
+    /// [`as_fd`](Self::as_fd) readiness seam and `rustix::event::poll`.
+    ///
+    /// `timeout` bounds the whole request/response operation. A terminal that never answers is the
+    /// FM-C4 **unknown** case, not an error: on elapse this resolves the expectation as
+    /// `Resolution::NoReply`, returns `Ok(None)`, and never hangs. A reply that arrives after the
+    /// budget is never claimed — the expectation is already removed, so the late reply passes
+    /// through the correlator as ordinary input (design 03 rule 4).
+    ///
+    /// # Typeahead safety
+    ///
+    /// Input that arrives while the query waits but is **not** the reply — a keystroke the user
+    /// typed ahead — is never consumed or misattributed. Those bytes are buffered on the session
+    /// and returned by the next [`read_input`](Self::read_input) in arrival order (FM-Q1), so
+    /// the query leaves the ordinary input stream intact.
+    ///
+    /// The raw pieces stay available: this helper does not hide [`command`](Self::command),
+    /// [`read_input`](Self::read_input), or [`as_fd`](Self::as_fd); a caller that wants to build
+    /// its own loop still can (see the `oneshot_background.rs` example).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use qwertty::TerminalSession;
+    ///
+    /// # fn main() -> qwertty::Result<()> {
+    /// let mut session = TerminalSession::open()?;
+    /// match session.request_cursor_position(Duration::from_millis(150))? {
+    ///     Some(report) => println!("cursor at row {}, column {}", report.row(), report.column()),
+    ///     None => println!("no reply within the budget (unknown, not an error)"),
+    /// }
+    /// session.leave()
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the device
+    /// has no pollable descriptor to wait on (a headless device, reported as
+    /// [`terminal::Error::Unsupported`]). A timeout is **not** an error — it is `Ok(None)`.
+    pub fn request_cursor_position(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<Option<CursorPositionReport>> {
+        let reply = self.run_query(
+            Expectation::CursorPosition,
+            &commands::cursor::request_position(),
+            timeout,
+        )?;
+        match reply {
+            Some(Reply::CursorPosition(report)) => Ok(Some(report)),
+            Some(other) => Err(unexpected_reply(&other)),
+            None => Ok(None),
+        }
+    }
+
+    /// Requests and reads terminal status, blocking without an async runtime.
+    ///
+    /// This is the synchronous mirror of the Tokio session's
+    /// [`request_terminal_status`](crate::TokioTerminalSession::request_terminal_status): it writes
+    /// the Device Status Report request `CSI 5 n`, flushes, and drives the correlator with the same
+    /// poll/read/decode loop until a `CSI 0 n` ready or `CSI 3 n` malfunction report completes the
+    /// query. It composes over the identical machinery as
+    /// [`request_cursor_position`](Self::request_cursor_position); only the expectation, request,
+    /// and reply type differ.
+    ///
+    /// `timeout` bounds the whole operation. A silent terminal is the FM-C4 **unknown** case:
+    /// `Ok(None)`, never an error and never a hang. Typeahead read while waiting survives for the
+    /// next [`read_input`](Self::read_input) (FM-Q1).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use qwertty::TerminalSession;
+    /// use qwertty::report::TerminalStatus;
+    ///
+    /// # fn main() -> qwertty::Result<()> {
+    /// let mut session = TerminalSession::open()?;
+    /// if let Some(report) = session.request_terminal_status(Duration::from_millis(150))? {
+    ///     assert_eq!(report.status(), TerminalStatus::Ready);
+    /// }
+    /// session.leave()
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the device
+    /// has no pollable descriptor to wait on. A timeout is `Ok(None)`, not an error.
+    pub fn request_terminal_status(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<Option<TerminalStatusReport>> {
+        let reply = self.run_query(
+            Expectation::TerminalStatus,
+            &commands::terminal::request_status(),
+            timeout,
+        )?;
+        match reply {
+            Some(Reply::TerminalStatus(report)) => Ok(Some(report)),
+            Some(other) => Err(unexpected_reply(&other)),
+            None => Ok(None),
+        }
+    }
+
+    /// Runs one typed query end to end against the correlator, synchronously.
+    ///
+    /// The steps mirror the Tokio driver's `run_query`, minus the reactor and cancellation sweep
+    /// (this driver holds `&mut self` for the whole blocking call, so no query can be abandoned
+    /// mid-flight):
+    ///
+    /// 1. **Sweep** any expectation a previous query left behind (defensive; a completed sync query
+    ///    always clears its own), then **register** the expectation and record its id.
+    /// 2. **Write** the request bytes and flush.
+    /// 3. **Deadline loop.** Poll the device fd with the remaining budget; on readiness read one OS
+    ///    read, decode it into events, and feed them through the correlator. The reply completes
+    ///    the query. A read that carries no reply is buffered raw as typeahead. On timeout the
+    ///    expectation resolves `Resolution::NoReply` and the query returns `Ok(None)`.
+    fn run_query(
+        &mut self,
+        expectation: Expectation,
+        request: &Command,
+        timeout: Duration,
+    ) -> terminal::Result<Option<Reply>> {
+        // Step 1: sweep a leftover expectation (defensive), then register.
+        self.sweep_active_query();
+        let id = self
+            .query
+            .correlator
+            .register(expectation)
+            .expect("single in-flight sync query never conflicts with a swept expectation");
+        self.query.active_query = Some(id);
+
+        // Step 2: write the request and flush.
+        self.command(request)?.flush()?;
+
+        // Step 3: deadline loop. The budget covers the whole request/response operation.
+        //
+        // This driver *is* the clock the sans-io core deliberately lacks (design 03/04): the
+        // correlator holds no clock, so the crate-wide `Instant::now` ban keeps time out of the
+        // core, and a real driver like this one owns its deadline outside it — exactly the escape
+        // the ban's own comment sanctions.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the sync query driver owns its deadline outside the sans-io core (design 04)"
+        )]
+        let deadline = Instant::now() + timeout;
+        loop {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the sync query driver owns its deadline outside the sans-io core (design \
+                          04)"
+            )]
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(self.resolve_query_timeout(id));
+            }
+
+            // Wait for the fd to become readable within the remaining budget. A device with no
+            // pollable descriptor cannot be waited on synchronously; report it as unsupported
+            // rather than busy-looping.
+            let Some(fd) = self.device.as_fd() else {
+                self.query.correlator.resolve(id, Resolution::Cancelled);
+                self.query.active_query = None;
+                return Err(terminal::Error::unsupported(
+                    "synchronous terminal query",
+                    "device without a fd",
+                ));
+            };
+            if !poll_readable(fd, remaining)? {
+                // poll timed out: the budget elapsed with no readiness.
+                return Ok(self.resolve_query_timeout(id));
+            }
+
+            // Readable: one OS read, decoded and matched. A read that does not complete the query
+            // is buffered raw for a later `read_input` (typeahead survival, FM-Q1).
+            if let Some(reply) = self.read_and_match(id)? {
+                self.query.active_query = None;
+                return Ok(Some(reply));
+            }
+        }
+    }
+
+    /// Resolves the query's expectation as `Resolution::NoReply` on a timeout and clears it.
+    ///
+    /// Returning `None` here is the FM-C4 *unknown* outcome the public helpers surface as
+    /// `Ok(None)`: the terminal did not answer within the budget, which is unknown, not an error.
+    /// Resolving the expectation removes it, so a reply that arrives later passes through the
+    /// correlator as ordinary input (design 03 rule 4) instead of completing a stale query.
+    fn resolve_query_timeout(&mut self, id: ExpectationId) -> Option<Reply> {
+        self.query.correlator.resolve(id, Resolution::NoReply);
+        self.query.active_query = None;
+        None
+    }
+
+    /// Performs one OS read, decodes it, and feeds the events through the correlator.
+    ///
+    /// Returns the taken reply when this read completes the query, otherwise `None`. Typeahead is
+    /// kept byte-accurate by decoding the read a byte at a time and tracking the raw byte span each
+    /// completed event occupied: a non-reply event's span is buffered as typeahead for a later
+    /// [`read_input`](Self::read_input), while the reply's own span is dropped (those bytes were
+    /// the answer, consumed by the correlator). This holds even when the reply and unrelated
+    /// input arrive in the **same** read — nothing the query saw is lost or misattributed
+    /// (FM-Q1).
+    ///
+    /// Feeding byte by byte also settles the syntax layer's parked trailing text: a lone
+    /// keystroke's text run is parked for split-equivalence until the next byte, so the loop
+    /// flushes the decoder once at the end of the read (the drained-OS-buffer boundary) to
+    /// release a complete parked run, attributing it to the bytes still pending in the decoder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the device read fails or the terminal closed (a zero-length read).
+    fn read_and_match(&mut self, id: ExpectationId) -> terminal::Result<Option<Reply>> {
+        let mut buffer = [0u8; QUERY_READ_BUFFER_LEN];
+        let len = self.device.read(&mut buffer)?;
+        if len == 0 {
+            // The terminal closed before answering. Resolve the expectation as EOF and surface the
+            // close as a read error, matching the device layer's own end-of-input contract.
+            self.query.correlator.resolve(id, Resolution::Eof);
+            self.query.active_query = None;
+            return Err(terminal::Error::read_terminal(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "terminal input closed before the query reply arrived",
+            )));
+        }
+        let chunk = &buffer[..len];
+
+        // `unattributed` is the raw byte run fed to the decoder since the last event completed. It
+        // spans reads: the decoder holds bytes across read boundaries (a parked text run, a
+        // half-finished sequence), so its own carry from a prior read is prepended before this
+        // read's bytes. When an event completes, that whole run is the event's bytes; it is
+        // buffered as typeahead unless the event is the reply.
+        let mut reply = None;
+        let mut unattributed = std::mem::take(&mut self.query.decoder_carry);
+        for &byte in chunk {
+            unattributed.push(byte);
+            let events = self.query.decoder.feed(&[byte]);
+            if events.is_empty() {
+                continue;
+            }
+            // The decoder may have completed an event *and* started a new pending sequence with the
+            // same byte (an ESC that flushes prior parked text then opens a fresh escape). Any
+            // bytes still pending in the decoder belong to that next, not-yet-complete
+            // event — so the span that just completed is `unattributed` minus its
+            // pending tail.
+            let pending_len = self.query.decoder.pending_bytes().len();
+            let span_len = unattributed.len().saturating_sub(pending_len);
+            let span: Vec<u8> = unattributed.drain(..span_len).collect();
+            self.attribute_span(id, span, &events, &mut reply);
+        }
+
+        // Drained-OS-buffer boundary: release a complete parked trailing text run so a lone
+        // keystroke is not held unseen until the next byte (the same flush the Tokio read loop
+        // does).
+        if self.query.decoder.has_settled_text() {
+            let events = self.query.decoder.finish();
+            let pending_len = self.query.decoder.pending_bytes().len();
+            let span_len = unattributed.len().saturating_sub(pending_len);
+            let span: Vec<u8> = unattributed.drain(..span_len).collect();
+            self.attribute_span(id, span, &events, &mut reply);
+        }
+
+        // Whatever is still unattributed is a partial sequence the decoder is holding for the next
+        // read; carry its raw bytes so its eventual completion is attributed correctly.
+        self.query.decoder_carry = unattributed;
+        Ok(reply)
+    }
+
+    /// Feeds one span's decoded events through the correlator and attributes the span's raw bytes.
+    ///
+    /// The span is the exact raw bytes that produced `events`. If one of the events is the reply,
+    /// the reply is taken into `reply` and the span is dropped (consumed as the answer). Otherwise
+    /// every byte of the span is unrelated input, buffered as typeahead in arrival order (FM-Q1).
+    fn attribute_span(
+        &mut self,
+        id: ExpectationId,
+        span: Vec<u8>,
+        events: &[Event],
+        reply: &mut Option<Reply>,
+    ) {
+        let mut span_is_reply = false;
+        for event in events {
+            match self.query.correlator.feed(event.clone()) {
+                Feed::Completed { id: completed, .. } if completed == id => {
+                    *reply = self.query.correlator.take_reply(id);
+                    span_is_reply = true;
+                }
+                // With a single in-flight query only `id` can complete; a stray completion has no
+                // waiter and is dropped. Passthroughs are unrelated input.
+                Feed::Completed { .. } | Feed::Passthrough(_) => {}
+            }
+        }
+        if !span_is_reply {
+            self.query.typeahead.extend(span);
+        }
+    }
+
+    /// Sweeps a leftover query expectation as cancelled.
+    ///
+    /// A completed synchronous query always clears its own `active_query`, so this is defensive: if
+    /// a prior query somehow left one registered, resolving it `Resolution::Cancelled` removes it
+    /// before a new one registers, so a stale reply can never misroute the new query (design 03
+    /// rule 4). Synchronous and idempotent.
+    fn sweep_active_query(&mut self) {
+        if let Some(id) = self.query.active_query.take() {
+            self.query.correlator.resolve(id, Resolution::Cancelled);
+        }
+    }
+}
+
+/// Waits for `fd` to become readable within `budget` using `rustix::event::poll`.
+///
+/// Returns `true` when the descriptor is readable and `false` when the budget elapsed first. This
+/// is the runtime-neutral wait the synchronous query loop needs: no reactor, no signal handler,
+/// just `poll(2)` on the session's own fd (the same seam [`TerminalSession::as_fd`] exposes).
+///
+/// # Errors
+///
+/// Returns a read error when `poll(2)` itself fails.
+#[cfg(unix)]
+fn poll_readable(fd: std::os::fd::BorrowedFd<'_>, budget: Duration) -> terminal::Result<bool> {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+    // `Timespec` fields are signed; the budget is non-negative, so the whole seconds saturate into
+    // `i64` and the sub-second nanoseconds widen from `u32` losslessly.
+    let timeout = Timespec {
+        tv_sec: i64::try_from(budget.as_secs()).unwrap_or(i64::MAX),
+        tv_nsec: budget.subsec_nanos().into(),
+    };
+    let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+    // `poll` returns the number of ready descriptors; 0 means the timeout elapsed. We poll exactly
+    // one fd, so any positive count is that fd becoming readable.
+    let ready = poll(&mut fds, Some(&timeout))
+        .map_err(|errno| terminal::Error::read_terminal(std::io::Error::from(errno)))?;
+    Ok(ready > 0)
+}
+
+/// Builds the error for the impossible "wrong reply type completed a typed query" case.
+///
+/// The correlator only completes an `Expectation::CursorPosition` with a `Reply::CursorPosition`
+/// and an `Expectation::TerminalStatus` with a `Reply::TerminalStatus`, so this never fires; it
+/// exists so the typed helpers stay total without an `unreachable!`.
+#[cfg(unix)]
+fn unexpected_reply(_reply: &Reply) -> terminal::Error {
+    terminal::Error::read_terminal(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "query completed with an unexpected reply type",
+    ))
+}
+
 impl<D: TerminalDevice> Drop for TerminalSession<D> {
     fn drop(&mut self) {
         _ = self.leave();
@@ -963,6 +1435,138 @@ mod tests {
         assert!(
             message.contains("clipboard write"),
             "error message should name the gate: {message}",
+        );
+    }
+
+    // --- Synchronous query driver (review-02 §2) -------------------------------------------------
+    //
+    // These drive the sans-io correlator with no Tokio, over a headless `FakeDevice` socket pair.
+    // The fake terminal's reply is fed before the blocking query polls, so the pre-queued bytes are
+    // already readable when the query waits — no thread, no pseudoterminal.
+
+    use std::time::Duration;
+
+    use crate::ProtocolPosition;
+    use crate::report::TerminalStatus;
+
+    #[test]
+    fn sync_cursor_query_round_trips_over_a_fake_device() {
+        // The whole point of the sync driver: a headless fake terminal drives the real correlator
+        // with a hand-rolled poll/read/decode loop (R-TST-1). Write `CSI 6 n`, get row 12 / col 34.
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // Queue the reply so it is readable the moment the query polls.
+        terminal
+            .feed_input(b"\x1b[12;34R")
+            .expect("feed cursor position report");
+
+        let report = session
+            .request_cursor_position(Duration::from_secs(1))
+            .expect("cursor query succeeds")
+            .expect("a reply arrives");
+
+        assert_eq!(report.position(), ProtocolPosition::new(12, 34));
+        assert_eq!(report.row(), 12);
+        assert_eq!(report.column(), 34);
+
+        // The request the driver wrote is exactly the DSR cursor-position probe.
+        assert_eq!(terminal.output().expect("request bytes"), b"\x1b[6n");
+    }
+
+    #[test]
+    fn sync_terminal_status_query_round_trips_over_a_fake_device() {
+        // The second helper composes over the identical machinery: `CSI 5 n` in, `CSI 0 n` reply.
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        terminal
+            .feed_input(b"\x1b[0n")
+            .expect("feed terminal status report");
+
+        let report = session
+            .request_terminal_status(Duration::from_secs(1))
+            .expect("terminal status query succeeds")
+            .expect("a reply arrives");
+
+        assert_eq!(report.status(), TerminalStatus::Ready);
+        assert_eq!(terminal.output().expect("request bytes"), b"\x1b[5n");
+    }
+
+    #[test]
+    fn sync_cursor_query_times_out_to_none_without_hanging() {
+        // No reply is ever fed: the query must return Ok(None) once the short budget elapses — the
+        // FM-C4 unknown case, not an error and not a hang.
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        let outcome = session
+            .request_cursor_position(Duration::from_millis(50))
+            .expect("a silent terminal is not an error");
+
+        assert!(outcome.is_none(), "no reply must resolve to None");
+        // The request still went out even though nothing answered it.
+        assert_eq!(terminal.output().expect("request bytes"), b"\x1b[6n");
+    }
+
+    #[test]
+    fn sync_query_preserves_typeahead_for_a_later_read() {
+        // A keystroke the user typed ahead arrives before the reply. It must NOT be swallowed by
+        // the query: after the query completes, `read_input` still delivers that keystroke
+        // as ordinary input, in arrival order (FM-Q1).
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // The typeahead 'x' lands first (its own read), then the cursor-position reply.
+        terminal.feed_input(b"x").expect("feed typeahead keystroke");
+        // Let the typeahead settle as its own OS read before the reply, so the driver buffers it as
+        // typeahead and matches the reply in a separate read.
+        std::thread::sleep(Duration::from_millis(10));
+        terminal
+            .feed_input(b"\x1b[7;9R")
+            .expect("feed cursor position report");
+
+        let report = session
+            .request_cursor_position(Duration::from_secs(1))
+            .expect("cursor query succeeds")
+            .expect("a reply arrives past the typeahead");
+        assert_eq!(report.position(), ProtocolPosition::new(7, 9));
+
+        // The unrelated keystroke survived: a later read still sees it, and nothing else.
+        let mut buffer = [0u8; 16];
+        let input = session
+            .read_input(&mut buffer)
+            .expect("read buffered typeahead");
+        assert_eq!(input.as_bytes(), b"x", "typeahead must survive the query");
+    }
+
+    #[test]
+    fn sync_query_separates_typeahead_from_a_reply_in_the_same_read() {
+        // The harder case: typeahead and the reply arrive coalesced in one OS read. Byte-accurate
+        // attribution must peel the reply's bytes off and keep the surrounding keystrokes as
+        // typeahead — 'a' before the reply and 'b' after it (FM-Q1).
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        terminal
+            .feed_input(b"a\x1b[7;9Rb")
+            .expect("feed typeahead+reply+typeahead in one burst");
+
+        let report = session
+            .request_cursor_position(Duration::from_secs(1))
+            .expect("cursor query succeeds")
+            .expect("the reply is peeled out of the coalesced read");
+        assert_eq!(report.position(), ProtocolPosition::new(7, 9));
+
+        // Both surrounding keystrokes survived, in order, with the reply's bytes removed.
+        let mut buffer = [0u8; 16];
+        let input = session
+            .read_input(&mut buffer)
+            .expect("read buffered typeahead");
+        assert_eq!(
+            input.as_bytes(),
+            b"ab",
+            "typeahead around the reply must survive with the reply removed",
         );
     }
 }

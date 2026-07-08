@@ -13,6 +13,14 @@
 //! driver: a Tokio session, a blocking one-shot loop, or a test. Deadlines and EOF enter only
 //! through [`Correlator::resolve`], which the driver calls; the correlator never waits.
 //!
+//! The correlator has **two** production consumers, which is the whole point of the sans-io split
+//! (design 04): the async [`TokioTerminalSession`](crate::TokioTerminalSession) drives it with
+//! Tokio readiness, and the synchronous query helpers on
+//! [`TerminalSession`](crate::TerminalSession) (for example
+//! [`request_cursor_position`](crate::TerminalSession::request_cursor_position)) drive the *same*
+//! correlator with a hand-rolled `poll`/read/decode loop and no runtime at all (review-02 §2). Both
+//! are Unix-gated; on Unix the correlator is live regardless of the `tokio` feature.
+//!
 //! # The rules (design 03)
 //!
 //! 1. **Full-discriminator matching.** A matcher matches on the complete identity of a reply, so
@@ -130,6 +138,14 @@ pub enum Expectation {
     /// (FM-C4). This is a fence, not a feature oracle: completing it means "replies that were
     /// coming have arrived," not "the terminal supports X." The correlator does not
     /// auto-resolve other expectations on this completion; the probe layer (M3) owns that.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "constructed only by the Tokio probe/kitty path; the sync query driver uses \
+                      just CursorPosition and TerminalStatus (review-02 §2)"
+        )
+    )]
     PrimaryDeviceAttributes,
     /// The kitty keyboard flags report, answering a `CSI ? u` query.
     ///
@@ -139,6 +155,14 @@ pub enum Expectation {
     /// flags the terminal actually granted, which the session records in its ledger. Its reply
     /// shape (`CSI ? … u`) is disjoint from the M2 variants by final byte and from DA1 by final
     /// byte, so it distinguishes from all of them.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "constructed only by the Tokio probe/kitty path; the sync query driver uses \
+                      just CursorPosition and TerminalStatus (review-02 §2)"
+        )
+    )]
     KittyKeyboardFlags,
     /// A DEC private mode report (DECRPM), answering a DEC private-mode DECRQM query
     /// `CSI ? mode $ p`.
@@ -149,6 +173,14 @@ pub enum Expectation {
     /// completes only its own query; the prototype's cross-completion bug was matching any mode
     /// report regardless of the mode number, which this discriminator makes impossible. Two for the
     /// same mode coalesce.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "constructed only by the Tokio probe/kitty path; the sync query driver uses \
+                      just CursorPosition and TerminalStatus (review-02 §2)"
+        )
+    )]
     DecPrivateMode {
         /// The private-mode number this expectation is waiting for (for example 2026).
         mode: u16,
@@ -159,6 +191,14 @@ pub enum Expectation {
     /// is DCS-framed (`SyntaxToken::Dcs`), so its shape is disjoint from every CSI-based
     /// expectation and from the OSC colour reports; there is no discriminator because a probe
     /// issues at most one XTVERSION query.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "constructed only by the Tokio probe/kitty path; the sync query driver uses \
+                      just CursorPosition and TerminalStatus (review-02 §2)"
+        )
+    )]
     XtVersion,
     /// An OSC default-colour report, answering an `OSC 10 ; ? ST` (foreground) or `OSC 11 ; ? ST`
     /// (background) query.
@@ -168,6 +208,14 @@ pub enum Expectation {
     /// expectations with different [`OscColorKind`] [`distinguishes`], so a bundle can query both
     /// colours at once and each answer completes only its own query. Two for the same colour
     /// coalesce.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "constructed only by the Tokio probe/kitty path; the sync query driver uses \
+                      just CursorPosition and TerminalStatus (review-02 §2)"
+        )
+    )]
     OscColor {
         /// Which default colour this expectation is waiting for.
         which: OscColorKind,
@@ -389,6 +437,19 @@ pub enum RegisterError {
 #[non_exhaustive]
 pub enum Resolution {
     /// The driver's deadline elapsed before a reply arrived.
+    ///
+    /// The Tokio driver uses this for a query timeout. The synchronous query driver instead
+    /// resolves a timed-out query as [`NoReply`](Self::NoReply) — the FM-C4 *unknown* outcome
+    /// it returns as `Ok(None)` — so this variant has no constructor in a non-Tokio, non-test
+    /// Unix build.
+    #[cfg_attr(
+        all(unix, not(feature = "tokio"), not(test)),
+        expect(
+            dead_code,
+            reason = "Tokio-driver-only; the sync query driver resolves a timeout as NoReply \
+                      (review-02 §2)"
+        )
+    )]
     Timeout,
     /// The terminal closed (end of input) before a reply arrived.
     Eof,

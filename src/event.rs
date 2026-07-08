@@ -295,6 +295,20 @@ impl SemanticDecoder {
             && std::str::from_utf8(pending).is_ok()
     }
 
+    /// Returns the raw bytes the decoder is holding for a sequence that has not yet completed.
+    ///
+    /// These are the bytes of a partial escape, control sequence, or text run buffered by the owned
+    /// [`SyntaxParser`] for the next [`feed`](Self::feed) — the same bytes
+    /// [`has_settled_text`](Self::has_settled_text) inspects. A driver that needs to attribute each
+    /// completed event back to its exact raw byte span (for example the synchronous query driver,
+    /// separating a reply's bytes from interleaved typeahead) reads this after each feed: any bytes
+    /// still pending here belong to the *next*, not-yet-complete event, so they are not part of the
+    /// span that just completed.
+    #[must_use]
+    pub fn pending_bytes(&self) -> &[u8] {
+        self.parser.pending_bytes()
+    }
+
     /// Maps a batch of syntax tokens to semantic events.
     fn map_tokens(&mut self, tokens: Vec<SyntaxToken>) -> Vec<Event> {
         let mut events = Vec::with_capacity(tokens.len());

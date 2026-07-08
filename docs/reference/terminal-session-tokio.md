@@ -405,6 +405,48 @@ match session.next_event().await? {
 For a runnable Tokio example that hands the terminal to `$EDITOR` and reclaims it, see
 `examples/editor_handoff.rs` in the repository.
 
+## Signal Handling
+
+Beyond `SIGWINCH` (handled by the `resize_stream` fallback), a full-screen application cares about a
+handful of other process signals: `SIGTSTP` (`Ctrl-Z`), `SIGCONT` (resumed with `fg`), `SIGTERM`
+(the default `kill`), and `SIGINT` (`Ctrl-C`, when the terminal delivers it as a signal). The `signals`
+method returns an opt-in `SignalStream` that reports these as typed `TerminalSignal` values —
+`Suspend`, `Continue`, `Terminate`, and `Interrupt` — for the application to select on alongside
+`next_event` and `resize_stream`.
+
+The stream is consistent with the rest of the design: qwertty installs no signal handler at session
+construction and never auto-acts (design 01). The four listeners are installed only when `signals`
+is called — the application owns registration by calling it — and the stream only *reports*. The
+recommended responses are `suspend` on `Suspend`, `resume` on `Continue`, and a graceful exit on
+`Terminate`/`Interrupt`, but nothing forces them: a REPL may treat `Interrupt` as "cancel the
+current line" instead. `SIGWINCH` is deliberately excluded — that is `resize_stream`'s job — so an
+application selects on `signals`, `resize_stream`, and `next_event` together.
+
+```no_run
+use qwertty::{TerminalSignal, TokioTerminalSession};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+let mut signals = session.signals()?;
+loop {
+    tokio::select! {
+        event = session.next_event() => { let _event = event?; }
+        signal = signals.next() => match signal? {
+            TerminalSignal::Suspend => session.suspend().await?,
+            TerminalSignal::Continue => session.resume(true).await?,
+            TerminalSignal::Terminate | TerminalSignal::Interrupt => break,
+            // `TerminalSignal` is `#[non_exhaustive]`; future signals land here.
+            _ => {}
+        }
+    }
+}
+# session.leave().await
+# }
+```
+
+For a runnable Tokio example that selects on the signal stream alongside input and resize, see
+`examples/signal_handling.rs` in the repository.
+
 ## Query Routing Boundary
 
 Live query routing currently belongs to `TokioTerminalSession`. The session owns the terminal

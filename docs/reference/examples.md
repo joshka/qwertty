@@ -110,6 +110,12 @@ point without scanning the repository tree.
   may have left cooked, FM-L9), re-register async readiness on the same fd, and queue a synthetic
   `Event::Resize` after; the closure is a synchronous `FnOnce` whose return value (the child's
   `ExitStatus`) is returned from `run_detached` (design 01 §4).
+- `signal_handling.rs`: `select!` the opt-in terminal-signals stream (`TokioTerminalSession::signals`
+  — yielding typed `TerminalSignal::Suspend`/`Continue`/`Terminate`/`Interrupt` for
+  `SIGTSTP`/`SIGCONT`/`SIGTERM`/`SIGINT`) alongside `next_event` and the `SIGWINCH` `resize_stream`,
+  responding with `suspend` on `Suspend`, `resume` on `Continue`, and a graceful exit on
+  `Terminate`/`Interrupt`; qwertty installs no handler and never auto-acts — the stream only reports,
+  the app owns the response (design 01), and `SIGWINCH` stays with `resize_stream`.
 - `tokio_query_error_handling.rs`: handle live query success, `Error::QueryTimeout`, and
   `Error::ReadTerminal` explicitly.
 - `verify_queries.rs`: real-emulator verification smoke — run once per terminal application to
@@ -154,6 +160,8 @@ point without scanning the repository tree.
 - Start with `tokio_input_events.rs` when you need decoded event delivery.
 - Start with `resize_events.rs` when you need resize handling — in-band (mode 2048) with the
   `SIGWINCH` fallback.
+- Start with `signal_handling.rs` when you need job-control and lifecycle signals — the opt-in
+  `signals` stream for `SIGTSTP`/`SIGCONT`/`SIGTERM`/`SIGINT`, wired to `suspend`/`resume`/exit.
 - Start with `tokio_query_error_handling.rs` when the main question is timeout or read-failure
   handling.
 - Start with the cancellation, late-reply, wrong-report, unmatched-input, and preserved-input

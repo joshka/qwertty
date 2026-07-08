@@ -131,4 +131,6 @@ pub use terminal::{DeviceMode, Error, PixelSize, Result, Terminal, TerminalDevic
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};
 #[cfg(all(feature = "tokio", unix))]
-pub use tokio_session::{ResizeStream, TerminalAcquisition, TokioTerminalSession};
+pub use tokio_session::{
+    ResizeStream, SignalStream, TerminalAcquisition, TerminalSignal, TokioTerminalSession,
+};

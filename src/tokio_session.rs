@@ -2113,6 +2113,69 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         Ok(ResizeStream { signal, size_fd })
     }
 
+    /// Returns an awaitable [`SignalStream`] that yields the terminal-relevant process signals a
+    /// TUI cares about — [`Suspend`](TerminalSignal::Suspend),
+    /// [`Continue`](TerminalSignal::Continue), [`Terminate`](TerminalSignal::Terminate), and
+    /// [`Interrupt`](TerminalSignal::Interrupt) — as typed [`TerminalSignal`] values the
+    /// application selects on and responds to itself.
+    ///
+    /// This is the **opt-in** companion to [`resize_stream`](Self::resize_stream). qwertty installs
+    /// no signal handler at session construction and never auto-acts on a signal (design 01): the
+    /// listeners are installed only when this method is called, and the stream only *reports* — the
+    /// application owns the response. On a `Suspend` (`SIGTSTP`) it typically calls
+    /// [`suspend`](Self::suspend); on a `Continue` (`SIGCONT`), [`resume`](Self::resume); on a
+    /// `Terminate` (`SIGTERM`) or `Interrupt` (`SIGINT`), it exits gracefully. Nothing forces those
+    /// responses — a REPL might treat `Interrupt` as "cancel the current line" instead.
+    ///
+    /// `SIGWINCH` is deliberately **not** handled here; that is
+    /// [`resize_stream`](Self::resize_stream)'s job. An application selects on
+    /// [`signals`](Self::signals), [`resize_stream`](Self::resize_stream),
+    /// and [`next_event`](Self::next_event) together. Because the stream does not borrow the
+    /// session, it can sit in a `tokio::select!` alongside those:
+    ///
+    /// ```no_run
+    /// # async fn run() -> qwertty::Result<()> {
+    /// use qwertty::{TerminalSignal, TokioTerminalSession};
+    ///
+    /// let mut session = TokioTerminalSession::open()?;
+    /// let mut signals = session.signals()?;
+    /// loop {
+    ///     tokio::select! {
+    ///         event = session.next_event() => { let _event = event?; }
+    ///         signal = signals.next() => match signal? {
+    ///             TerminalSignal::Suspend => session.suspend().await?,
+    ///             TerminalSignal::Continue => session.resume(true).await?,
+    ///             TerminalSignal::Terminate | TerminalSignal::Interrupt => break,
+    ///             // `TerminalSignal` is `#[non_exhaustive]`; future signals land here.
+    ///             _ => {}
+    ///         }
+    ///     }
+    /// }
+    /// # session.leave().await
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any of the four signal listeners cannot be installed.
+    pub fn signals(&self) -> terminal::Result<SignalStream> {
+        // Install the four listeners now — never at construction (design 01: the app owns
+        // registration by calling this). SIGINT/SIGTERM have named Tokio constructors; SIGTSTP and
+        // SIGCONT are addressed by raw number via rustix's signal table (no libc dependency).
+        let suspend = signal(SignalKind::from_raw(ProcessSignal::TSTP.as_raw()))
+            .map_err(terminal::Error::read_terminal)?;
+        let continue_ = signal(SignalKind::from_raw(ProcessSignal::CONT.as_raw()))
+            .map_err(terminal::Error::read_terminal)?;
+        let terminate = signal(SignalKind::terminate()).map_err(terminal::Error::read_terminal)?;
+        let interrupt = signal(SignalKind::interrupt()).map_err(terminal::Error::read_terminal)?;
+        Ok(SignalStream {
+            suspend,
+            continue_,
+            terminate,
+            interrupt,
+        })
+    }
+
     /// Restores the device status flags captured before this session set the descriptor
     /// non-blocking.
     ///
@@ -2203,6 +2266,108 @@ impl ResizeStream {
                 "SIGWINCH signal stream closed",
             ))),
         }
+    }
+}
+
+/// A terminal-relevant process signal a TUI selects on, reported by [`SignalStream`].
+///
+/// These are the signals a full-screen application typically wants to respond to itself, distinct
+/// from the resize signal (`SIGWINCH`), which [`ResizeStream`] handles. qwertty only *reports*
+/// them; the application owns the response. `#[non_exhaustive]` because more terminal-relevant
+/// signals may be added.
+///
+/// Obtain a stream of these from [`TokioTerminalSession::signals`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TerminalSignal {
+    /// `SIGTSTP` — a job-control stop request, usually from the user pressing `Ctrl-Z`.
+    ///
+    /// The intended response is [`TokioTerminalSession::suspend`], which restores the terminal to a
+    /// clean cooked state and stops the process group so the controlling shell regains the
+    /// terminal.
+    Suspend,
+    /// `SIGCONT` — the process has been continued, usually by the shell bringing the job back with
+    /// `fg`.
+    ///
+    /// The intended response is [`TokioTerminalSession::resume`], which re-enters raw mode and the
+    /// recorded modes, re-asserts non-blocking, and queues a synthetic resize so the application
+    /// repaints at the current size.
+    Continue,
+    /// `SIGTERM` — a polite request to terminate (the default `kill`).
+    ///
+    /// The intended response is a graceful exit: leave the session (restoring the terminal) and
+    /// shut down.
+    Terminate,
+    /// `SIGINT` — an interrupt, usually from the user pressing `Ctrl-C` (when the terminal delivers
+    /// it as a signal rather than a keystroke).
+    ///
+    /// The intended response is typically a graceful exit, though an application is free to treat
+    /// it as a lighter-weight cancellation (a REPL cancelling the current input line, say).
+    Interrupt,
+}
+
+/// An awaitable stream of the terminal-relevant process signals a TUI selects on.
+///
+/// Obtain one from [`TokioTerminalSession::signals`]. Like [`ResizeStream`], it is an independent
+/// value that does not borrow the session (design 01: qwertty installs no handler itself, only
+/// exposes a stream the app selects on), so it can sit in a `tokio::select!` alongside
+/// [`next_event`](TokioTerminalSession::next_event) and
+/// [`resize_stream`](TokioTerminalSession::resize_stream). It owns the four Tokio signal listeners
+/// (`SIGTSTP`, `SIGCONT`, `SIGTERM`, `SIGINT`) and `select!`s across them on each
+/// [`next`](Self::next), yielding whichever fired as a typed [`TerminalSignal`].
+///
+/// `SIGWINCH` is deliberately excluded — that is [`ResizeStream`]'s responsibility, and mixing it
+/// in would blur the resize path with the lifecycle-signal path.
+///
+/// # Shape choice
+///
+/// Like [`ResizeStream`], this is a small helper with an `async fn` [`next`](Self::next) rather
+/// than a full `futures::Stream` implementation. The awaitable-method shape keeps the type
+/// dependency-free (no `futures`/`Stream` in the public API before the vocabulary freeze) and is
+/// all a `select!` loop needs; a `Stream` impl can be added later without changing this method
+/// (design 04).
+#[derive(Debug)]
+pub struct SignalStream {
+    /// The `SIGTSTP` (job-control stop) listener. Tokio owns the registration; qwertty installs no
+    /// handler of its own.
+    suspend: Signal,
+    /// The `SIGCONT` (continue) listener.
+    continue_: Signal,
+    /// The `SIGTERM` (terminate) listener.
+    terminate: Signal,
+    /// The `SIGINT` (interrupt) listener.
+    interrupt: Signal,
+}
+
+impl SignalStream {
+    /// Awaits the next terminal-relevant signal and yields it as a typed [`TerminalSignal`].
+    ///
+    /// `select!`s across the four owned listeners and returns whichever fires first. This only
+    /// *reports* the signal — it never calls [`suspend`](TokioTerminalSession::suspend),
+    /// [`resume`](TokioTerminalSession::resume), or exits; the application decides the response
+    /// (see [`signals`](TokioTerminalSession::signals) for the recommended wiring).
+    ///
+    /// Cancel-safe: dropping the future mid-await abandons only the wait; the listeners live on
+    /// this value, so the next call resumes cleanly. Tokio coalesces pending deliveries of a
+    /// given signal the same way it does for `SIGWINCH`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a read error if a signal stream closes, which does not happen for these signals in
+    /// normal operation.
+    pub async fn next(&mut self) -> terminal::Result<TerminalSignal> {
+        let signal = tokio::select! {
+            received = self.suspend.recv() => received.map(|()| TerminalSignal::Suspend),
+            received = self.continue_.recv() => received.map(|()| TerminalSignal::Continue),
+            received = self.terminate.recv() => received.map(|()| TerminalSignal::Terminate),
+            received = self.interrupt.recv() => received.map(|()| TerminalSignal::Interrupt),
+        };
+        signal.ok_or_else(|| {
+            terminal::Error::read_terminal(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "terminal signal stream closed",
+            ))
+        })
     }
 }
 
@@ -3161,5 +3326,49 @@ mod tests {
         )
         .ok()?;
         Some((master, slave, sized))
+    }
+
+    // --- terminal-signals stream (M6-S3) ---------------------------------------------------------
+    //
+    // Signal delivery is process-global. A real SIGINT/SIGTERM delivered to the test process would
+    // abort the runner, and SIGTSTP would stop it — so we deliberately do NOT deliver any of the
+    // four signals in a unit test (a CI-safety requirement, not just a convenience). We test the
+    // enum's value semantics and that `signals()` installs the four listeners and hands back a
+    // live, usable stream. A genuine end-to-end signal round-trip is owed to the
+    // attended/manual checklist (playbook M6-S3): it cannot be exercised headlessly without
+    // endangering the harness.
+
+    #[test]
+    fn terminal_signal_is_copy_eq_and_debug() {
+        // Copy: using a value after a "move" only compiles because it is Copy.
+        let suspend = TerminalSignal::Suspend;
+        let copied = suspend;
+        assert_eq!(suspend, copied);
+
+        // Eq/PartialEq across the variants, and distinctness.
+        assert_eq!(TerminalSignal::Continue, TerminalSignal::Continue);
+        assert_ne!(TerminalSignal::Terminate, TerminalSignal::Interrupt);
+
+        // Debug renders the variant name, which the derive guarantees.
+        assert_eq!(format!("{:?}", TerminalSignal::Interrupt), "Interrupt");
+    }
+
+    #[tokio::test]
+    async fn signals_installs_the_listeners_and_returns_a_usable_stream() {
+        let (session, _peer) = fake_session();
+
+        // Installing the four listeners must succeed; this is the app-owns-registration step
+        // (design 01) and the only thing we can assert without delivering a real signal.
+        let mut signals = session
+            .signals()
+            .expect("install the terminal-signal listeners");
+
+        // The stream is live and usable: nothing is delivered, so `next()` must simply keep waiting
+        // rather than resolve. A short timeout that elapses confirms the await parks correctly.
+        let waited = timeout(Duration::from_millis(20), signals.next()).await;
+        assert!(
+            waited.is_err(),
+            "with no signal delivered, next() stays pending (a live, parked stream)",
+        );
     }
 }

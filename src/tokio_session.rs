@@ -173,6 +173,16 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// `Resolution::Cancelled` before the next query registers. Cleared when a probe finishes
     /// normally (its own fence resolves the set).
     active_probe: Vec<ExpectationId>,
+    /// The capability snapshot from the most recent
+    /// [`probe_capabilities`](Self::probe_capabilities), or `None` before any probe (FM-C8: the
+    /// snapshot is per-attachment and lives on the session).
+    ///
+    /// Emit-gating reads this: [`synchronized`](Self::synchronized) wraps a frame in mode 2026
+    /// only when this snapshot's [`synchronized_output`](Capabilities::synchronized_output) is
+    /// a known `true` finding (R-CAP-4, FM-V4). `None` here — never probed — is treated
+    /// exactly like an unknown finding: the gate degrades rather than emitting into a terminal
+    /// that never answered.
+    capabilities: Option<Capabilities>,
 }
 
 impl TokioTerminalSession<Terminal> {
@@ -304,6 +314,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             pending: VecDeque::new(),
             active_query: None,
             active_probe: Vec::new(),
+            capabilities: None,
         })
     }
 
@@ -726,6 +737,103 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// occurs. A silent terminal (timeout) or a closed terminal (EOF) is **not** an error: both
     /// yield the `Capabilities` gathered so far, with the unanswered fields `None`.
     pub async fn probe_capabilities(
+        &mut self,
+        timeout: Duration,
+    ) -> terminal::Result<Capabilities> {
+        let capabilities = self.probe_capabilities_inner(timeout).await?;
+        // Store the snapshot on the session (FM-C8: per-attachment, session-owned). Emit-gating
+        // (`synchronized`) reads it after the probe. A caller that never probes leaves this `None`,
+        // which the gate treats as unknown and degrades on (FM-V4). The returned value is a clone
+        // so the caller can inspect it independently of the stored snapshot.
+        self.capabilities = Some(capabilities.clone());
+        Ok(capabilities)
+    }
+
+    /// Returns the capability snapshot from the most recent
+    /// [`probe_capabilities`](Self::probe_capabilities), or `None` before any probe has run.
+    ///
+    /// The snapshot is per-attachment (FM-C8): it reflects the terminal this session was probing at
+    /// probe time, not a live view, and a resume/reattach to a different outer terminal does not
+    /// refresh it. Emit-gating on this session (see [`synchronized`](Self::synchronized)) reads
+    /// this snapshot; a consumer can read it directly to make its own gated-emission decisions.
+    #[must_use]
+    pub fn capabilities(&self) -> Option<&Capabilities> {
+        self.capabilities.as_ref()
+    }
+
+    /// Runs a full frame with synchronized output (DEC private mode 2026) **only when the probed
+    /// capability says the terminal supports it** (R-CAP-4, FM-V4).
+    ///
+    /// The gate reads the session's stored [`capabilities`](Self::capabilities) snapshot:
+    ///
+    /// - When [`synchronized_output`](Capabilities::synchronized_output) is a **known `true`**
+    ///   finding (the terminal answered the mode-2026 DECRQM probe affirmatively), this emits
+    ///   [`begin_synchronized_update`](commands::screen::begin_synchronized_update) before running
+    ///   `frame` and [`end_synchronized_update`](commands::screen::end_synchronized_update) after,
+    ///   through the same write path [`command`](Self::command) uses, so the terminal paints the
+    ///   frame atomically.
+    /// - In **every other case** — the finding is unknown, known `false`, or the session was never
+    ///   probed (`capabilities()` is `None`) — the frame body runs **without** the 2026 wrap. The
+    ///   frame still renders; it is simply not batched. This is the FM-V4 rule: qwertty never emits
+    ///   the 2026 begin/end into a terminal that did not answer the probe, because those bytes leak
+    ///   raw onto terminals that do not understand them (codex#24543). Degrading is not an error.
+    ///
+    /// The `frame` closure draws through the session (its output methods are `async`, so `frame` is
+    /// an `async` closure receiving `&mut Self`); its return value is returned on success. The gate
+    /// wraps the whole closure: begin is emitted first, the closure runs, then end is emitted, in
+    /// that order.
+    ///
+    /// # Forcing the wrap (escape hatch)
+    ///
+    /// There is intentionally no override argument in this method. A caller that must emit the 2026
+    /// wrap regardless of the probe — because it probed out of band, or accepts the FM-V4 risk —
+    /// drives the raw builders through [`command`](Self::command) directly:
+    ///
+    /// ```no_run
+    /// # use qwertty::{TokioTerminalSession, commands};
+    /// # async fn run(session: &mut TokioTerminalSession) -> qwertty::Result<()> {
+    /// session
+    ///     .command(commands::screen::begin_synchronized_update())
+    ///     .await?;
+    /// // ... draw the frame ...
+    /// session
+    ///     .command(commands::screen::end_synchronized_update())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing the begin bytes, or the end bytes, fails; the underlying write
+    /// error is propagated. When the frame runs un-gated (degraded), only the closure's own writes
+    /// can fail. `frame`'s own errors surface through its return value `R`, not through this
+    /// method's `Result`.
+    pub async fn synchronized<R>(
+        &mut self,
+        frame: impl AsyncFnOnce(&mut Self) -> R,
+    ) -> terminal::Result<R> {
+        let gated = self
+            .capabilities()
+            .is_some_and(|caps| caps.synchronized_output.value_copied() == Some(true));
+
+        if gated {
+            self.command(commands::screen::begin_synchronized_update())
+                .await?;
+        }
+        let result = frame(self).await;
+        if gated {
+            self.command(commands::screen::end_synchronized_update())
+                .await?;
+        }
+        Ok(result)
+    }
+
+    /// The unstored probe: writes the bundle, gathers replies, and returns the snapshot. The public
+    /// [`probe_capabilities`](Self::probe_capabilities) wraps this to store the snapshot on the
+    /// session; keeping the gather logic here means its several exit paths do not each repeat the
+    /// store.
+    async fn probe_capabilities_inner(
         &mut self,
         timeout: Duration,
     ) -> terminal::Result<Capabilities> {

@@ -282,9 +282,17 @@ assert_eq!(frame.as_bytes(), b"\x1b[?2026hframe contents\x1b[?2026l");
 **This pair must be detection-gated (FM-V4).** `commands::screen` only builds bytes; it does not
 probe whether a terminal understands mode 2026. codex found mode-2026-adjacent sequences leaking
 raw onto consoles that do not support them because it emitted unconditionally (codex#24543) — a
-caller should probe for mode 2026 support before writing these bytes to a real terminal, and a
-later session/capability slice owns applying that gate. Wrap exactly one full frame per `begin`/
-`end` pair.
+caller should probe for mode 2026 support before writing these bytes to a real terminal. Wrap
+exactly one full frame per `begin`/`end` pair.
+
+#### Capability-Gated Synchronized Output
+
+The encode-only `begin`/`end` pair above must be detection-gated by the caller. With the optional
+`tokio` feature on Unix, `TokioTerminalSession::synchronized` performs that gate — it wraps a frame
+in mode 2026 **only when the terminal probed the capability as supported** (R-CAP-4), degrading to an
+un-batched frame otherwise, never emitting the 2026 bytes into a terminal that did not answer
+(FM-V4). See [Live Query Helpers (Tokio)](crate::docs#live-query-helpers-tokio) for the gated helper
+and its example.
 
 Upstream references:
 

@@ -49,3 +49,35 @@ support multiple simultaneous live queries, capability probing, or query registr
 [Terminal Session: Async Boundary And Live
 Queries](crate::docs#terminal-session-async-boundary-and-live-queries) and [Tokio Input Ownership
 And Query Handoff](crate::docs#tokio-input-ownership-and-query-handoff) for the session-owned model.
+
+## Capability-Gated Synchronized Output
+
+`TokioTerminalSession::synchronized` gates the mode-2026 synchronized-output wrap (R-CAP-4). It reads
+the session's capability snapshot — populated by `probe_capabilities` and returned by
+`capabilities()` — and wraps the frame in mode 2026 **only when the terminal probed the capability as
+supported**:
+
+```rust,no_run
+use std::time::Duration;
+
+use qwertty::{TokioTerminalSession, commands};
+
+# async fn run() -> qwertty::Result<()> {
+let mut session = TokioTerminalSession::open()?;
+session.probe_capabilities(Duration::from_millis(250)).await?;
+session
+    .synchronized(async |s| {
+        s.command(commands::screen::clear()).await?;
+        s.text("frame contents").await
+    })
+    .await??;
+# session.leave().await
+# }
+```
+
+When `synchronized_output` is a known-`true` finding this emits `begin` before the frame and `end`
+after; when it is unknown, known-`false`, or the session was never probed, the frame runs **without**
+the wrap — graceful degradation, never the 2026 bytes into a terminal that did not answer (FM-V4).
+Degrading is not an error. To force the wrap regardless of the probe (an out-of-band escape hatch),
+drive `commands::screen::begin_synchronized_update`/`end_synchronized_update` through `command`
+directly.

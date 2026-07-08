@@ -66,6 +66,10 @@ point without scanning the repository tree.
   deadline, with an unknown finding meaning *unknown, not unsupported* (FM-C4). See [Capability
   Model](crate::docs#capability-model-evidence-identity-and-environment-inference) for the
   `Finding`/`Evidence`/identity/env-heuristic model.
+- `synchronized_frame.rs`: probe for synchronized output, then draw a capability-gated frame with
+  `TokioTerminalSession::synchronized` — it emits the mode-2026 wrap only when the probe answered
+  supported, and runs the same frame un-batched otherwise (FM-V4: never the 2026 bytes into a
+  terminal that did not answer). See [Terminal Control](terminal-control.md) for the gating rule.
 - `mouse_and_paste.rs`: enable SGR mouse (`enable_mouse`), focus (`enable_focus_events`), and
   bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
   and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control

@@ -1599,3 +1599,170 @@ fn termios_without_pending_input(mut termios: Termios) -> String {
     termios.local_modes -= LocalModes::PENDIN;
     format!("{termios:?}")
 }
+
+// --- Capability-gated synchronized output (R-CAP-4, FM-V4) ---------------------------------------
+
+/// Drives a real probe over the fake terminal, answering mode 2026 with `value` (1 = set/true,
+/// 2 = reset/false) and the DA1 fence, silent on everything else. Returns the session (its
+/// `synchronized_output` capability set from that answer) together with the fake terminal peer, so
+/// a follow-up can read what the session emits after the probe.
+async fn probe_mode_2026(value: u8) -> (TokioTerminalSession<FakeDevice>, FakeTerminal) {
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let probe = async move {
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .await
+            .expect("probe returns capabilities");
+        (session, caps)
+    };
+    let peer = async {
+        let _bundle = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read probe bundle");
+        // Answer only mode 2026 with the requested value, then the DA1 fence (which resolves the
+        // rest as NoReply). The fence, not the timeout, ends the probe fast.
+        let reply = format!("\x1b[?2026;{value}$y\x1b[?1;2c");
+        terminal
+            .feed_input(reply.as_bytes())
+            .expect("feed mode 2026 answer + DA1 fence");
+        terminal
+    };
+
+    let ((session, _caps), terminal) = tokio::join!(probe, peer);
+    (session, terminal)
+}
+
+/// Encodes a command to bytes, matching the builder's own encoding for exact assertions.
+fn command_bytes(command: &qwertty::Command) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    command.encode(&mut bytes);
+    bytes
+}
+
+#[tokio::test]
+async fn tokio_synchronized_wraps_the_frame_when_2026_is_probed_supported() {
+    // With synchronized_output a known-true probed finding, `synchronized` emits the mode-2026
+    // begin, then the frame body, then the mode-2026 end — in that order, byte-for-byte matching
+    // the command builders' own encodings.
+    let (mut session, mut terminal) = probe_mode_2026(1).await;
+    assert_eq!(
+        session
+            .capabilities()
+            .expect("probed")
+            .synchronized_output
+            .value_copied(),
+        Some(true),
+        "the probe recorded mode 2026 as supported",
+    );
+
+    // The frame body writes a distinctive command so we can assert the wrap surrounds it exactly.
+    let returned = session
+        .synchronized(async |s| {
+            s.command(commands::screen::clear())
+                .await
+                .expect("frame body writes clear");
+            "frame-return-value"
+        })
+        .await
+        .expect("synchronized frame");
+    assert_eq!(
+        returned, "frame-return-value",
+        "the closure's value is returned"
+    );
+    session.flush().await.expect("flush");
+
+    let emitted = read_fake_until_available(&mut terminal)
+        .await
+        .expect("read synchronized frame output");
+
+    let mut expected = command_bytes(&commands::screen::begin_synchronized_update());
+    expected.extend(command_bytes(&commands::screen::clear()));
+    expected.extend(command_bytes(&commands::screen::end_synchronized_update()));
+    assert_eq!(
+        emitted, expected,
+        "gated frame emits begin, body, end in order: got {emitted:?}",
+    );
+}
+
+#[tokio::test]
+async fn tokio_synchronized_degrades_without_the_wrap_when_never_probed() {
+    // Never probed: capabilities() is None. The gate must NOT emit the 2026 wrap into a terminal
+    // that never answered (FM-V4); the frame body still renders, un-batched.
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+    assert!(
+        session.capabilities().is_none(),
+        "capabilities() is None before any probe",
+    );
+
+    session
+        .synchronized(async |s| {
+            s.command(commands::screen::clear())
+                .await
+                .expect("frame body writes clear");
+        })
+        .await
+        .expect("synchronized frame degrades cleanly");
+    session.flush().await.expect("flush");
+
+    let emitted = read_fake_until_available(&mut terminal)
+        .await
+        .expect("read frame output");
+    assert_eq!(
+        emitted,
+        command_bytes(&commands::screen::clear()),
+        "un-probed frame emits ONLY the body, no 2026 wrap: got {emitted:?}",
+    );
+}
+
+#[tokio::test]
+async fn tokio_synchronized_degrades_without_the_wrap_when_2026_probed_unsupported() {
+    // Probed and the terminal answered "reset" (value 2 -> known false). The gate still degrades:
+    // only a known-TRUE finding emits the wrap; a known-false one runs un-batched, no wrap bytes.
+    let (mut session, mut terminal) = probe_mode_2026(2).await;
+    assert_eq!(
+        session
+            .capabilities()
+            .expect("probed")
+            .synchronized_output
+            .value_copied(),
+        Some(false),
+        "the probe recorded mode 2026 as reset (unsupported)",
+    );
+
+    session
+        .synchronized(async |s| {
+            s.command(commands::screen::clear())
+                .await
+                .expect("frame body writes clear");
+        })
+        .await
+        .expect("synchronized frame degrades cleanly");
+    session.flush().await.expect("flush");
+
+    let emitted = read_fake_until_available(&mut terminal)
+        .await
+        .expect("read frame output");
+    assert_eq!(
+        emitted,
+        command_bytes(&commands::screen::clear()),
+        "known-false frame emits ONLY the body, no 2026 wrap: got {emitted:?}",
+    );
+}
+
+#[tokio::test]
+async fn tokio_capabilities_snapshot_is_none_before_probe_and_set_after() {
+    // capabilities() returns None before a probe and the snapshot after (FM-C8: session-owned).
+    let (session, _terminal) = probe_mode_2026(1).await;
+    let snapshot = session
+        .capabilities()
+        .expect("snapshot present after probe");
+    assert_eq!(
+        snapshot.synchronized_output.value_copied(),
+        Some(true),
+        "the stored snapshot reflects the probed answer",
+    );
+    session.leave().await.expect("leave Tokio fake session");
+}

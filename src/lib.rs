@@ -71,7 +71,13 @@ pub mod commands;
 // The correlator is sans-io core, deliberately not feature-gated: design 04 keeps it
 // runtime-independent so the planned blocking one-shot driver (OQ-1) can drive it without Tokio.
 // Only the Tokio session consumes it today, so a build without that session has no consumer.
-#[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+#[cfg_attr(
+    not(all(feature = "tokio", unix)),
+    expect(
+        dead_code,
+        reason = "sans-io correlator (design 04); only the tokio+unix session drives it today"
+    )
+)]
 pub(crate) mod correlate;
 pub mod docs;
 mod escape;

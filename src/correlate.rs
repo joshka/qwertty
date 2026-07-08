@@ -262,8 +262,12 @@ impl Expectation {
 // is a *relation over expectations*, and future discriminator-carrying variants (M3) will make
 // `Expectation` larger than a `Copy`-by-value threshold, so the by-reference signature is the
 // stable one. Suppress the trivially-copy lint that fires only while the M2 variants are still
-// fieldless.
-#[allow(clippy::trivially_copy_pass_by_ref)]
+// fieldless; `expect` makes this self-retiring — the day a discriminator grows `Expectation` past
+// the by-value threshold the lint stops firing and this attribute becomes a build error to remove.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "by-reference is the stable signature; see comment above"
+)]
 #[must_use]
 pub fn distinguishes(a: &Expectation, b: &Expectation) -> bool {
     // Two expectations fail to distinguish exactly when a single event could complete both. Every

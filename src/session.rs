@@ -120,7 +120,7 @@ impl TerminalSession<Terminal> {
     /// the emergency path covers.
     #[cfg(unix)]
     #[must_use]
-    #[allow(
+    #[expect(
         clippy::missing_panics_doc,
         reason = "from_terminal always constructs the handle, so the expect cannot fire"
     )]
@@ -332,7 +332,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// A driver that registers the same device's descriptor with a runtime reactor (the Tokio
     /// session) uses this to reach the device the session owns — for its pollable fd and its path —
     /// without taking it away from the session's mode ledger and restore paths.
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn device(&self) -> &D {
         &self.device
     }
@@ -358,7 +364,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// The push bytes are already on the wire when the driver calls this (the request wrote them to
     /// run the query), so this records the entry for lifecycle replay without re-emitting; the
     /// `enter` replay path emits the apply bytes on a subsequent re-entry.
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_kitty_keyboard(&mut self, granted: KittyKeyboardFlags) {
         if granted.is_empty() {
             return;
@@ -573,7 +585,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// The driver has written `CSI ? N h CSI ? 1006 h` through its own readiness path; this records
     /// the ledger entry and refreshes the emergency blob without a second write, keeping the
     /// private [`ModeKind`] out of the driver.
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_mouse_enabled(&mut self, mode: MouseMode) {
         let mut apply = Vec::new();
         commands::terminal::enable_mouse(mode).encode(&mut apply);
@@ -585,7 +603,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     }
 
     /// Records an already-written focus-events enable in the ledger (Tokio driver path).
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_focus_events_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_focus_events().encode(&mut apply);
@@ -597,7 +621,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     }
 
     /// Records an already-written bracketed-paste enable in the ledger (Tokio driver path).
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_bracketed_paste_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_bracketed_paste().encode(&mut apply);
@@ -609,7 +639,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     }
 
     /// Records an already-written in-band resize enable in the ledger (Tokio driver path).
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_in_band_resize_enabled(&mut self) {
         let mut apply = Vec::new();
         commands::terminal::enable_in_band_resize().encode(&mut apply);
@@ -626,7 +662,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// The driver has written `CSI ? 1049 h` followed by the explicit `CSI 2 J` clear (R-OUT-3)
     /// through its own readiness path; this records the ledger entry — apply is the enter-and-clear
     /// pair, undo is `CSI ? 1049 l` — and refreshes the emergency blob without a second write.
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_alternate_screen_entered(&mut self) {
         let mut apply = Vec::new();
         commands::screen::enter_alternate_screen().encode(&mut apply);
@@ -643,7 +685,13 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// The driver has written `CSI ? 25 l` through its own readiness path; this records the ledger
     /// entry — apply hides, undo shows (FM-L3) — and refreshes the emergency blob without a second
     /// write.
-    #[cfg_attr(not(all(feature = "tokio", unix)), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "tokio", unix)),
+        expect(
+            dead_code,
+            reason = "tokio+unix async-driver helper; absent from other builds"
+        )
+    )]
     pub(crate) fn record_cursor_hidden(&mut self) {
         let mut apply = Vec::new();
         commands::cursor::hide().encode(&mut apply);

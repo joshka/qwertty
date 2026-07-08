@@ -1284,7 +1284,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Errors
     ///
     /// Never returns an error today; the `Result` shape is kept for forward compatibility.
-    #[allow(
+    #[expect(
         clippy::unused_async,
         reason = "raw-fd writes are unbuffered so there is nothing to flush; the async shape is \
                   kept for API continuity with the awaited call sites"
@@ -1309,7 +1309,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Errors
     ///
     /// Returns an error when cooked mode cannot be restored.
-    #[allow(
+    #[expect(
         clippy::unused_async,
         reason = "teardown is synchronous (design 04 forbids spawn_blocking here), but leave stays \
                   an async fn for API continuity with the awaited call sites"

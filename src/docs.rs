@@ -15,6 +15,11 @@
            owning terminal reads, live queries, cancellation, and handoff with \
            `TokioTerminalSession`."
 )]
+#![cfg_attr(
+    feature = "tokio",
+    doc = "//! - [The async model](async_model) — how the sans-io core, the query correlator, and \
+           Tokio readiness make terminal queries race-free by construction."
+)]
 //! - [Capabilities](capabilities) — the `Finding`/`Evidence` model, terminal identity, and
 //!   environment-heuristic inference behind capability probing.
 //! - [Platform support](platform) — what works today, what the `tokio` feature adds, and the
@@ -50,6 +55,13 @@ pub mod terminal_input {}
 #[cfg(feature = "tokio")]
 #[doc = include_str!("../docs/reference/tokio-input-ownership.md")]
 pub mod tokio_input_ownership {}
+
+// The async model page explains the sans-io core, the query correlator, and Tokio-readiness
+// driving; its links reference the async types, so the whole module is gated behind the `tokio`
+// feature.
+#[cfg(feature = "tokio")]
+#[doc = include_str!("../docs/reference/async-model.md")]
+pub mod async_model {}
 
 #[doc = include_str!("../docs/reference/capability-model.md")]
 pub mod capabilities {}

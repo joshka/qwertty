@@ -19,10 +19,11 @@ wholesale.
 qwertty's encode, decode, and query-correlation logic is a single runtime-neutral, side-effect-free
 core. That same core is driven either by the blocking [`TerminalSession`] or, under the `tokio`
 feature, by the async `TokioTerminalSession` — the two share identical decode and query logic, so an
-async application is not running a different, less-tested path. Most terminal libraries are
-synchronous designs; where async exists it is typically an add-on (an event stream over a background
-thread) rather than the primary shape. See the async-model reference for how the sans-io core is
-built.
+async application is not running a different, less-tested path. The alternatives do offer async or
+non-blocking input in various forms — an optional event stream, a non-blocking reader on a background
+thread — but as facilities layered onto a synchronous core; in qwertty the sans-io core is the
+primary design, and the blocking and async sessions are two thin drivers over the same logic. See the
+async-model reference for how that core is built.
 
 ### Queries that cannot mistake a keystroke for an answer
 
@@ -75,21 +76,23 @@ is restrictive; loosening it is a visible, deliberate choice in the code.
 
 ## How it compares
 
-Small orientation first, on the facts that are least ambiguous:
+A rough orientation first (concurrency described as each library's primary shape, not its only
+option — several offer non-blocking or async facilities as well):
 
-| Library   | Platforms      | Concurrency model                          |
-| --------- | -------------- | ------------------------------------------ |
-| crossterm | Unix + Windows | synchronous; optional async event stream   |
-| termion   | Unix           | synchronous                                |
-| termwiz   | Unix + Windows | synchronous                                |
-| termina   | Unix + Windows | synchronous                                |
-| qwertty   | Unix           | async-first, with a blocking session too   |
+| Library   | Platforms              | Concurrency model                              |
+| --------- | ---------------------- | ---------------------------------------------- |
+| crossterm | Unix + Windows         | sync core; optional async event stream         |
+| termion   | Unix                   | sync; thread-backed non-blocking reader        |
+| termwiz   | Unix + Windows         | sync; blocking or non-blocking input           |
+| termina   | Unix + Windows         | synchronous (per its current docs)             |
+| qwertty   | Unix (Windows planned) | async-first sans-io core; blocking session too |
 
 **vs. [crossterm].** crossterm's reach is its strength: it runs on Windows as well as Unix, it has by
-far the largest ecosystem, and it is the default backend for ratatui. qwertty gives up Windows to buy
-the things above — an async-first core, correlated queries, evidence-backed capabilities, and
-ledger-based restore. Choose crossterm for portability and ecosystem; reach for qwertty when you are
-building an async Unix application whose correctness depends on reliable queries and clean teardown.
+far the largest ecosystem, and it is the default backend for ratatui. qwertty is Unix-first today —
+Windows is a goal, not a rejection — and spends its focus on the things above: an async-first core,
+correlated queries, evidence-backed capabilities, and ledger-based restore. Choose crossterm for
+portability and ecosystem today; reach for qwertty when you are building an async Unix application
+whose correctness depends on reliable queries and clean teardown.
 
 **vs. [termwiz].** termwiz is far more than an ownership layer: it carries a terminfo database, a
 cell-and-surface model, a line editor, image protocols, and widgets — it is the toolkit behind a full
@@ -99,26 +102,28 @@ surface-and-widget stack, termwiz; if you want a focused, async ownership-and-pr
 build a renderer on, qwertty.
 
 **vs. [termion].** termion is minimal and dependency-free, which is a real virtue for small Unix
-programs. It is synchronous, does comparatively little to protect you from a botched teardown, and
-reads query replies inline. qwertty is a larger dependency that does more: async, panic-safe restore,
+programs. Its async story is a thread-backed non-blocking reader rather than correlated queries, it
+does comparatively little to protect you from a botched teardown, and it reads query replies inline.
+qwertty is a larger dependency that does more: async-first, panic-safe restore,
 correlated queries, typed lossless decode. For a tiny filter or prompt, termion is lighter; for a
 long-running interactive application, qwertty's guarantees start to pay for themselves.
 
 **vs. [termina].** termina is the closest in spirit — it, too, keeps the terminal protocol visible,
 letting you write typed CSI/OSC/DCS and read typed events instead of hand-decoding bytes, and it is
 maintained and cross-platform. The differences are architectural rather than philosophical: termina
-is synchronous and cross-platform, whereas qwertty is async-first and Unix-only, and qwertty builds
-the race-free query correlator and the evidence-backed capability model in as first-class mechanisms
-rather than leaving reply-matching and capability inference to the application. If you want a typed,
-portable, synchronous library today, termina is an excellent choice; qwertty is the bet for
-async Unix applications that lean hard on queries and capability data.
+is cross-platform, whereas qwertty is async-first and Unix-first (Windows is a goal), and qwertty
+builds the race-free query correlator and the evidence-backed capability model in as first-class
+mechanisms rather than leaving reply-matching and capability inference to the application. If you want
+a typed, portable, cross-platform library today, termina is an excellent choice; qwertty is the bet
+for async Unix applications that lean hard on queries and capability data.
 
 ## What qwertty does not do
 
 Being honest about the boundaries is part of the pitch:
 
-- **No Windows.** Live terminal ownership is Unix-only by design. The encode and decode layers compile
-  everywhere, but if you need a Windows console you want crossterm, termwiz, or termina. See
+- **Windows isn't here yet.** Live terminal ownership is Unix-only today, though the encode and decode
+  layers already compile everywhere. Windows support is a goal rather than a rejected one — but until
+  it lands, a Windows console app wants crossterm, termwiz, or termina. See
   [platform support](crate::docs::platform).
 - **It is not a widget toolkit.** qwertty has no surfaces, cells, layout, or widgets. It is the layer
   a renderer sits on, not the renderer.

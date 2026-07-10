@@ -11,6 +11,18 @@ entries.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-10
+
+Documentation-only patch release; no library code or public API changes.
+
+### Documentation
+
+- Link the Tokio session types (`TokioTerminalSession`, `ResizeStream`, `SignalStream`,
+  `TerminalAcquisition`) from the crate-root introduction so they render as links on docs.rs rather
+  than as unlinked code.
+- Add a "Why qwertty" reference page (`qwertty::docs::why_qwertty`) comparing qwertty to crossterm,
+  termwiz, termion, and termina, and stating where it deliberately does less.
+
 ## [0.1.0] - 2026-07-07
 
 Initial release of qwertty, a Unix-first Rust library for building terminal applications that need
@@ -48,5 +60,6 @@ explicit terminal ownership, ordered output, input handling, and policy-aware te
 - Checked-in examples and docs.rs reference pages (`qwertty::docs`) for the public workflows above.
 - Dual `MIT OR Apache-2.0` licensing.
 
-[Unreleased]: https://github.com/joshka/qwertty/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/joshka/qwertty/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/joshka/qwertty/releases/tag/v0.1.1
 [0.1.0]: https://github.com/joshka/qwertty/releases/tag/v0.1.0

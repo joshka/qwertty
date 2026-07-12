@@ -1,0 +1,66 @@
+name: Pages
+
+# Publishes the mdBook conformance-reference site (site/book.toml) from the committed
+# docs/reference/generated/ tree to GitHub Pages. The generated tree is already frozen and
+# freshness-checked by the CI `qdb-generate-check` gate — this workflow only builds and deploys
+# it, never regenerates it, so a Pages deploy never diverges from what's actually committed.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/reference/generated/**
+      - site/**
+      - scripts/build_site.sh
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+# Only one deploy in flight at a time; a newer push supersedes an in-progress one rather than
+# queuing behind it (this is a "deploy the latest" workflow, not a fan-out).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install mdbook
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        with:
+          tool: mdbook
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Build the site
+        run: |
+          bash scripts/build_site.sh
+          mdbook build site
+      - name: Upload the site artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/book
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

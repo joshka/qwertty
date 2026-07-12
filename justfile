@@ -49,6 +49,19 @@ docs:
 docs-serve: docs
     python3 -m http.server 8347 --bind 127.0.0.1 --directory target/doc
 
+# Build the published conformance-reference site (mdBook, site/book.toml) from the committed
+# docs/reference/generated/ tree. Requires `cargo run -p qdb -- generate reference` to be current
+# (the `qdb-generate-check` gate enforces that) and `cargo install mdbook`. Output: site/book/.
+site-build:
+    bash scripts/build_site.sh
+    mdbook build site
+
+# Build and serve the site with live-reload at http://127.0.0.1:3000. Use this to preview before
+# pushing — the CI `pages` workflow runs the same two steps as `site-build` on every push to main.
+site-serve:
+    bash scripts/build_site.sh
+    mdbook serve site
+
 loom:
     RUSTFLAGS="--cfg loom" cargo test --lib loom_
 

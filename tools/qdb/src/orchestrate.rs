@@ -19,6 +19,7 @@ use crate::targets::alacritty::AlacrittyTarget;
 use crate::targets::betamax::BetamaxTarget;
 use crate::targets::kitty::KittyTarget;
 use crate::targets::tmux::TmuxTarget;
+use crate::targets::wezterm::WeztermTarget;
 use crate::targets::{AdapterKind, Target};
 
 /// Which adapter the orchestrator drives.
@@ -33,6 +34,8 @@ pub enum TargetKind {
     /// A scripted, briefly-visible alacritty window hosting the byte relay (no headless mode
     /// exists for alacritty — the window closes itself when the relay session ends).
     Alacritty,
+    /// A headless `wezterm-mux-server` session hosting the byte relay.
+    Wezterm,
 }
 
 impl TargetKind {
@@ -44,6 +47,7 @@ impl TargetKind {
             "betamax" => Some(Self::Betamax),
             "kitty" => Some(Self::Kitty),
             "alacritty" => Some(Self::Alacritty),
+            "wezterm" => Some(Self::Wezterm),
             _ => None,
         }
     }
@@ -56,6 +60,7 @@ impl TargetKind {
             Self::Betamax => "betamax",
             Self::Kitty => "kitty",
             Self::Alacritty => "alacritty",
+            Self::Wezterm => "wezterm",
         }
     }
 
@@ -67,6 +72,7 @@ impl TargetKind {
             Self::Betamax => Box::new(BetamaxTarget::new()),
             Self::Kitty => Box::new(KittyTarget::new()),
             Self::Alacritty => Box::new(AlacrittyTarget::new()),
+            Self::Wezterm => Box::new(WeztermTarget::new()),
         }
     }
 
@@ -76,7 +82,9 @@ impl TargetKind {
     #[must_use]
     pub const fn adapter_kind(self) -> AdapterKind {
         match self {
-            Self::Tmux | Self::Betamax | Self::Kitty | Self::Alacritty => AdapterKind::PtyHosted,
+            Self::Tmux | Self::Betamax | Self::Kitty | Self::Alacritty | Self::Wezterm => {
+                AdapterKind::PtyHosted
+            }
         }
     }
 }

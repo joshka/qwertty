@@ -241,7 +241,7 @@ name        = "iTerm2 Report Cell Size Response"
 description = "Scale is present in newer iTerm2 versions."
 direction   = "terminal-to-host"
 refs        = [{ doc = "iterm2-escape-codes" }]
-fixtures    = []
+fixtures    = ["fixtures/iterm2/iterm2_osc1337_report_cell_size_report_report_capture_wezterm.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -464,7 +464,7 @@ name        = "iTerm2 Extended Device Attributes Response"
 description = "Reports terminal name and version, such as iTerm2 3.4.0."
 direction   = "terminal-to-host"
 refs        = [{ doc = "iterm2-escape-codes" }]
-fixtures    = ["fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq"]
+fixtures    = ["fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 

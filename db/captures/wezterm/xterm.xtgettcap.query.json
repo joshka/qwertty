@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?65;4;6;18;22c",
+    "target": "wezterm",
+    "version": "WezTerm 20240203-110809-5046fc22",
+    "xtversion_escaped": "\\eP>|WezTerm 20240203-110809-5046fc22\\e\\\\"
+  },
+  "query_id": "xterm.xtgettcap.query",
+  "reply_escaped": "\\eP1+r544E=57657A5465726D\\e\\\\",
+  "reply_id": "xterm.xtgettcap.report",
+  "reply_len": 26,
+  "status": "answered",
+  "target": "wezterm",
+  "timestamp": "2026-07-12T12:58:04Z"
+}

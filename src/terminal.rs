@@ -13,6 +13,11 @@ use std::{error, fmt, io};
 
 use crate::policy::PolicyGate;
 
+// Pure, console-free translation logic for the Windows device (UTF-16 carry, record→VT synthesis,
+// mode-bit math). Compiled in the Windows build and under `test` on every platform, so its logic is
+// unit-tested locally even though the live device only builds on Windows.
+#[cfg(any(test, windows))]
+mod console_translate;
 mod device;
 #[cfg(unix)]
 mod fake;
@@ -223,9 +228,11 @@ impl Error {
         Self::QueryTimeout { operation, timeout }
     }
 
-    // Used on every target now: the non-unix device stub constructs it for every operation, and on
-    // Unix both the Tokio driver and the synchronous query driver (review-02 §2) construct it for a
-    // device with no pollable fd. No build is left without a caller, so it needs no cfg gate.
+    // Constructed on Unix (the Tokio driver and the synchronous query driver, review-02 §2, for a
+    // device with no pollable fd) and by the fallback device stub on other non-Windows targets. The
+    // real Windows console device (MW-1) supports every operation, so it never constructs this and
+    // the constructor would be dead code there — hence the `not(windows)` gate.
+    #[cfg(not(windows))]
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
             operation,

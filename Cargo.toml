@@ -70,6 +70,12 @@ loom = "0.7"
 [target.'cfg(unix)'.dev-dependencies]
 tokio = { version = "1.37", default-features = false, features = ["test-util"] }
 
+# The `#![cfg(windows)]` integration test (tests/windows_console.rs) needs `AllocConsole` to attach a
+# console before driving the public `Terminal` surface headlessly on CI. Only the console feature is
+# pulled in for tests; the library's own console FFI lives under `[target.'cfg(windows)'.dependencies]`.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 # Floors are real (the CI minimal-versions job builds against them): tokio 1.37 is the first with
 # `AsyncFd::try_new`, rustix 1.1 the first with `Pid::as_raw_pid`. qdb shares the rustix dep, so
 # its floor must stay consistent with this one for the workspace to resolve a single version.
@@ -91,13 +97,16 @@ tokio = { version = "1.37", optional = true, default-features = false, features 
 ] }
 
 # Windows console FFI for the `#[cfg(windows)]` terminal device (src/terminal/windows.rs). Only the
-# raw console-mode, size, and read/write entry points are pulled in — no higher-level wrappers — so
-# the stub proves the `TerminalDevice` seam accommodates a real ConPTY/console impl. The async
-# readiness model (no `AsyncFd` equivalent) is deliberately NOT built here; see
-# work/phase4/windows-readiness-analysis.md.
+# raw console entry points the device calls are pulled in — no higher-level wrappers — so the crate
+# talks to the console host directly (ADR 0022). `Win32_Security` and `Win32_System_IO` carry only
+# the `SECURITY_ATTRIBUTES` and `OVERLAPPED` types named (as null pointers) in the `CreateFileW` and
+# `WriteFile` signatures. The async readiness model (no `AsyncFd` equivalent) is deliberately NOT
+# built here; see work/phase4/windows-readiness-analysis.md.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
-    "Win32_System_Console",
+    "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
 ] }

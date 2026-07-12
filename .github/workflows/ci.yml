@@ -355,7 +355,11 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Test (platform-neutral core)
-        run: cargo test -p qwertty
+        # Unit and integration tests only, not doctests: the reference-doc examples exercise the
+        # Unix-only session API (`TerminalSession::open`, `restore_handle`, …), which does not exist
+        # on Windows, so they cannot compile here. The platform-neutral core they document is still
+        # fully exercised by the lib and integration tests, and the doctests run on the Unix jobs.
+        run: cargo test -p qwertty --tests
       - name: Clippy
         run: cargo clippy -p qwertty --all-targets -- -D warnings
 

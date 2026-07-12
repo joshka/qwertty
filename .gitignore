@@ -3,3 +3,8 @@
 # hold a full checkout). Ignoring it here — not just in machine-local .git/info/exclude — keeps
 # the root workspace from ever snapshotting nested checkouts as phantom files on other machines.
 /work/
+# mdBook site build: site/src/ is populated by scripts/build_site.sh from the committed
+# docs/reference/generated/ tree (never hand-edited, never committed) and site/book/ is mdBook's
+# HTML output. Only site/book.toml is checked in.
+/site/src/
+/site/book/

@@ -1,0 +1,19 @@
+[book]
+title = "qwertty terminal conformance reference"
+description = "What each terminal control sequence is, where it is specified, and what real terminals actually did when probed — live-capture evidence, never hand-assertion."
+authors = ["qwertty contributors"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/joshka/qwertty"
+
+[output.html.search]
+enable = true
+# git-repository-icon deliberately unset: its default is already "fab-github" (GitHub's brand
+# icon); mdBook derives the icon *class* (regular/solid/brands) from the "fa-"/"fas-"/"fab-"
+# prefix, and getting that wrong ("fa-github", a brands-only icon under the regular set) fails
+# the build outright — verified by trying it.
+# No edit-url-template: every page here is machine-generated from db/ + db/results/*.toml (see
+# each page's own "Do not edit by hand" banner) — an "edit this page" link would point readers at
+# hand-editing output that the freshness gate would just overwrite.

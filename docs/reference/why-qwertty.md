@@ -1,6 +1,6 @@
 # Why qwertty
 
-qwertty is a Unix-first terminal library built around three bets that the existing libraries do not
+qwertty is a terminal library built around three bets that the existing libraries do not
 all make together: it is **async-first**, its terminal queries are **race-free by construction**, and
 it treats **what a terminal actually supports as measured evidence** rather than a guess. If those are
 not properties you need, one of the mature alternatives below is very likely the better choice — this
@@ -79,20 +79,22 @@ is restrictive; loosening it is a visible, deliberate choice in the code.
 A rough orientation first (concurrency described as each library's primary shape, not its only
 option — several offer non-blocking or async facilities as well):
 
-| Library   | Platforms              | Concurrency model                              |
-| --------- | ---------------------- | ---------------------------------------------- |
-| crossterm | Unix + Windows         | sync core; optional async event stream         |
-| termion   | Unix                   | sync; thread-backed non-blocking reader        |
-| termwiz   | Unix + Windows         | sync; blocking or non-blocking input           |
-| termina   | Unix + Windows         | synchronous (per its current docs)             |
-| qwertty   | Unix (Windows planned) | async-first sans-io core; blocking session too |
+| Library   | Platforms      | Concurrency model                              |
+| --------- | -------------- | ---------------------------------------------- |
+| crossterm | Unix + Windows | sync core; optional async event stream         |
+| termion   | Unix           | sync; thread-backed non-blocking reader        |
+| termwiz   | Unix + Windows | sync; blocking or non-blocking input           |
+| termina   | Unix + Windows | synchronous (per its current docs)             |
+| qwertty   | Unix + Windows | async-first sans-io core; blocking session too |
 
-**vs. [crossterm].** crossterm's reach is its strength: it runs on Windows as well as Unix, it has by
-far the largest ecosystem, and it is the default backend for ratatui. qwertty is Unix-first today —
-Windows is a goal, not a rejection — and spends its focus on the things above: an async-first core,
-correlated queries, evidence-backed capabilities, and ledger-based restore. Choose crossterm for
-portability and ecosystem today; reach for qwertty when you are building an async Unix application
-whose correctness depends on reliable queries and clean teardown.
+**vs. [crossterm].** crossterm's reach is its strength: it has by far the largest ecosystem and is
+the default backend for ratatui. qwertty runs on Unix and Windows too — its Windows console backend
+is VT-based (Windows 10 1809+), newer than crossterm's and without crossterm's legacy-console path —
+and spends its focus on the things above: an async-first core, correlated queries, evidence-backed
+capabilities, and ledger-based restore. Choose crossterm for its ecosystem and its long-hardened
+Windows support today; reach for qwertty when you are building an async application whose correctness
+depends on reliable queries and clean teardown. See the [platform support
+reference](crate::docs::platform) for exactly what each platform validates.
 
 **vs. [termwiz].** termwiz is far more than an ownership layer: it carries a terminfo database, a
 cell-and-surface model, a line editor, image protocols, and widgets — it is the toolkit behind a full
@@ -111,11 +113,12 @@ long-running interactive application, qwertty's guarantees start to pay for them
 **vs. [termina].** termina is the closest in spirit — it, too, keeps the terminal protocol visible,
 letting you write typed CSI/OSC/DCS and read typed events instead of hand-decoding bytes, and it is
 maintained and cross-platform. The differences are architectural rather than philosophical: termina
-is cross-platform, whereas qwertty is async-first and Unix-first (Windows is a goal), and qwertty
-builds the race-free query correlator and the evidence-backed capability model in as first-class
-mechanisms rather than leaving reply-matching and capability inference to the application. If you want
-a typed, portable, cross-platform library today, termina is an excellent choice; qwertty is the bet
-for async Unix applications that lean hard on queries and capability data.
+is cross-platform and synchronous, whereas qwertty is async-first (and cross-platform too, with a
+VT-based Windows backend), and qwertty builds the race-free query correlator and the evidence-backed
+capability model in as first-class mechanisms rather than leaving reply-matching and capability
+inference to the application. If you want a typed, portable, synchronous library with mature
+cross-platform support today, termina is an excellent choice; qwertty is the bet for async
+applications that lean hard on queries and capability data.
 
 ## What qwertty does not do
 

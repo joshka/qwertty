@@ -93,6 +93,7 @@ documentation in the right layer.
 | —         | Release engineering and publish prep       | Complete                             |
 | —         | Docs pass and reference restructure        | Complete                             |
 | M8        | 0.1.0 publication gate                     | Complete (0.1.2 on crates.io)        |
+| MW        | Windows console support                    | Complete (unreleased)                |
 | M9        | Conformance runner and generated reference | In progress (Phase 5 lanes)          |
 
 Milestone detail:
@@ -111,6 +112,12 @@ Milestone detail:
   publisher, and 0.1.1/0.1.2 released through release-plz via OIDC. Releases are the maintainer's
   act (merging the release-plz PR or dispatching the workflow); the process is documented in
   [`docs/development/release-engineering.md`](development/release-engineering.md).
+- **MW** — complete (unreleased): a VT-based Windows console backend (Windows 10 1809+) behind the
+  shared device/session/decoder surface — the sync and async sessions, an FM-A1-safe worker-thread
+  readiness transport, panic-safe console-mode restore, console Ctrl signals, and `run_detached`, with
+  win32-input-mode decode. `suspend`/`resize_stream` are typed `Unsupported` (no job control; resize
+  is in-band). Decisions are in ADR 0021 (unsafe policy) and ADR 0022 (console support model). The
+  remaining validation is interactive/IME coverage on the real Windows terminal matrix.
 - **M9** — generalizes the M7 capture harness into a full conformance runner (target-trait shape),
   produces a results-driven support matrix and a generated docs.rs reference, and adds
   width-behavior probes.

@@ -24,8 +24,8 @@
 )]
 //! - [Capabilities](capabilities) — the `Finding`/`Evidence` model, terminal identity, and
 //!   environment-heuristic inference behind capability probing.
-//! - [Platform support](platform) — what works today, what the `tokio` feature adds, and the
-//!   `Error::Unsupported` boundary on other platforms.
+//! - [Platform support](platform) — the Unix and Windows terminal backends, where they differ, and
+//!   the `Error::Unsupported` boundary on other targets.
 //! - [Examples](examples) — the durable index of runnable examples shipped with the crate.
 //!
 //! Concept guides — how a specific terminal feature works:
@@ -35,6 +35,8 @@
 //! - [Bracketed paste](bracketed_paste) — telling pasted input apart from typed input.
 //! - [Kitty keyboard](kitty_keyboard) — progressive-enhancement key reporting and
 //!   verify-after-push.
+//! - [Keybinding portability](keybinding_portability) — which key combinations a terminal can tell
+//!   apart, the legacy collisions, and the kitty/win32-input enhancement ladder.
 
 #[doc = include_str!("../docs/reference/why-qwertty.md")]
 pub mod why_qwertty {}
@@ -96,3 +98,6 @@ pub mod bracketed_paste {}
 
 #[doc = include_str!("../docs/reference/kitty-keyboard.md")]
 pub mod kitty_keyboard {}
+
+#[doc = include_str!("../docs/reference/keybinding-portability.md")]
+pub mod keybinding_portability {}

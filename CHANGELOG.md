@@ -11,8 +11,25 @@ entries.
 
 ## [Unreleased]
 
+### Added
+
+- Windows console support. `Terminal`, `TerminalSession`, and (behind the `tokio` feature)
+  `TokioTerminalSession` now own a live Windows console, sharing the Unix decoder, command encoders,
+  query correlator, and capability model over a VT-based backend (Windows 10 1809+; no legacy-console
+  path). The async session reads through a cancellation-safe worker thread that waits on the console
+  input handle. Resize arrives in-band as `Event::Resize`; `RestoreHandle` restores console modes and
+  the output codepage from a panic hook; `signals()` reports console Ctrl events; `run_detached`
+  hands the console to a child. `suspend`/`resume` and `resize_stream` return `Error::Unsupported` on
+  Windows (no job control; resize is in-band). See the platform support reference.
+- Decode support for win32-input-mode (`CSI … _`) key sequences, including key-release events,
+  positional modifiers, and surrogate pairs. Enabling the mode stays a policy-gated opt-in.
+- A keybinding-portability reference page documenting the legacy key collisions and the
+  kitty/win32-input enhancement ladder.
+
 ### Changed
 
+- The `unsafe_code` lint moved from `forbid` to `deny` so the `#[cfg(windows)]` console FFI modules
+  can opt in; the Unix and platform-neutral layers remain free of `unsafe` (ADR 0021).
 - Raised dependency version floors to what the code actually requires: `tokio` ≥ 1.37
   (`AsyncFd::try_new`) and `rustix` ≥ 1.1 (`Pid::as_raw_pid`). The CI minimal-versions check now
   builds against these floors as a required gate. Consumers already resolving newer versions are

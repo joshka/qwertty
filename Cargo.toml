@@ -48,12 +48,13 @@ tokio = ["dep:tokio"]
 # entirely `#![cfg(unix)]` (and thus an empty crate) on non-Unix targets like the Windows CI job.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
-# `deny`, not `forbid`, so the Windows console device (src/terminal/windows.rs) can scope a single
-# `#[allow(unsafe_code)]` over its `windows-sys` FFI. `forbid` cannot be locally overridden, and
-# every Windows console entry point (SetConsoleMode, GetConsoleScreenBufferInfo, ReadConsoleW,
-# WriteConsoleW, GetStdHandle) is an `unsafe extern "system"` call with no safe wrapper in the
-# dependency tree. The Unix/pure crate carries no `unsafe` and stays effectively forbidden: the
-# only `#[allow(unsafe_code)]` in the tree is the `#[cfg(windows)]` FFI module. See
+# `deny`, not `forbid`, so the `#[cfg(windows)]` console modules can each scope an
+# `#[allow(unsafe_code)]` over their `windows-sys` FFI. `forbid` cannot be locally overridden, and
+# every Windows console entry point (CreateFileW, SetConsoleMode, ReadConsoleInputW, WriteFile,
+# WaitForMultipleObjects, …) is an `unsafe extern "system"` call with no safe wrapper in the
+# dependency tree. The Unix/pure crate carries no `unsafe` and stays effectively forbidden: the only
+# `#[allow(unsafe_code)]` opt-ins in the tree are the `#[cfg(windows)]` FFI modules (the console
+# device, its input reader, the readiness worker, and the restore handle). See ADR 0021 and
 # work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
 unsafe_code = "deny"
 

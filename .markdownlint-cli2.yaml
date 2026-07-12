@@ -3,6 +3,10 @@ config:
     line_length: 100
     code_blocks: false
     tables: false
+  # Keep-a-changelog repeats section headings (Added/Changed/Fixed) once per release, so duplicate
+  # headings are only a problem when they share a parent. Scope the check to siblings.
+  no-duplicate-heading:
+    siblings_only: true
   table-pipe-style:
     style: leading_and_trailing
   table-column-style:

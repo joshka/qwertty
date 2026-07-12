@@ -11,96 +11,96 @@ pass or fail.
 
 Captured:
 
-- **betamax** (libghostty) — 2026-07-07T10:56:32Z
-- **kitty** (kitty(0.39.1)) — 2026-07-12T08:18:09Z
-- **tmux** (tmux 3.7b) — 2026-07-07T10:59:13Z
+- **betamax** (libghostty, pty-headless) — 2026-07-12T08:29:31Z
+- **kitty** (kitty(0.39.1), pty-headless) — 2026-07-12T08:29:55Z
+- **tmux** (tmux 3.7b, pty-headless) — 2026-07-12T08:29:20Z
 
 ## Legend
 
-| Glyph | Meaning |
-| ----- | ------- |
-| answered (N) | The target replied; N is the raw reply byte length. |
-| silent | The target ran the probe and produced no reply before the deadline. |
-| timeout | Same wire event as silent (no bytes before the deadline); see `db/README.md`. |
+| Verdict | Meaning |
+| ------- | ------- |
+| supported (N) | The target answered with a genuine reply; N is the raw reply byte length. |
+| unsupported | Bytes came back but only echoed the query — not a real reply; see `db/README.md`. |
+| no-reply | The target ran the probe and produced no reply before the deadline. |
 | unprobeable | The entry is a query but the harness will not send it blind (side-effecting or ill-defined); see `db/README.md`. |
-| — | No result: this target has not captured this entry. |
+| — | No result: this target has not recorded this entry. |
 
 ## `ecma48-csi`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| DSR: Query Cursor Position | `csi.dsr.cursor_position` | answered (6) | answered (6) | answered (6) |
-| DA1: Query Primary Device Attributes | `csi.da.primary` | answered (9) | answered (7) | answered (9) |
-| DA2: Query Secondary Device Attributes | `csi.da.secondary` | answered (9) | answered (13) | answered (10) |
-| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | answered (14) | timeout | timeout |
-| DSR: Query Terminal Status | `csi.dsr.status` | answered (4) | answered (4) | answered (4) |
-| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | timeout | answered (7) | answered (7) |
-| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | timeout | answered (11) | answered (11) |
-| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | timeout | answered (14) | answered (14) |
+| DSR: Query Cursor Position | `csi.dsr.cursor_position` | supported (6) | supported (6) | supported (6) |
+| DA1: Query Primary Device Attributes | `csi.da.primary` | supported (9) | supported (7) | supported (9) |
+| DA2: Query Secondary Device Attributes | `csi.da.secondary` | supported (9) | supported (13) | supported (10) |
+| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | supported (14) | no-reply | no-reply |
+| DSR: Query Terminal Status | `csi.dsr.status` | supported (4) | supported (4) | supported (4) |
+| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | no-reply | supported (7) | supported (7) |
+| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | no-reply | supported (11) | supported (11) |
+| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | no-reply | supported (14) | supported (14) |
 
 ## `iterm2`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | timeout | timeout | timeout |
-| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | timeout | timeout | timeout |
-| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | timeout | timeout | timeout |
-| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | timeout | timeout | timeout |
-| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | — | — | — |
-| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | answered (16) | answered (19) | answered (15) |
-| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | — | — | — |
+| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | no-reply | no-reply | no-reply |
+| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | no-reply | no-reply | no-reply |
+| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | no-reply | no-reply | no-reply |
+| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | no-reply | no-reply | no-reply |
+| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | unprobeable | unprobeable | unprobeable |
+| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | supported (16) | supported (19) | supported (15) |
+| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | unprobeable | unprobeable | unprobeable |
 
 ## `kitty-color`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| Query Kitty Color Key | `kitty.color.query` | timeout | answered (30) | timeout |
+| Query Kitty Color Key | `kitty.color.query` | no-reply | supported (30) | no-reply |
 
 ## `kitty-keyboard`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | answered (5) | answered (5) | timeout |
+| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | supported (5) | supported (5) | no-reply |
 
 ## `kitty-multicursor`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | timeout | timeout | timeout |
+| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | no-reply | no-reply | no-reply |
 
 ## `kitty-pointer`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| Query Kitty Pointer Shape | `kitty.pointer.query` | timeout | answered (8) | timeout |
+| Query Kitty Pointer Shape | `kitty.pointer.query` | no-reply | supported (8) | no-reply |
 
 ## `osc`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| Query Foreground Color | `osc.10.foreground_query` | timeout | answered (25) | timeout |
-| Query Background Color | `osc.11.background_query` | timeout | answered (25) | timeout |
-| Query Cursor Color | `osc.12.cursor_query` | timeout | answered (25) | timeout |
-| Query Palette Color | `osc.4.palette_query` | timeout | answered (26) | timeout |
-| Query Special Color | `osc.5.special_query` | timeout | timeout | timeout |
-| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | timeout | timeout | timeout |
-| Query Pointer Background Color | `osc.14.pointer_background_query` | timeout | timeout | timeout |
-| Query Highlight Background Color | `osc.17.highlight_background_query` | timeout | answered (25) | timeout |
-| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | timeout | answered (25) | timeout |
-| OSC 52 Clipboard Query | `osc.52.clipboard_query` | timeout | timeout | timeout |
+| Query Foreground Color | `osc.10.foreground_query` | no-reply | supported (25) | no-reply |
+| Query Background Color | `osc.11.background_query` | no-reply | supported (25) | no-reply |
+| Query Cursor Color | `osc.12.cursor_query` | no-reply | supported (25) | no-reply |
+| Query Palette Color | `osc.4.palette_query` | no-reply | supported (26) | no-reply |
+| Query Special Color | `osc.5.special_query` | no-reply | no-reply | no-reply |
+| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | no-reply | no-reply | no-reply |
+| Query Pointer Background Color | `osc.14.pointer_background_query` | no-reply | no-reply | no-reply |
+| Query Highlight Background Color | `osc.17.highlight_background_query` | no-reply | supported (25) | no-reply |
+| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | no-reply | supported (25) | no-reply |
+| OSC 52 Clipboard Query | `osc.52.clipboard_query` | no-reply | no-reply | no-reply |
 
 ## `xterm-capabilities`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| XTGETTCAP Query | `xterm.xtgettcap.query` | timeout | answered (34) | timeout |
-| XTGETXRES Query | `xterm.xtgetxres.query` | timeout | timeout | timeout |
+| XTGETTCAP Query | `xterm.xtgettcap.query` | no-reply | supported (34) | no-reply |
+| XTGETXRES Query | `xterm.xtgetxres.query` | no-reply | no-reply | no-reply |
 
 ## `xterm-modes`
 
 | Sequence | id | betamax | kitty | tmux |
 | --- | --- | --- | --- | --- |
-| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | — | — | — |
-| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | — | — | — |
-| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | — | — | — |
-| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | — | — | — |
+| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | unprobeable | unprobeable | unprobeable |
+| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | unprobeable | unprobeable | unprobeable |
+| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | unprobeable | unprobeable | unprobeable |
+| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | unprobeable | unprobeable | unprobeable |

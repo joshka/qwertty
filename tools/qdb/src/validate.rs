@@ -228,6 +228,49 @@ fn check_results(db: &Database, repo_root: &Path, ids: &BTreeSet<&str>, errors: 
                 continue;
             }
         };
+        // Metadata: schema v2 records how the run was hosted so the matrix never over-claims its
+        // automation level (the attended-cell honesty rule). Every field is enforced here — the
+        // struct's serde defaults keep a partial file loadable, so validate is the only guard
+        // against a metadata block silently drifting out of schema.
+        for field in ["target", "version", "captured", "version_source", "runner"] {
+            if value.get(field).and_then(toml::Value::as_str).is_none() {
+                errors.push(format!("results {name}: missing metadata field {field:?}"));
+            }
+        }
+        match value.get("adapter").and_then(toml::Value::as_str) {
+            Some("in-process" | "pty-headless" | "attended") => {}
+            Some(a) => errors.push(format!("results {name}: invalid adapter {a:?}")),
+            None => errors.push(format!(
+                "results {name}: missing metadata field \"adapter\""
+            )),
+        }
+        // Value check only; presence is already reported by the field loop above.
+        if let Some(v) = value.get("version_source").and_then(toml::Value::as_str) {
+            if !matches!(v, "xtversion" | "hint" | "none") {
+                errors.push(format!("results {name}: invalid version_source {v:?}"));
+            }
+        }
+        // geometry must be an inline table of two non-negative integers — checked here because
+        // `Database::load_results` would otherwise be the first thing to reject a malformed one,
+        // and validate should localize the error to the file.
+        match value.get("geometry") {
+            Some(g) => {
+                let ok = ["cols", "rows"].iter().all(|k| {
+                    g.get(k)
+                        .and_then(toml::Value::as_integer)
+                        .is_some_and(|n| n >= 0)
+                });
+                if !ok {
+                    errors.push(format!(
+                        "results {name}: geometry must be {{ cols = N, rows = N }} with N >= 0"
+                    ));
+                }
+            }
+            None => errors.push(format!(
+                "results {name}: missing metadata field \"geometry\""
+            )),
+        }
+
         let Some(results) = value.get("result").and_then(toml::Value::as_array) else {
             errors.push(format!("results {name}: no [[result]] entries"));
             continue;
@@ -239,11 +282,26 @@ fn check_results(db: &Database, repo_root: &Path, ids: &BTreeSet<&str>, errors: 
             } else if !ids.contains(id) {
                 errors.push(format!("results {name}: unknown entry id {id:?}"));
             }
-            let status = r.get("status").and_then(toml::Value::as_str).unwrap_or("");
-            if !matches!(status, "answered" | "silent" | "timeout") {
+            let verdict = r.get("verdict").and_then(toml::Value::as_str).unwrap_or("");
+            if !crate::capture::Verdict::ALL_STRS.contains(&verdict) {
                 errors.push(format!(
-                    "results {name}: invalid status {status:?} for {id}"
+                    "results {name}: invalid verdict {verdict:?} for {id}"
                 ));
+            }
+            // A skipped verdict must name the replay class it was skipped for; no other verdict
+            // may carry one (it would be meaningless).
+            let skipped_class = r.get("skipped_class").and_then(toml::Value::as_str);
+            match (verdict, skipped_class) {
+                ("skipped", None) => errors.push(format!(
+                    "results {name}: skipped verdict for {id} has no skipped_class"
+                )),
+                ("skipped", Some(c)) if !matches!(c, "modal" | "destructive") => errors.push(
+                    format!("results {name}: invalid skipped_class {c:?} for {id}"),
+                ),
+                (v, Some(_)) if v != "skipped" => errors.push(format!(
+                    "results {name}: skipped_class on non-skipped verdict {v:?} for {id}"
+                )),
+                _ => {}
             }
         }
     }

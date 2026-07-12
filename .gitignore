@@ -1,1 +1,5 @@
 /target/
+# The untracked process tree: plan/status docs and nested jj lane workspaces (work/<lane> each
+# hold a full checkout). Ignoring it here — not just in machine-local .git/info/exclude — keeps
+# the root workspace from ever snapshotting nested checkouts as phantom files on other machines.
+/work/

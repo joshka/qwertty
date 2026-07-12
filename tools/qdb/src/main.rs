@@ -39,10 +39,11 @@ fn main() -> ExitCode {
         _ => {
             eprintln!(
                 "usage: qdb <validate | generate [--check] [reference] | \
-                 capture --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] | \
-                 run --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] \
+                 capture --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm \
+                 [--entry <id>...] | \
+                 run --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm [--entry <id>...] \
                  [--allow-modal] [--allow-destructive] | \
-                 width-probe --target tmux|betamax|kitty|alacritty|wezterm>"
+                 width-probe --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm>"
             );
             ExitCode::FAILURE
         }
@@ -97,7 +98,7 @@ fn parse_drive_args(
         }
     }
     let target = target.ok_or_else(|| {
-        format!("qdb {cmd}: --target tmux|betamax|kitty|alacritty|wezterm is required")
+        format!("qdb {cmd}: --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm is required")
     })?;
     Ok(DriveArgs {
         target,
@@ -107,8 +108,8 @@ fn parse_drive_args(
     })
 }
 
-/// `qdb capture --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...]`: drive a real
-/// terminal and mint artifacts.
+/// `qdb capture --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm [--entry <id>...]`: drive
+/// a real terminal and mint artifacts.
 #[cfg(unix)]
 fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     use qdb::orchestrate;
@@ -142,8 +143,9 @@ fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     }
 }
 
-/// `qdb run --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] [--allow-modal]
-/// [--allow-destructive]`: the conformance pass — same loop as capture, results seed only.
+/// `qdb run --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm [--entry <id>...]
+/// [--allow-modal] [--allow-destructive]`: the conformance pass — same loop as capture, results
+/// seed only.
 #[cfg(unix)]
 fn cmd_run(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     use qdb::capture::AllowedClasses;
@@ -209,7 +211,9 @@ fn cmd_width_probe(repo_root: &Path, rest: &[String]) -> ExitCode {
         }
     }
     let Some(kind) = target else {
-        eprintln!("qdb width-probe: --target tmux|betamax|kitty|alacritty|wezterm is required");
+        eprintln!(
+            "qdb width-probe: --target tmux|betamax|kitty|alacritty|wezterm|foot|xterm is required"
+        );
         return ExitCode::FAILURE;
     };
 

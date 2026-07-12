@@ -62,7 +62,7 @@ Queries the current progressive enhancement flag set.
 - Responds with: `kitty.keyboard.flags_report`
 - References: [kitty Keyboard Protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/keyboard_flags_query.seq`](../../../fixtures/kitty/keyboard_flags_query.seq)
-- Conformance: alacritty supported (5); betamax supported (5); kitty supported (5); tmux no-reply; wezterm no-reply
+- Conformance: alacritty supported (5); betamax supported (5); foot supported (5); kitty supported (5); tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## Kitty Keyboard Flags Report (`kitty.keyboard.flags_report`)
 
@@ -70,7 +70,7 @@ Fixture reports recommended flags value 23.
 
 - Direction: terminal-to-host
 - References: [kitty Keyboard Protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_betamax.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_betamax.seq), [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_kitty.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_kitty.seq), [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_alacritty.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_alacritty.seq)
+- Fixtures: [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_betamax.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_betamax.seq), [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_kitty.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_kitty.seq), [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_alacritty.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_alacritty.seq), [`fixtures/kitty/kitty_keyboard_flags_report_report_capture_foot.seq`](../../../fixtures/kitty/kitty_keyboard_flags_report_report_capture_foot.seq)
 - Notes: reply syntax pending live capture
 
 ## Kitty Keyboard Keypad Add (`kitty.keyboard.keypad_add`)

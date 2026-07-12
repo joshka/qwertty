@@ -297,6 +297,82 @@ jobs:
         env:
           RUSTFLAGS: --cfg loom
 
+  # Runs the two Linux-only conformance targets (foot under a self-managed headless Wayland
+  # compositor, xterm under a self-managed headless Xvfb) that cannot run on the macOS/Windows
+  # machines the other targets were captured from. Unlike those targets — captured once locally
+  # and committed — this job's capture step runs fresh on every push, so it is deliberately NOT
+  # in `required`'s needs list: a transient runner/package hiccup on a target no session can
+  # reproduce locally should not block unrelated PRs. It still fails loudly on drift between a
+  # fresh capture and the committed `db/results/{foot,xterm}.toml` (same freshness philosophy as
+  # A3's `generate --check reference`) and uploads the fresh capture as a build artifact so a
+  # human can inspect and commit it — never auto-committed. Promote to `required` once proven
+  # stable over a few runs (maintainer's call).
+  linux-targets:
+    name: Linux conformance targets (foot, xterm)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install foot, xterm, sway, Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y foot xterm sway xvfb
+      # The foot adapter creates its own private XDG_RUNTIME_DIR per session (a fresh directory
+      # makes sway's `wayland-1` socket name predictable and collision-free — sway does not honor
+      # a caller-chosen WAYLAND_DISPLAY when picking its own socket name), so no runner-side
+      # runtime-dir setup is needed here.
+      - name: Capture foot
+        run: cargo run -p qdb -- capture --target foot
+      - name: Capture xterm
+        run: cargo run -p qdb -- capture --target xterm
+      - name: Regenerate conformance reference
+        run: cargo run -p qdb -- generate reference
+      - name: Upload fresh capture
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-targets-capture
+          path: |
+            db
+            fixtures
+            docs/reference/generated
+          if-no-files-found: error
+      # A fresh capture that differs from the committed tree means either the baseline has never
+      # been committed yet, or foot/xterm's behavior (or this job's own package versions) drifted
+      # since the last capture. Both cases need a human to look at the uploaded artifact above and
+      # commit it — never silently auto-committed.
+      #
+      # Volatile-by-construction lines are ignored, or every re-run would drift: the results
+      # `captured =` date, sidecar `"timestamp":` fields, and fixture `#!` headers (which embed
+      # capture date + version) are stamped fresh on each run. Anything semantic — verdicts,
+      # reply bytes, tool versions in results — still drifts loudly. The regenerated reference is
+      # NOT drift-checked here (its pages embed the fresh run dates); committed-reference ⇄
+      # committed-results coherence is already gated by `generate --check reference` in the test
+      # job, so this job only needs to prove live behavior ⇄ committed results. `git add -N`
+      # makes brand-new (untracked) capture artifacts visible to the diff — without it a missing
+      # baseline would pass silently.
+      - name: Check for drift against committed results
+        run: |
+          git add --intent-to-add db fixtures
+          drift=$(git diff -I'^captured = ' -I'"timestamp": ' -I'^#! ' -- db fixtures)
+          if [ -n "$drift" ]; then
+            echo "$drift"
+            echo "::error::foot/xterm capture drifted from the committed db/ and fixtures/ \
+          (new or changed results, sidecars, or fixtures). Download the linux-targets-capture \
+          artifact from this run, review it, and commit it."
+            exit 1
+          fi
+
   # Each syntax-layer invariant gets a short nightly cargo-fuzz smoke run per push; deep runs stay
   # local or scheduled.
   fuzz:

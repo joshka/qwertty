@@ -1,7 +1,12 @@
 //! Small process helpers shared by the PTY-hosted adapters.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
+
+/// How often [`wait_for_path`] polls for the path to appear.
+const WAIT_FOR_PATH_POLL: Duration = Duration::from_millis(50);
 
 /// Errors if `tool` is not on `$PATH`.
 pub(crate) fn require_tool(tool: &str) -> Result<(), String> {
@@ -66,6 +71,76 @@ pub(crate) fn session_dir(slug: &str) -> Result<PathBuf, String> {
 /// code the adapter was built from (never a stale `$PATH` copy).
 pub(crate) fn current_qdb() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| format!("resolving current executable: {e}"))
+}
+
+/// Polls until `path` exists or `deadline` passes — used to wait for a socket a spawned server
+/// creates (Xvfb's X11 socket, a headless compositor's Wayland socket) before connecting a
+/// client to it.
+///
+/// # Errors
+///
+/// Returns an error if `path` does not appear within `deadline`.
+pub(crate) fn wait_for_path(path: &Path, deadline: Duration) -> Result<(), String> {
+    // Live-driver wall-clock deadline (clippy.toml carve-out).
+    #[allow(clippy::disallowed_methods)]
+    let give_up = std::time::Instant::now() + deadline;
+    loop {
+        if path.exists() {
+            return Ok(());
+        }
+        #[allow(clippy::disallowed_methods)]
+        if std::time::Instant::now() >= give_up {
+            return Err(format!(
+                "{} did not appear within {deadline:?}",
+                path.display()
+            ));
+        }
+        sleep(WAIT_FOR_PATH_POLL);
+    }
+}
+
+/// Polls until a Wayland socket (`wayland-*`, not its `.lock` companion) appears in
+/// `runtime_dir` or `deadline` passes, returning the socket's file name.
+///
+/// The directory must be private to one compositor: any Wayland socket appearing there is by
+/// construction the one we started. Compositors pick their own socket name — none of them read
+/// a requested name back from the environment, and where the first probe starts is an
+/// implementation detail (wlroots currently starts at `wayland-1`) — so discovering the name a
+/// compositor actually bound beats hard-coding one implementation's current choice.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read or no socket appears within `deadline`.
+pub(crate) fn wait_for_wayland_socket(
+    runtime_dir: &Path,
+    deadline: Duration,
+) -> Result<String, String> {
+    // Live-driver wall-clock deadline (clippy.toml carve-out).
+    #[allow(clippy::disallowed_methods)]
+    let give_up = std::time::Instant::now() + deadline;
+    loop {
+        let entries = std::fs::read_dir(runtime_dir)
+            .map_err(|e| format!("reading {}: {e}", runtime_dir.display()))?;
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            // A generated socket name, never user input: exact-case ".lock" is what wayland
+            // servers actually write, so a case-insensitive check would be the wrong tool here.
+            #[allow(clippy::case_sensitive_file_extension_comparisons)]
+            let is_lock_file = name.ends_with(".lock");
+            if name.starts_with("wayland-") && !is_lock_file {
+                return Ok(name.to_string());
+            }
+        }
+        #[allow(clippy::disallowed_methods)]
+        if std::time::Instant::now() >= give_up {
+            return Err(format!(
+                "no wayland-* socket appeared in {} within {deadline:?}",
+                runtime_dir.display()
+            ));
+        }
+        sleep(WAIT_FOR_PATH_POLL);
+    }
 }
 
 /// Writes the relay launch script: `qdb target-relay` plus a completion marker echo that tape

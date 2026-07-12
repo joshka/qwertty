@@ -38,7 +38,7 @@ Fixture queries the `__current__` pseudo-shape.
 - Responds with: `kitty.pointer.report`
 - References: [kitty Pointer Shapes Protocol](https://sw.kovidgoyal.net/kitty/pointer-shapes/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/pointer_query.seq`](../../../fixtures/kitty/pointer_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (8); tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty supported (8); tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## Kitty Pointer Shape Report (`kitty.pointer.report`)
 

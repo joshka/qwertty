@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?64;1;2;6;9;15;16;17;18;21;22;28c",
+    "target": "xterm",
+    "version": "XTerm(390)",
+    "xtversion_escaped": "\\eP>|XTerm(390)\\e\\\\"
+  },
+  "query_id": "iterm2.osc4.default_foreground_query",
+  "reply_escaped": "",
+  "reply_id": "iterm2.osc4.default_foreground_report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "xterm",
+  "timestamp": "2026-07-12T14:51:10Z"
+}

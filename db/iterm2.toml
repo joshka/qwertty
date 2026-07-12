@@ -464,7 +464,7 @@ name        = "iTerm2 Extended Device Attributes Response"
 description = "Reports terminal name and version, such as iTerm2 3.4.0."
 direction   = "terminal-to-host"
 refs        = [{ doc = "iterm2-escape-codes" }]
-fixtures    = ["fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq"]
+fixtures    = ["fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_foot.seq", "fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_xterm.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 

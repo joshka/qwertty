@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;4;22c",
+    "target": "foot",
+    "version": "foot(1.16.2)",
+    "xtversion_escaped": "\\eP>|foot(1.16.2)\\e\\\\"
+  },
+  "query_id": "xterm.xtgettcap.query",
+  "reply_escaped": "\\eP1+r544E=666F6F74\\e\\\\",
+  "reply_id": "xterm.xtgettcap.report",
+  "reply_len": 20,
+  "status": "answered",
+  "target": "foot",
+  "timestamp": "2026-07-12T14:51:01Z"
+}

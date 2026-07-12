@@ -15,6 +15,7 @@ use crate::capture::{
 };
 use crate::model::Database;
 use crate::runner::{self, IdentityCheck, RunnerOptions};
+use crate::targets::alacritty::AlacrittyTarget;
 use crate::targets::betamax::BetamaxTarget;
 use crate::targets::kitty::KittyTarget;
 use crate::targets::tmux::TmuxTarget;
@@ -29,6 +30,9 @@ pub enum TargetKind {
     Betamax,
     /// A minimized, task-hidden kitty OS window hosting the byte relay.
     Kitty,
+    /// A scripted, briefly-visible alacritty window hosting the byte relay (no headless mode
+    /// exists for alacritty — the window closes itself when the relay session ends).
+    Alacritty,
 }
 
 impl TargetKind {
@@ -39,6 +43,7 @@ impl TargetKind {
             "tmux" => Some(Self::Tmux),
             "betamax" => Some(Self::Betamax),
             "kitty" => Some(Self::Kitty),
+            "alacritty" => Some(Self::Alacritty),
             _ => None,
         }
     }
@@ -50,6 +55,7 @@ impl TargetKind {
             Self::Tmux => "tmux",
             Self::Betamax => "betamax",
             Self::Kitty => "kitty",
+            Self::Alacritty => "alacritty",
         }
     }
 
@@ -60,6 +66,7 @@ impl TargetKind {
             Self::Tmux => Box::new(TmuxTarget::new()),
             Self::Betamax => Box::new(BetamaxTarget::new()),
             Self::Kitty => Box::new(KittyTarget::new()),
+            Self::Alacritty => Box::new(AlacrittyTarget::new()),
         }
     }
 
@@ -69,7 +76,7 @@ impl TargetKind {
     #[must_use]
     pub const fn adapter_kind(self) -> AdapterKind {
         match self {
-            Self::Tmux | Self::Betamax | Self::Kitty => AdapterKind::PtyHosted,
+            Self::Tmux | Self::Betamax | Self::Kitty | Self::Alacritty => AdapterKind::PtyHosted,
         }
     }
 }

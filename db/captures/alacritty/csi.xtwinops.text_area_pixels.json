@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?6c",
+    "target": "alacritty",
+    "version": "alacritty 0.17.0 (94e7c88)",
+    "xtversion_escaped": ""
+  },
+  "query_id": "csi.xtwinops.text_area_pixels",
+  "reply_escaped": "\\e[4;1040;1560t",
+  "reply_id": "csi.xtwinops.text_area_pixels_report",
+  "reply_len": 14,
+  "status": "answered",
+  "target": "alacritty",
+  "timestamp": "2026-07-12T08:33:00Z"
+}

@@ -11,6 +11,7 @@ pass or fail.
 
 Captured:
 
+- **alacritty** (alacritty 0.17.0 (94e7c88), pty-headless) — 2026-07-12T12:45:20Z
 - **betamax** (libghostty, pty-headless) — 2026-07-12T08:29:31Z
 - **kitty** (kitty(0.39.1), pty-headless) — 2026-07-12T08:29:55Z
 - **tmux** (tmux 3.7b, pty-headless) — 2026-07-12T08:29:20Z
@@ -27,80 +28,80 @@ Captured:
 
 ## `ecma48-csi`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| DSR: Query Cursor Position | `csi.dsr.cursor_position` | supported (6) | supported (6) | supported (6) |
-| DA1: Query Primary Device Attributes | `csi.da.primary` | supported (9) | supported (7) | supported (9) |
-| DA2: Query Secondary Device Attributes | `csi.da.secondary` | supported (9) | supported (13) | supported (10) |
-| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | supported (14) | no-reply | no-reply |
-| DSR: Query Terminal Status | `csi.dsr.status` | supported (4) | supported (4) | supported (4) |
-| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | no-reply | supported (7) | supported (7) |
-| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | no-reply | supported (11) | supported (11) |
-| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | no-reply | supported (14) | supported (14) |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| DSR: Query Cursor Position | `csi.dsr.cursor_position` | supported (6) | supported (6) | supported (6) | supported (6) |
+| DA1: Query Primary Device Attributes | `csi.da.primary` | supported (5) | supported (9) | supported (7) | supported (9) |
+| DA2: Query Secondary Device Attributes | `csi.da.secondary` | supported (12) | supported (9) | supported (13) | supported (10) |
+| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | no-reply | supported (14) | no-reply | no-reply |
+| DSR: Query Terminal Status | `csi.dsr.status` | supported (4) | supported (4) | supported (4) | supported (4) |
+| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | supported (7) | no-reply | supported (7) | supported (7) |
+| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | supported (11) | no-reply | supported (11) | supported (11) |
+| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | supported (14) | no-reply | supported (14) | supported (14) |
 
 ## `iterm2`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | no-reply | no-reply | no-reply |
-| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | no-reply | no-reply | no-reply |
-| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | no-reply | no-reply | no-reply |
-| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | no-reply | no-reply | no-reply |
-| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | unprobeable | unprobeable | unprobeable |
-| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | supported (16) | supported (19) | supported (15) |
-| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | unprobeable | unprobeable | unprobeable |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | no-reply | no-reply | no-reply | no-reply |
+| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | no-reply | no-reply | no-reply | no-reply |
+| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | no-reply | no-reply | no-reply | no-reply |
+| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | no-reply | no-reply | no-reply | no-reply |
+| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | unprobeable | unprobeable | unprobeable | unprobeable |
+| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | no-reply | supported (16) | supported (19) | supported (15) |
+| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | unprobeable | unprobeable | unprobeable | unprobeable |
 
 ## `kitty-color`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Color Key | `kitty.color.query` | no-reply | supported (30) | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Color Key | `kitty.color.query` | no-reply | no-reply | supported (30) | no-reply |
 
 ## `kitty-keyboard`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | supported (5) | supported (5) | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | supported (5) | supported (5) | supported (5) | no-reply |
 
 ## `kitty-multicursor`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | no-reply | no-reply | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | no-reply | no-reply | no-reply | no-reply |
 
 ## `kitty-pointer`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Pointer Shape | `kitty.pointer.query` | no-reply | supported (8) | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Pointer Shape | `kitty.pointer.query` | no-reply | no-reply | supported (8) | no-reply |
 
 ## `osc`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Foreground Color | `osc.10.foreground_query` | no-reply | supported (25) | no-reply |
-| Query Background Color | `osc.11.background_query` | no-reply | supported (25) | no-reply |
-| Query Cursor Color | `osc.12.cursor_query` | no-reply | supported (25) | no-reply |
-| Query Palette Color | `osc.4.palette_query` | no-reply | supported (26) | no-reply |
-| Query Special Color | `osc.5.special_query` | no-reply | no-reply | no-reply |
-| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | no-reply | no-reply | no-reply |
-| Query Pointer Background Color | `osc.14.pointer_background_query` | no-reply | no-reply | no-reply |
-| Query Highlight Background Color | `osc.17.highlight_background_query` | no-reply | supported (25) | no-reply |
-| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | no-reply | supported (25) | no-reply |
-| OSC 52 Clipboard Query | `osc.52.clipboard_query` | no-reply | no-reply | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Foreground Color | `osc.10.foreground_query` | supported (25) | no-reply | supported (25) | no-reply |
+| Query Background Color | `osc.11.background_query` | supported (25) | no-reply | supported (25) | no-reply |
+| Query Cursor Color | `osc.12.cursor_query` | no-reply | no-reply | supported (25) | no-reply |
+| Query Palette Color | `osc.4.palette_query` | supported (26) | no-reply | supported (26) | no-reply |
+| Query Special Color | `osc.5.special_query` | no-reply | no-reply | no-reply | no-reply |
+| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | no-reply | no-reply | no-reply | no-reply |
+| Query Pointer Background Color | `osc.14.pointer_background_query` | no-reply | no-reply | no-reply | no-reply |
+| Query Highlight Background Color | `osc.17.highlight_background_query` | no-reply | no-reply | supported (25) | no-reply |
+| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | no-reply | no-reply | supported (25) | no-reply |
+| OSC 52 Clipboard Query | `osc.52.clipboard_query` | no-reply | no-reply | no-reply | no-reply |
 
 ## `xterm-capabilities`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| XTGETTCAP Query | `xterm.xtgettcap.query` | no-reply | supported (34) | no-reply |
-| XTGETXRES Query | `xterm.xtgetxres.query` | no-reply | no-reply | no-reply |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| XTGETTCAP Query | `xterm.xtgettcap.query` | no-reply | no-reply | supported (34) | no-reply |
+| XTGETXRES Query | `xterm.xtgetxres.query` | no-reply | no-reply | no-reply | no-reply |
 
 ## `xterm-modes`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | unprobeable | unprobeable | unprobeable |
-| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | unprobeable | unprobeable | unprobeable |
-| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | unprobeable | unprobeable | unprobeable |
-| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | unprobeable | unprobeable | unprobeable |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | unprobeable | unprobeable | unprobeable | unprobeable |
+| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | unprobeable | unprobeable | unprobeable | unprobeable |
+| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | unprobeable | unprobeable | unprobeable | unprobeable |
+| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | unprobeable | unprobeable | unprobeable | unprobeable |

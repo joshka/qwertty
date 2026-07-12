@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?6c",
+    "target": "alacritty",
+    "version": "alacritty 0.17.0 (94e7c88)",
+    "xtversion_escaped": ""
+  },
+  "query_id": "osc.10.foreground_query",
+  "reply_escaped": "\\e]10;rgb:d8d8/d8d8/d8d8\\e\\\\",
+  "reply_id": "osc.10.foreground_report",
+  "reply_len": 25,
+  "status": "answered",
+  "target": "alacritty",
+  "timestamp": "2026-07-12T08:33:00Z"
+}

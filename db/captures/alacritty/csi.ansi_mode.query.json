@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?6c",
+    "target": "alacritty",
+    "version": "alacritty 0.17.0 (94e7c88)",
+    "xtversion_escaped": ""
+  },
+  "query_id": "csi.ansi_mode.query",
+  "reply_escaped": "\\e[4;2$y",
+  "reply_id": "csi.ansi_mode.report",
+  "reply_len": 7,
+  "status": "answered",
+  "target": "alacritty",
+  "timestamp": "2026-07-12T08:33:00Z"
+}

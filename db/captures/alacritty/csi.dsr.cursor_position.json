@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?6c",
+    "target": "alacritty",
+    "version": "alacritty 0.17.0 (94e7c88)",
+    "xtversion_escaped": ""
+  },
+  "query_id": "csi.dsr.cursor_position",
+  "reply_escaped": "\\e[1;1R",
+  "reply_id": "csi.cpr",
+  "reply_len": 6,
+  "status": "answered",
+  "target": "alacritty",
+  "timestamp": "2026-07-12T08:33:00Z"
+}

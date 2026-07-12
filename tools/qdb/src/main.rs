@@ -37,6 +37,8 @@ fn main() -> ExitCode {
         Some("width-probe") => cmd_width_probe(&repo_root, &args[1..]),
         #[cfg(unix)]
         Some("target-relay") => cmd_target_relay(&args[1..]),
+        #[cfg(windows)]
+        Some("conpty-relay") => cmd_conpty_relay(&args[1..]),
         _ => {
             eprintln!(
                 "usage: qdb <validate | generate [--check] [reference] | \
@@ -301,6 +303,39 @@ fn cmd_target_relay(rest: &[String]) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("qdb target-relay: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `qdb conpty-relay --pipe <name>`: internal — the ConPTY relay child the `#[cfg(windows)]`
+/// `ConptyTarget` launches inside the pseudo-console. It connects to the host's named side-channel
+/// pipe, emits fed bytes to conhost via stdout, and forwards conhost's replies (read from stdin)
+/// back over the side channel. Not part of the user-facing surface.
+#[cfg(windows)]
+fn cmd_conpty_relay(rest: &[String]) -> ExitCode {
+    let mut pipe = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--pipe" if i + 1 < rest.len() => {
+                pipe = Some(rest[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                eprintln!("qdb conpty-relay: unexpected argument {other:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(pipe) = pipe else {
+        eprintln!("qdb conpty-relay: --pipe <name> is required");
+        return ExitCode::FAILURE;
+    };
+    match qdb::targets::relay_conpty::run(&pipe) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("qdb conpty-relay: {e}");
             ExitCode::FAILURE
         }
     }

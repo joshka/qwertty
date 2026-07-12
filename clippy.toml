@@ -8,3 +8,9 @@ disallowed-methods = [
     { path = "std::time::Instant::now", reason = "sans-io core holds no clock; deadlines are driver-injected (design 03/04)" },
     { path = "std::time::SystemTime::now", reason = "sans-io core holds no clock; deadlines are driver-injected (design 03/04)" },
 ]
+
+# Proper nouns that `clippy::doc_markdown` would otherwise demand be backticked in prose. These are
+# product/API names from the Windows console model (ADR 0022) and the qdb ConPTY conformance target
+# — real names, not code identifiers, so they read better unquoted in doc comments. Extends clippy's
+# built-in valid-ident list (which already covers macOS, GitHub, …).
+doc-valid-idents = ["ConPTY", "PseudoConsole", ".."]

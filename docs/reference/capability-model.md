@@ -145,11 +145,25 @@ than sniffed from `COLORTERM`.
 
 ### Dumb terminals
 
-A `TERM=dumb` terminal should not be sent the probe bundle at all — probing has side effects even
-when unanswered — so a caller that detects `TERM=dumb` should skip `probe_capabilities` entirely
-and treat every finding as unknown. This module has no opinion on *when* a caller probes; it only
-guarantees that `identity_from_env` and the env-heuristic functions are safe to call over any
-environment, `TERM=dumb` included, since they only read env vars and never write to the terminal.
+A dumb terminal is never sent the probe bundle — probing has side effects even when unanswered,
+and a terminal that does not parse escape sequences echoes probe bytes as garbage output (the
+Linux console's documented behavior). Both probe drivers enforce this themselves: before writing a
+single byte, `qwertty::caps::probe_skip_from_env` checks for `TERM=dumb` and the Linux console
+(`TERM=linux`), and a detected dumb terminal makes `probe_capabilities` return immediately with:
+
+- every probe-backed finding `Evidence::Unknown` — nothing was asked, so nothing is reported as a
+  no-reply;
+- the env-inferred findings and identity still populated, since they only read env vars and never
+  write to the terminal;
+- the reason recorded on `Capabilities::probe_skip` (`ProbeSkip::TermDumb` or
+  `ProbeSkip::LinuxConsole`) — the inspectable difference between "we asked and nothing answered"
+  (`probe_skip: None`, all findings unknown) and "we refused to ask".
+
+`probe_skip_from_env` is public, so a caller composing its own query flow can apply the identical
+guard. An unset `TERM` does not skip: unknown is not dumb, and an explicitly requested probe still
+runs. The detection reads `TERM` rather than the console ioctl notcurses uses, because this crate
+forbids `unsafe`; `TERM` is caller-controlled and can lie, and a caller that knows better can fix
+its environment.
 
 ### Snapshot, not live
 

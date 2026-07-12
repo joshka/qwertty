@@ -18,6 +18,14 @@ entries.
   clustering/in-band resize/bracketed paste), blocking with no async runtime. The synchronous
   mirror of `TokioTerminalSession::probe_capabilities`, sharing its bundle contents and
   reply-to-field mapping so the two drivers can never drift apart.
+- Dumb terminals are now detected and never probed (R-QRY-5). Both `probe_capabilities` drivers
+  check the environment for `TERM=dumb` and the Linux console (`TERM=linux`) before writing a
+  single byte — a terminal that does not parse escape sequences would echo the probe as garbage —
+  and return immediately with every probe-backed finding honestly `Evidence::Unknown` and the
+  reason recorded on the new `Capabilities::probe_skip` field (`Some(ProbeSkip::TermDumb)` /
+  `Some(ProbeSkip::LinuxConsole)`; `None` when the probe actually ran). The guard itself is public
+  as `caps::probe_skip_from_env` for callers composing their own query flow. Previously this was
+  documented as a caller duty.
 
 ## [0.1.3] - 2026-07-12
 

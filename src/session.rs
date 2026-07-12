@@ -1133,12 +1133,42 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// # }
     /// ```
     ///
+    /// # Dumb terminals are never probed (R-QRY-5)
+    ///
+    /// A dumb terminal echoes probe bytes as garbage output instead of answering them (FM-C5), so
+    /// when the environment declares one — `TERM=dumb`, or the Linux console's `TERM=linux` — this
+    /// writes nothing at all and returns immediately: every probe-backed finding is
+    /// [`Evidence::Unknown`](crate::Evidence::Unknown) (nothing was asked, so nothing is a
+    /// no-reply), the env-inferred findings and identity are still populated (they never touch the
+    /// terminal), and the reason is recorded on
+    /// [`Capabilities::probe_skip`](crate::Capabilities::probe_skip) so a caller can tell a skipped
+    /// probe from a silent terminal. See [`crate::caps::probe_skip_from_env`].
+    ///
     /// # Errors
     ///
     /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the device
     /// has no pollable descriptor to wait on. A silent or partially silent terminal is not an
     /// error: it is `Ok(Capabilities)` with the unanswered fields `None`.
     pub fn probe_capabilities(&mut self, timeout: Duration) -> terminal::Result<Capabilities> {
+        self.probe_capabilities_from_env(timeout, crate::caps::std_env_source)
+    }
+
+    /// [`probe_capabilities`](Self::probe_capabilities) with an injected [`crate::caps::EnvSource`]
+    /// for the dumb-terminal guard, so tests exercise the skip path without mutating the process
+    /// environment (which is unsound from parallel tests). The guard and its skip snapshot use
+    /// `env`; the probing path's own env-inferred population keeps using the real environment via
+    /// the shared bundle machinery.
+    fn probe_capabilities_from_env(
+        &mut self,
+        timeout: Duration,
+        env: impl crate::caps::EnvSource,
+    ) -> terminal::Result<Capabilities> {
+        // The dumb-terminal guard (R-QRY-5, FM-C5): skip before sweeping or registering anything —
+        // a skipped probe must leave no trace on the correlator and write no bytes.
+        if let Some(skip) = crate::caps::probe_skip_from_env(&env) {
+            return Ok(crate::caps::skipped_capabilities(skip, &env));
+        }
+
         // Step 1: sweep a leftover single-query expectation (defensive; mirrors `run_query`), then
         // register the bundle. DA1 is registered last so it is the fence.
         self.sweep_active_query();
@@ -1992,5 +2022,56 @@ mod tests {
             &Evidence::Probed { via: "DECRQM 2027" },
             "mode 2027 finding names its own query, not 2026's"
         );
+    }
+
+    #[test]
+    fn sync_probe_skips_a_dumb_terminal_without_writing_a_byte() {
+        // R-QRY-5/FM-C5: TERM=dumb means the probe bundle is never written — a dumb terminal
+        // echoes it as garbage. The env is injected (not process-global) so this test is safe to
+        // run in parallel; the public `probe_capabilities` passes the real environment.
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        let env = |key: &str| match key {
+            "TERM" => Some("dumb".to_owned()),
+            "COLORTERM" => Some("truecolor".to_owned()),
+            _ => None,
+        };
+        let caps = session
+            .probe_capabilities_from_env(Duration::from_secs(30), env)
+            .expect("a skipped probe is not an error");
+
+        // Not one byte reached the terminal, and the skip is visible provenance, not silence.
+        assert_eq!(
+            terminal.output().expect("output"),
+            Vec::<u8>::new(),
+            "a skipped probe must write nothing"
+        );
+        assert_eq!(caps.probe_skip, Some(crate::ProbeSkip::TermDumb));
+        // Probe-backed findings are Unknown (nothing was asked), never fabricated no-replies...
+        assert!(caps.is_all_unknown(), "nothing was asked: {caps:?}");
+        assert_eq!(caps.synchronized_output.evidence(), &Evidence::Unknown);
+        assert_eq!(caps.background_color.evidence(), &Evidence::Unknown);
+        // ...while env-inferred findings still populate: they never touch the terminal.
+        assert_eq!(caps.truecolor.value_copied(), Some(true));
+        assert_eq!(
+            caps.truecolor.evidence(),
+            &Evidence::Inferred { via: "COLORTERM" }
+        );
+    }
+
+    #[test]
+    fn sync_probe_skips_the_linux_console_without_writing_a_byte() {
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        let env = |key: &str| (key == "TERM").then(|| "linux".to_owned());
+        let caps = session
+            .probe_capabilities_from_env(Duration::from_secs(30), env)
+            .expect("a skipped probe is not an error");
+
+        assert_eq!(terminal.output().expect("output"), Vec::<u8>::new());
+        assert_eq!(caps.probe_skip, Some(crate::ProbeSkip::LinuxConsole));
+        assert!(caps.is_all_unknown());
     }
 }

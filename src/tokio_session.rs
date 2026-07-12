@@ -27,12 +27,12 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+use rustix::fs::{OFlags, fcntl_getfl};
 use rustix::process::{Pid, Signal as ProcessSignal, getpgrp, getsid, kill_process_group};
-use tokio::io::unix::AsyncFd;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 use tokio::time::{Instant, timeout_at};
 
+use self::readiness::FdReadiness;
 use crate::caps::{
     Capabilities, Finding, identity_from_env, infer_hyperlinks, infer_truecolor, std_env_source,
 };
@@ -45,6 +45,9 @@ use crate::{
     Command, CommandBuffer, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, ResizeEvent,
     SemanticDecoder, Terminal, TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
+
+/// The internal readiness transport: `AsyncFd`/`rustix` live here, not in the session body.
+mod readiness;
 
 /// The DEC private modes the capability probe bundle queries, and the [`Capabilities`] field each
 /// answer sets. Kept as one table so the write side, the register side, and the collect side stay
@@ -221,30 +224,24 @@ impl fmt::Display for TerminalAcquisition {
 pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// The composed sans-io session: device, mode ledger, restore handle, enter/leave.
     session: TerminalSession<D>,
-    /// A duplicate of the device descriptor registered with Tokio readiness.
+    /// The internal readiness transport: a reactor-registered dup plus its saved `fcntl` flags.
     ///
-    /// The dup shares the same open file description as the device the session owns, so readiness
-    /// observed on either applies to both. Setting the dup non-blocking (required by [`AsyncFd`])
-    /// therefore affects the shared description; [`original_flags`](Self::original_flags) captures
-    /// what to put back on teardown.
+    /// This is the transport seam. The session body never touches `AsyncFd` or `rustix` for its
+    /// read/write/registration paths — it drives every byte through [`FdReadiness`], whose dup
+    /// shares the same open file description as the device the session owns (so readiness observed
+    /// on either applies to both) and whose saved flags are restored on teardown.
     ///
     /// This is `Some` for the whole ordinary lifetime of the session: it is populated at
     /// construction and every method reaches it through the `readiness` / `readiness_mut`
-    /// accessors, which expect `Some`. It goes momentarily `None`
-    /// only inside [`run_detached`](Self::run_detached), which pulls the registered [`OwnedFd`]
-    /// out of the [`AsyncFd`] (dropping the reactor registration) while a synchronous child
-    /// owns the terminal, then re-registers a fresh [`AsyncFd`] over the *same* fd before
-    /// returning. Holding the fd raw across the handoff — rather than keeping a dormant
-    /// registration — is what guarantees the post-handoff registration reads current readiness
-    /// with no stale edge-triggered notification carried over from before the child ran.
-    readiness: Option<AsyncFd<OwnedFd>>,
-    /// The device status flags captured before this session set the descriptor non-blocking.
-    ///
-    /// Restored on every teardown path (leave and drop). This matters most for the
-    /// [`open`](Self::open) path, whose descriptor is a duplicate of the inherited standard input:
-    /// its open file description is shared with the parent shell, so a leaked non-blocking flag
-    /// would corrupt the shell's own reads (FM-L class).
-    original_flags: OFlags,
+    /// accessors, which expect `Some`. It goes momentarily `None` only inside
+    /// [`run_detached`](Self::run_detached), which [`detach`](FdReadiness::detach)es the transport
+    /// (dropping the reactor registration and holding the raw fd) while a synchronous child owns
+    /// the terminal, then [`reattach`](FdReadiness::reattach)es a fresh registration over the
+    /// *same* fd before returning. Holding the fd raw across the handoff — rather than keeping
+    /// a dormant registration — is what guarantees the post-handoff registration reads current
+    /// readiness with no stale edge-triggered notification carried over from before the child
+    /// ran.
+    readiness: Option<FdReadiness>,
     /// The semantic decoder that turns each read's raw bytes into typed events (design 02).
     decoder: SemanticDecoder,
     /// The sans-io correlator matching query replies to expectations (design 03).
@@ -459,11 +456,12 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         self.acquisition
     }
 
-    /// Wraps an entered [`TerminalSession`] with the readiness registration and sans-io core.
+    /// Wraps an entered [`TerminalSession`] with the readiness transport and sans-io core.
     ///
-    /// This duplicates the device descriptor for Tokio readiness (a dup shares the same open file
-    /// description, so readiness is shared), captures the original status flags, sets the dup
-    /// non-blocking, and registers it with the current runtime.
+    /// The device must expose a pollable descriptor through [`TerminalDevice::as_fd`]; one that
+    /// returns `None` is rejected with [`terminal::Error::Unsupported`] because Tokio readiness has
+    /// nothing to register. [`FdReadiness::new`] then duplicates that descriptor, captures its
+    /// original status flags, sets the dup non-blocking, and registers it with the current runtime.
     ///
     /// `acquisition` is the fallback branch that produced the device, or `None` when the device was
     /// supplied already open (the [`from_device`](Self::from_device) path).
@@ -474,32 +472,11 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         let borrowed = session.device().as_fd().ok_or_else(|| {
             terminal::Error::unsupported("Tokio readiness registration", "device without a fd")
         })?;
-
-        let dup: OwnedFd = rustix::io::dup(borrowed)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-
-        let original_flags = fcntl_getfl(&dup)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-        fcntl_setfl(&dup, original_flags | OFlags::NONBLOCK)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-
-        let readiness = match AsyncFd::try_new(dup) {
-            Ok(readiness) => readiness,
-            Err(err) => {
-                let (dup, err) = err.into_parts();
-                // Put the original flags back on the shared description before giving up.
-                _ = fcntl_setfl(&dup, original_flags);
-                return Err(terminal::Error::open_terminal(err));
-            }
-        };
+        let readiness = FdReadiness::new(borrowed)?;
 
         Ok(Self {
             session,
             readiness: Some(readiness),
-            original_flags,
             decoder: SemanticDecoder::new(),
             correlator: Correlator::new(),
             pending: VecDeque::new(),
@@ -512,25 +489,25 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         })
     }
 
-    /// Borrows the live Tokio readiness registration.
+    /// Borrows the live readiness transport.
     ///
     /// The `readiness` field is `Some` for the whole ordinary lifetime of the session,
     /// going `None` only for the brief handoff window inside
     /// [`run_detached`](Self::run_detached), which never calls this. Every other method reaches
-    /// the registration through this accessor so the `Option` stays an internal detail rather than
+    /// the transport through this accessor so the `Option` stays an internal detail rather than
     /// rippling `expect`s across the read/write paths.
-    fn readiness(&self) -> &AsyncFd<OwnedFd> {
+    fn readiness(&self) -> &FdReadiness {
         self.readiness.as_ref().expect(
             "readiness registration is only absent inside run_detached, which never reads it",
         )
     }
 
-    /// Mutably borrows the live Tokio readiness registration.
+    /// Mutably borrows the live readiness transport.
     ///
     /// The mutable sibling of the `readiness` accessor, used by the read/write awaits that
-    /// need `&mut AsyncFd`. Same invariant: `Some` everywhere except the handoff window in
+    /// need `&mut FdReadiness`. Same invariant: `Some` everywhere except the handoff window in
     /// [`run_detached`](Self::run_detached).
-    fn readiness_mut(&mut self) -> &mut AsyncFd<OwnedFd> {
+    fn readiness_mut(&mut self) -> &mut FdReadiness {
         self.readiness.as_mut().expect(
             "readiness registration is only absent inside run_detached, which never reads it",
         )
@@ -623,34 +600,10 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write all bytes.
     pub async fn bytes(&mut self, bytes: impl AsRef<[u8]>) -> terminal::Result<()> {
-        let mut bytes = bytes.as_ref();
-        while !bytes.is_empty() {
-            let mut guard = self
-                .readiness_mut()
-                .writable()
-                .await
-                .map_err(terminal::Error::write_terminal)?;
-
-            // Write through the *registered* readiness descriptor, which shares its open file
-            // description with the device the session owns (the dup), so bytes written here are the
-            // device's bytes. Doing the I/O on the fd Tokio registered is what keeps readiness
-            // correct under edge-triggered polling; the closure returns `io::Result` so `try_io`
-            // can classify a `WouldBlock` (clearing the guard's readiness) from a real
-            // error, exactly as the old direct-`File` loop did.
-            match guard.try_io(|inner| fd_write(inner.get_ref(), bytes)) {
-                Ok(Ok(0)) => {
-                    return Err(terminal::Error::write_terminal(io::Error::new(
-                        ErrorKind::WriteZero,
-                        "failed to write terminal output",
-                    )));
-                }
-                Ok(Ok(len)) => bytes = &bytes[len..],
-                Ok(Err(err)) => return Err(terminal::Error::write_terminal(err)),
-                Err(_would_block) => {}
-            }
-        }
-
-        Ok(())
+        // Write through the readiness transport, whose registered dup shares its open file
+        // description with the device the session owns, so bytes written here are the device's
+        // bytes and readiness stays correct under edge-triggered polling.
+        self.readiness_mut().write_all(bytes.as_ref()).await
     }
 
     /// Writes UTF-8 render text through Tokio readiness.
@@ -684,19 +637,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             return Ok(InputBytes::default());
         }
 
-        loop {
-            let mut guard = self
-                .readiness_mut()
-                .readable()
-                .await
-                .map_err(terminal::Error::read_terminal)?;
-
-            match guard.try_io(|inner| fd_read(inner.get_ref(), buffer)) {
-                Ok(Ok(len)) => return Ok(InputBytes::new(buffer[..len].to_vec())),
-                Ok(Err(err)) => return Err(terminal::Error::read_terminal(err)),
-                Err(_would_block) => {}
-            }
-        }
+        let len = self.readiness_mut().read(buffer).await?;
+        Ok(InputBytes::new(buffer[..len].to_vec()))
     }
 
     /// Reads and delivers the next terminal input [`Event`].
@@ -1670,41 +1612,32 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// closes (a zero-length read). Cancel-safe: no decoder state is lost on a cancelled await
     /// because the decoder lives on the session and only advances on a completed read.
     async fn read_events(&mut self) -> terminal::Result<Vec<Event>> {
-        loop {
-            let mut guard = self
-                .readiness_mut()
-                .readable()
-                .await
-                .map_err(terminal::Error::read_terminal)?;
-
-            let mut buffer = [0; READ_BUFFER_LEN];
-            let read = guard.try_io(|inner| fd_read(inner.get_ref(), &mut buffer));
-            match read {
-                Ok(Ok(0)) => {
-                    return Err(terminal::Error::read_terminal(io::Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "terminal input closed before another event was available",
-                    )));
-                }
-                Ok(Ok(len)) => {
-                    let mut events = self.decoder.feed(&buffer[..len]);
-                    // Drain-boundary flush: a read that did not fill the buffer means the operating
-                    // system's input buffer is drained, so a trailing text run the syntax layer
-                    // parked for split-equivalence is settled input the caller should receive now.
-                    // Only *complete* trailing text is flushed; a partial escape, control sequence,
-                    // or mid-character UTF-8 run keeps waiting for the bytes that finish it (design
-                    // 02: the decoder never guesses across a real split). Without this, the last
-                    // character typed before a pause — the `o` in "hello" — would sit unseen until
-                    // the next keystroke, which the real-emulator typeahead gate would catch.
-                    if len < buffer.len() && self.decoder.has_settled_text() {
-                        events.extend(self.decoder.finish());
-                    }
-                    return Ok(events);
-                }
-                Ok(Err(err)) => return Err(terminal::Error::read_terminal(err)),
-                Err(_would_block) => {}
-            }
+        let mut buffer = [0; READ_BUFFER_LEN];
+        let len = self.readiness_mut().read(&mut buffer).await?;
+        if len == 0 {
+            return Err(terminal::Error::read_terminal(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "terminal input closed before another event was available",
+            )));
         }
+
+        // The decoder stays on the session, not in the readiness transport: the seam yields raw
+        // bytes and the session owns all decode/correlate/pending state, so cancel-safety keeps
+        // falling out of "state lives on the struct" (design 04). The read above performed no state
+        // mutation until it returned bytes here.
+        let mut events = self.decoder.feed(&buffer[..len]);
+        // Drain-boundary flush: a read that did not fill the buffer means the operating system's
+        // input buffer is drained, so a trailing text run the syntax layer parked for
+        // split-equivalence is settled input the caller should receive now. Only *complete*
+        // trailing text is flushed; a partial escape, control sequence, or mid-character
+        // UTF-8 run keeps waiting for the bytes that finish it (design 02: the decoder
+        // never guesses across a real split). Without this, the last character typed before
+        // a pause — the `o` in "hello" — would sit unseen until the next keystroke, which
+        // the real-emulator typeahead gate would catch.
+        if len < buffer.len() && self.decoder.has_settled_text() {
+            events.extend(self.decoder.finish());
+        }
+        Ok(events)
     }
 
     /// Flushes buffered terminal output.
@@ -1823,7 +1756,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// 2. **Flags resync (re-assert non-blocking).** It re-applies the `O_NONBLOCK` status flag on
     ///    the readiness descriptor. The session set the descriptor non-blocking at construction,
     ///    but the shell the process returned from may have cleared it on the shared open file
-    ///    description; [`AsyncFd`] requires non-blocking, so this must be re-asserted after
+    ///    description; `AsyncFd` requires non-blocking, so this must be re-asserted after
     ///    `SIGCONT`, after the termios resync.
     /// 3. **Optional input flush.** When `flush_input` is `true`, it `tcflush`es the pending input
     ///    so stale bytes the user typed at the shell (or a partially typed line) are dropped rather
@@ -1847,12 +1780,12 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // Step 2: flags resync — re-assert non-blocking on the readiness fd. The shell may have
         // cleared it on the shared description after SIGCONT; AsyncFd requires it. This is done
         // *after* the termios resync, so the ordering the playbook mandates holds.
-        self.reassert_nonblocking()?;
+        self.readiness().reassert_nonblocking()?;
 
         // Step 3: optional stale-input flush. The caller decides whether typeahead at the shell is
         // dropped (`tcflush` of the input queue) or kept.
         if flush_input {
-            self.flush_pending_input()?;
+            self.readiness().flush_input()?;
         }
 
         // Step 4: queue a synthetic resize so the app repaints at whatever size the terminal is now
@@ -1895,19 +1828,19 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///    does ordinary *blocking* reads on stdin; without this its reads would spuriously hit
     ///    `EAGAIN` from the non-blocking flag the session set on the shared description (FM-L
     ///    class).
-    /// 3. **Release the reactor registration.** Pulls the registered [`OwnedFd`] out of the
-    ///    [`AsyncFd`] ([`AsyncFd::into_inner`]), dropping the Tokio readiness registration entirely
-    ///    and holding the fd raw across the closure.
+    /// 3. **Release the reactor registration.** Detaches the readiness transport, dropping the
+    ///    Tokio readiness registration entirely and holding the raw fd (and its saved flags) across
+    ///    the closure.
     ///
     /// **Run `f()`** — call the closure and capture its `R`. It blocks; the caller's child runs
     /// here.
     ///
     /// **After `f` returns — reclaim the terminal, never trusting what the child left:**
     ///
-    /// 4. **Re-register.** Takes a **fresh** [`AsyncFd`] over the *same* fd ([`AsyncFd::try_new`]).
-    ///    Because the registration was fully released in step 3 and re-taken here, the reactor
-    ///    reads the descriptor's *current* readiness with no stale edge-triggered notification
-    ///    carried over from before the child ran — see below.
+    /// 4. **Re-register.** Reattaches a **fresh** reactor registration over the *same* fd. Because
+    ///    the registration was fully released in step 3 and re-taken here, the reactor reads the
+    ///    descriptor's *current* readiness with no stale edge-triggered notification carried over
+    ///    from before the child ran — see below.
     /// 5. **Termios + flags resync.** Re-asserts `O_NONBLOCK` on the readiness fd (the same
     ///    `reassert_nonblocking` step [`resume`](Self::resume) uses) and re-enters the kept ledger
     ///    with the same bounded retry through [`TerminalSession::enter`], which re-enters raw mode,
@@ -1924,12 +1857,12 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Panics
     ///
     /// Panics when called outside a Tokio runtime: reclaiming the terminal re-registers the fd with
-    /// the current runtime's reactor ([`AsyncFd::try_new`]), which requires an active runtime, the
+    /// the current runtime's reactor (`AsyncFd::try_new`), which requires an active runtime, the
     /// same requirement as [`open`](Self::open).
     ///
     /// # Why a fresh registration (the edge-triggered readiness concern)
     ///
-    /// Tokio's [`AsyncFd`] registers the descriptor with an edge-triggered reactor (kqueue/epoll).
+    /// Tokio's `AsyncFd` registers the descriptor with an edge-triggered reactor (kqueue/epoll).
     /// Readiness is delivered as *edges*: a transition to readable/writable notifies once, and the
     /// reactor then waits for the next transition. While the synchronous child owns the terminal
     /// the runtime is not polling this fd, yet the child freely reads and writes it — draining
@@ -1949,7 +1882,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the ledger undo fails, if the fresh [`AsyncFd`] cannot be registered
+    /// Returns an error if the ledger undo fails, if the fresh registration cannot be taken
     /// (surfaced as an open-terminal error, matching construction), if non-blocking cannot be
     /// re-asserted, if the bounded-retry re-enter never succeeds, or if the current size cannot be
     /// read for the synthetic resize. When re-registration fails the terminal has still been
@@ -1966,39 +1899,35 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // the readiness registration is still present, so `restore_flags` finds it.
         self.restore_flags();
 
-        // Step 3: release the reactor registration by pulling the OwnedFd out of the AsyncFd, and
-        // hold it raw across the closure. `readiness` is guaranteed `Some` here: a session with no
-        // pollable fd is rejected at construction, so the only way it is ever `None` is inside this
-        // very window. Dropping the AsyncFd (via into_inner) tears down the edge-triggered
-        // registration so step 4 can take a guaranteed-fresh one.
-        let owned = self
+        // Step 3: release the reactor registration by detaching the readiness transport, holding
+        // the raw fd (and its saved flags) across the closure. `readiness` is guaranteed `Some`
+        // here: a session with no pollable fd is rejected at construction, so the only way it is
+        // ever `None` is inside this very window. Detaching drops the edge-triggered registration
+        // so step 4 can reattach a guaranteed-fresh one.
+        let (owned, original_flags) = self
             .readiness
             .take()
             .expect("readiness is Some outside the run_detached window")
-            .into_inner();
+            .detach();
 
         // Run the child. It blocks; the caller spawns/waits their foreground process here. No
         // `.await` runs while the registration is released, so the session stays quiescent and no
         // read/write path can observe the `None`.
         let result = f();
 
-        // Step 4: re-register a FRESH AsyncFd over the SAME fd. A fresh registration reads the
+        // Step 4: reattach a FRESH registration over the SAME fd. A fresh registration reads the
         // descriptor's current readiness with no stale edge carried over from before the child ran
         // (see the method docs' edge-triggered discussion). On failure the fd is dropped with the
-        // error's parts; the terminal is already clean (steps 1-2), so the caller keeps a usable
-        // terminal even though this session cannot continue.
-        let readiness = AsyncFd::try_new(owned).map_err(|err| {
-            let (_owned, err) = err.into_parts();
-            terminal::Error::open_terminal(err)
-        })?;
-        self.readiness = Some(readiness);
+        // error; the terminal is already clean (steps 1-2), so the caller keeps a usable terminal
+        // even though this session cannot continue.
+        self.readiness = Some(FdReadiness::reattach(owned, original_flags)?);
 
         // Step 5: flags + termios resync. Re-assert non-blocking on the fresh registration (AsyncFd
         // requires it), then re-enter the kept ledger with the bounded retry — re-entering raw
         // mode, re-applying every recorded mode, and re-arming the restore handle. Never
         // trust the termios the child left (FM-L9): the re-enter re-asserts the session's
         // own modes wholesale.
-        self.reassert_nonblocking()?;
+        self.readiness().reassert_nonblocking()?;
         self.reenter_with_retry().await?;
 
         // Step 6: queue a synthetic resize so the app repaints at whatever size the terminal is now
@@ -2034,38 +1963,6 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             }
         }
         Err(last_error.expect("the retry loop runs at least once, so an error was recorded"))
-    }
-
-    /// Re-asserts the readiness descriptor's non-blocking flag after a `SIGCONT`.
-    ///
-    /// [`AsyncFd`] requires the registered descriptor to be non-blocking. The session set it so at
-    /// construction, but the shell the process returned from may have cleared `O_NONBLOCK` on the
-    /// shared open file description while it owned the terminal, so resume re-asserts it. Reads the
-    /// current flags and sets non-blocking on top, so no other status flag the shell may have set
-    /// is disturbed.
-    fn reassert_nonblocking(&self) -> terminal::Result<()> {
-        let fd = self.readiness().get_ref();
-        let flags = fcntl_getfl(fd)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::set_terminal_mode)?;
-        fcntl_setfl(fd, flags | OFlags::NONBLOCK)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::set_terminal_mode)
-    }
-
-    /// Drops pending input on the terminal (`tcflush` of the input queue).
-    ///
-    /// Called by [`resume`](Self::resume) only when the caller passes `flush_input: true`. This
-    /// discards stale bytes typed at the shell while the process was stopped so they are not
-    /// delivered to the application as if typed into it. It flushes the *input* queue only; queued
-    /// output the session still owes is untouched.
-    fn flush_pending_input(&self) -> terminal::Result<()> {
-        rustix::termios::tcflush(
-            self.readiness().get_ref(),
-            rustix::termios::QueueSelector::IFlush,
-        )
-        .map_err(io::Error::from)
-        .map_err(terminal::Error::set_terminal_mode)
     }
 
     /// Reads the current terminal size and enqueues a synthetic [`Event::Resize`] for delivery.
@@ -2124,12 +2021,10 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Returns an error when the `SIGWINCH` listener cannot be installed or the descriptor cannot
     /// be duplicated for size reads.
     pub fn resize_stream(&self) -> terminal::Result<ResizeStream> {
-        let borrowed = self.session.device().as_fd().ok_or_else(|| {
-            terminal::Error::unsupported("SIGWINCH resize stream", "device without a fd")
-        })?;
-        let size_fd = rustix::io::dup(borrowed)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
+        // The private size descriptor comes from the readiness transport, so the session body stops
+        // touching `rustix` for the dup: `dup_fd` duplicates the registered dup, which shares the
+        // device's open file description, so the size it measures is the session's terminal size.
+        let size_fd = self.readiness().dup_fd()?;
         let signal = signal(SignalKind::window_change()).map_err(terminal::Error::read_terminal)?;
         Ok(ResizeStream { signal, size_fd })
     }
@@ -2200,16 +2095,15 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Restores the device status flags captured before this session set the descriptor
     /// non-blocking.
     ///
-    /// The readiness dup and the session device share one open file description, so restoring the
-    /// flags on either restores them for both. This runs before the session teardown and again from
-    /// drop, so every exit path puts the flags back (idempotent; a redundant set is harmless).
+    /// Delegates to [`FdReadiness::restore_flags`], which puts the flags back on the shared open
+    /// file description (the readiness dup and the session device share one, so restoring on either
+    /// restores them for both). This runs before the session teardown and again from drop, so every
+    /// exit path puts the flags back (idempotent; a redundant set is harmless). The `Option` guard
+    /// keeps this a no-op inside the `run_detached` handoff window — the one path that holds the
+    /// dup raw and restored the flags itself before detaching.
     fn restore_flags(&self) {
-        // Restore on the shared description via the readiness dup. Every caller of this method
-        // (leave, drop) holds a registered readiness, so it is `Some` here; the one path that owns
-        // the dup raw — `run_detached` during its handoff window — restores the flags on the held
-        // fd directly rather than through this accessor, so `None` here is a no-op by construction.
         if let Some(readiness) = self.readiness.as_ref() {
-            _ = fcntl_setfl(readiness.get_ref(), self.original_flags);
+            readiness.restore_flags();
         }
     }
 }
@@ -2390,26 +2284,6 @@ impl SignalStream {
             ))
         })
     }
-}
-
-/// Writes bytes to the readiness-registered descriptor with one `write(2)`, returning the count.
-///
-/// I/O runs on the fd Tokio registered — the dup that shares the device's open file description —
-/// so readiness stays correct under edge-triggered polling and the bytes are still the device's
-/// bytes. On the non-blocking descriptor a short write advances the caller's remaining slice, and a
-/// `WouldBlock` surfaces as an error so `try_io` clears the readiness guard and the caller retries
-/// on the next writable notification. This is the exact partial-write semantics of the old
-/// direct-`File::write` loop.
-fn fd_write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
-    rustix::io::write(fd, bytes).map_err(io::Error::from)
-}
-
-/// Reads into `buffer` from the readiness-registered descriptor with one `read(2)`.
-///
-/// Returns `Ok(0)` at end of input. Runs on the registered fd for the same readiness-correctness
-/// reason as [`fd_write`].
-fn fd_read(fd: &OwnedFd, buffer: &mut [u8]) -> io::Result<usize> {
-    rustix::io::read(fd, buffer).map_err(io::Error::from)
 }
 
 /// The default job-control stop-signal seam: guards the process group (FM-G7), then sends
@@ -2758,6 +2632,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    // `fcntl_setfl` moved out of the module body with the readiness transport; the flag-poking
+    // tests (clearing/asserting `O_NONBLOCK` on the readiness fd, and the PTY-master
+    // helper) still need it.
+    use rustix::fs::fcntl_setfl;
     use tokio::time::timeout;
 
     use crate::{FakeDevice, FakeTerminal};

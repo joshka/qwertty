@@ -22,24 +22,24 @@ serde = { version = "1.0.225", features = ["derive"] }
 # toml: the database is TOML (design 05); this is the reference parser and the smallest one
 # that round-trips the table-array shape we use.
 toml = "1.1"
-# serde_json: the capture probe emits one JSON line per query (the collab-ask-4 sidecar handshake
-# is "raw bytes + a TOML sidecar"; the probe->orchestrator wire is JSON lines). The orchestrator
-# reads them back; a shared serde model keeps that contract honest.
+# serde_json: the per-entry capture sidecars under `db/captures/` are JSON (schema documented in
+# db/captures/FORMAT.md — the collab-ask-4 handshake); a shared serde model keeps that contract
+# honest.
 serde_json = "1.0.25"
 
-# qwertty: the library under test. The capture harness is its first partial consumer of the
-# conformance Target interface — `qdb capture-probe` drives a real terminal through the
-# library's own device + syntax layers (design 05 live-capture harness). A path dependency,
-# never published: qdb shares no semver with the library (ADR-0014).
+# qwertty: the library under test. The conformance runner drives real terminals through the
+# library's own device + syntax layers — the in-terminal relay (`qdb target-relay`) opens the
+# controlling tty via `Terminal` (design 05 live-capture harness). A path dependency, never
+# published: qdb shares no semver with the library (ADR-0014).
 qwertty = { path = "../.." }
 
-# rustix: the probe drains reply bytes off the terminal fd, waiting on `FIONREAD` (bytes-available)
-# with a per-query deadline — poll(2)/select(2) on a slave pty are unreliable on macOS, so the
-# adapter's efficient wait is a light FIONREAD poll instead. qwertty already depends on rustix;
-# qdb reuses it. Unix-only, matching the probe.
+# rustix: the relay waits for tty reply bytes on `FIONREAD` (bytes-available) — poll(2)/select(2)
+# on a slave pty are unreliable on macOS, so the efficient wait is a light FIONREAD poll — and
+# the adapter side opens/configures the relay FIFOs (nonblocking open, fcntl). qwertty already
+# depends on rustix; qdb reuses it. Unix-only, matching the adapters.
 [target.'cfg(unix)'.dependencies]
 # Floor consistent with the root crate's rustix dep (see the note there).
-rustix = { version = "1.1", features = ["stdio"] }
+rustix = { version = "1.1", features = ["fs", "stdio"] }
 
 [lints.rust]
 missing_docs = "warn"

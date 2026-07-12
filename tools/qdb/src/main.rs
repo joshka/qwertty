@@ -6,6 +6,11 @@
 //!   the ephemeral markdown reference to `target/qdb-docs/`; `matrix` writes the checked-in caniuse
 //!   support table to `db/caniuse.md`. `--check` regenerates to a buffer and fails on drift from
 //!   the committed/existing output instead of writing.
+//! - `capture --target <name>` — drive a real terminal through the conformance runner with
+//!   recording on: mint sidecars, `origin=capture:` fixtures, and the results seed.
+//! - `run --target <name>` — the conformance pass: same loop, results seed only. `--allow-modal` /
+//!   `--allow-destructive` opt replay classes in; they are never probed blind.
+//! - `target-relay` — internal: the in-terminal byte relay the PTY-hosted adapters launch.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,48 +30,88 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         Some("capture") => cmd_capture(&db_dir, &repo_root, &args[1..]),
         #[cfg(unix)]
-        Some("capture-probe") => cmd_capture_probe(&db_dir, &repo_root, &args[1..]),
+        Some("run") => cmd_run(&db_dir, &repo_root, &args[1..]),
+        #[cfg(unix)]
+        Some("target-relay") => cmd_target_relay(&args[1..]),
         _ => {
             eprintln!(
                 "usage: qdb <validate | generate [--check] [docs|matrix] | \
-                 capture --target tmux|betamax [--entry <id>...]>"
+                 capture --target tmux|betamax [--entry <id>...] | \
+                 run --target tmux|betamax [--entry <id>...] [--allow-modal] \
+                 [--allow-destructive]>"
             );
             ExitCode::FAILURE
         }
     }
 }
 
-/// `qdb capture --target tmux|betamax [--entry <id>...]`: drive a real terminal and mint artifacts.
+/// Shared `--target`/`--entry` argument parsing for the capture and run commands.
 #[cfg(unix)]
-fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
-    use qdb::orchestrate::{self, Target};
+struct DriveArgs {
+    target: qdb::orchestrate::TargetKind,
+    only: Vec<String>,
+    allow_modal: bool,
+    allow_destructive: bool,
+}
+
+/// Parses `--target`, `--entry`, and (for `run`) the replay-class opt-in flags.
+#[cfg(unix)]
+fn parse_drive_args(
+    cmd: &str,
+    rest: &[String],
+    allow_class_flags: bool,
+) -> Result<DriveArgs, String> {
+    use qdb::orchestrate::TargetKind;
 
     let mut target = None;
     let mut only = Vec::new();
+    let mut allow_modal = false;
+    let mut allow_destructive = false;
     let mut i = 0;
     while i < rest.len() {
         match rest[i].as_str() {
             "--target" if i + 1 < rest.len() => {
-                target = Target::parse(&rest[i + 1]);
-                if target.is_none() {
-                    eprintln!("qdb capture: unknown target {:?}", rest[i + 1]);
-                    return ExitCode::FAILURE;
-                }
+                target = Some(
+                    TargetKind::parse(&rest[i + 1])
+                        .ok_or_else(|| format!("qdb {cmd}: unknown target {:?}", rest[i + 1]))?,
+                );
                 i += 2;
             }
             "--entry" if i + 1 < rest.len() => {
                 only.push(rest[i + 1].clone());
                 i += 2;
             }
-            other => {
-                eprintln!("qdb capture: unexpected argument {other:?}");
-                return ExitCode::FAILURE;
+            "--allow-modal" if allow_class_flags => {
+                allow_modal = true;
+                i += 1;
             }
+            "--allow-destructive" if allow_class_flags => {
+                allow_destructive = true;
+                i += 1;
+            }
+            other => return Err(format!("qdb {cmd}: unexpected argument {other:?}")),
         }
     }
-    let Some(target) = target else {
-        eprintln!("qdb capture: --target tmux|betamax is required");
-        return ExitCode::FAILURE;
+    let target = target.ok_or_else(|| format!("qdb {cmd}: --target tmux|betamax is required"))?;
+    Ok(DriveArgs {
+        target,
+        only,
+        allow_modal,
+        allow_destructive,
+    })
+}
+
+/// `qdb capture --target tmux|betamax [--entry <id>...]`: drive a real terminal and mint artifacts.
+#[cfg(unix)]
+fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
+    use qdb::orchestrate;
+
+    let args = match parse_drive_args("capture", rest, false) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
     };
     let db = match Database::load(db_dir) {
         Ok(db) => db,
@@ -75,7 +120,7 @@ fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match orchestrate::run(&db, repo_root, target, &only) {
+    match orchestrate::capture(&db, repo_root, args.target, &args.only) {
         Ok(s) => {
             println!(
                 "qdb capture {}: {} answered, {} silent, {} unprobeable (version {:?})",
@@ -90,58 +135,77 @@ fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     }
 }
 
-/// `qdb capture-probe`: the in-terminal helper. Runs inside the target and writes a JSON report.
+/// `qdb run --target tmux|betamax [--entry <id>...] [--allow-modal] [--allow-destructive]`:
+/// the conformance pass — same loop as capture, results seed only.
 #[cfg(unix)]
-fn cmd_capture_probe(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
-    let mut target = String::new();
-    let mut version = String::new();
-    let mut timestamp = String::new();
-    let mut out = None;
-    let mut only = Vec::new();
-    let mut i = 0;
-    while i < rest.len() {
-        match rest[i].as_str() {
-            "--target" if i + 1 < rest.len() => {
-                target.clone_from(&rest[i + 1]);
-                i += 2;
-            }
-            "--version" if i + 1 < rest.len() => {
-                version.clone_from(&rest[i + 1]);
-                i += 2;
-            }
-            "--timestamp" if i + 1 < rest.len() => {
-                timestamp.clone_from(&rest[i + 1]);
-                i += 2;
-            }
-            "--out" if i + 1 < rest.len() => {
-                out = Some(PathBuf::from(&rest[i + 1]));
-                i += 2;
-            }
-            "--entry" if i + 1 < rest.len() => {
-                only.push(rest[i + 1].clone());
-                i += 2;
-            }
-            other => {
-                eprintln!("qdb capture-probe: unexpected argument {other:?}");
-                return ExitCode::FAILURE;
-            }
+fn cmd_run(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
+    use qdb::capture::AllowedClasses;
+    use qdb::orchestrate;
+
+    let args = match parse_drive_args("run", rest, true) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
         }
-    }
-    let Some(out) = out else {
-        eprintln!("qdb capture-probe: --out <path> is required");
-        return ExitCode::FAILURE;
     };
     let db = match Database::load(db_dir) {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("qdb capture-probe: {e}");
+            eprintln!("qdb run: {e}");
             return ExitCode::FAILURE;
         }
     };
-    match qdb::probe::run(&db, repo_root, &only, &target, &version, &timestamp, &out) {
+    let allowed = AllowedClasses {
+        modal: args.allow_modal,
+        destructive: args.allow_destructive,
+    };
+    match orchestrate::conformance(&db, repo_root, args.target, &args.only, allowed) {
+        Ok(s) => {
+            println!(
+                "qdb run {}: {} answered, {} silent, {} unprobeable (version {:?})",
+                s.target, s.answered, s.silent, s.unprobeable, s.version
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("qdb run: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `qdb target-relay --in <fifo> --out <fifo>`: internal — the in-terminal byte relay the
+/// PTY-hosted adapters launch. Not part of the user-facing surface.
+#[cfg(unix)]
+fn cmd_target_relay(rest: &[String]) -> ExitCode {
+    let mut fifo_in = None;
+    let mut fifo_out = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--in" if i + 1 < rest.len() => {
+                fifo_in = Some(PathBuf::from(&rest[i + 1]));
+                i += 2;
+            }
+            "--out" if i + 1 < rest.len() => {
+                fifo_out = Some(PathBuf::from(&rest[i + 1]));
+                i += 2;
+            }
+            other => {
+                eprintln!("qdb target-relay: unexpected argument {other:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let (Some(fifo_in), Some(fifo_out)) = (fifo_in, fifo_out) else {
+        eprintln!("qdb target-relay: --in <fifo> and --out <fifo> are required");
+        return ExitCode::FAILURE;
+    };
+    match qdb::targets::relay::run(&fifo_in, &fifo_out) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("qdb capture-probe: {e}");
+            eprintln!("qdb target-relay: {e}");
             ExitCode::FAILURE
         }
     }

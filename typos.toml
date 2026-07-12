@@ -20,5 +20,7 @@ kitty = "kitty"
 xterm = "xterm"
 # `fo` is a literal RFC 4648 base64 test vector (`encode_base64(b"fo")`), not a typo.
 fo = "fo"
+# `WRONLY` is the POSIX O_WRONLY open flag (rustix::fs::OFlags::WRONLY), not "wrongly".
+WRONLY = "WRONLY"
 # `BROWSEABLE` is a deliberate uppercase rule-name token in the agent rules docs.
 BROWSEABLE = "BROWSEABLE"

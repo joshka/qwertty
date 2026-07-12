@@ -94,28 +94,34 @@ capture artifacts below: an `origin=capture:` fixture is terminal-to-host and ha
 `db/captures/<target>/` log, and every `db/results/<target>.toml` row names an existing entry with
 a valid status.
 
-## Live capture (`qdb capture`)
+## The conformance runner (`qdb run`, `qdb capture`)
 
-Reply-direction (`terminal-to-host`) entries ship with quarantined syntax — the audited prototype
-fabricated replies, so a reply's bytes re-enter only through a live capture. `qdb capture` is that
-path: it drives one real terminal with the query entries and records what the terminal actually
-sends back.
+Both commands are one loop — the conformance runner driving a `Target` adapter
+(`tools/qdb/src/targets.rs`, the Phase 2 target-interface design made concrete). The runner owns
+policy: per-query deadlines, replay-class gating, late-reply attribution, an echoed-reply
+fabrication guard, and a DA1/XTVERSION identity cross-check against what the adapter claims to be
+driving. Adapters own only the byte transport. The PTY-hosted adapters (`tmux`: a detached pane;
+`betamax`: a headless ghostty-vt under an on-the-fly tape) share one mechanic: a thin relay
+(`qdb target-relay`) launched inside the target terminal, pumping bytes between the controlling
+tty (opened through the qwertty library) and a FIFO pair the runner drives from outside.
+
+For each query entry that has a `responds` link and an admitted replay class, the runner writes
+the query's exact bytes (unescaped from the entry's own query fixture — the single source of
+truth) and drains the reply with a per-query deadline. By default only `replay = "safe"` entries
+run; `qdb run --allow-modal` / `--allow-destructive` opt the other classes in explicitly — they
+are never probed blind (the DECSLPP incident rule).
 
 ```sh
-just capture                              # both installed targets, skip-if-missing
-cargo run -p qdb -- capture --target tmux            # one target
+just capture                              # capture both installed targets, skip-if-missing
+cargo run -p qdb -- capture --target tmux            # capture one target
 cargo run -p qdb -- capture --target betamax --entry osc.11.background_query   # one entry
+cargo run -p qdb -- run --target tmux                # conformance pass: results seed only
 ```
 
-For each query entry that has a `responds` link and `replay = "safe"` (queries only — never
-`modal`/`destructive`), the harness runs a helper (`qdb capture-probe`) *inside* the target
-terminal. The probe opens the controlling terminal through the qwertty library, writes the query's
-exact bytes (unescaped from the entry's own query fixture — the single source of truth), and drains
-the reply with a per-query deadline. It also records an identity probe (DA1 + XTVERSION; for tmux,
-also `tmux -V`). Two targets are wired: `tmux` (a detached pane driven with `send-keys`) and
-`betamax` (a headless ghostty-vt driven by an on-the-fly tape).
-
-It writes three kinds of artifact, all reviewable:
+**Capture mode is the same loop with recording on.** Reply-direction (`terminal-to-host`) entries
+ship with quarantined syntax — the audited prototype fabricated replies, so a reply's bytes
+re-enter only through a live capture. `qdb capture` writes three kinds of artifact, all
+reviewable ([`db/captures/FORMAT.md`](captures/FORMAT.md) documents the sidecar schema):
 
 | Path                                                   | What it is                                                        |
 | ------------------------------------------------------ | ----------------------------------------------------------------- |
@@ -123,17 +129,21 @@ It writes three kinds of artifact, all reviewable:
 | `fixtures/<family>/<name>_report_capture_<target>.seq` | The minted reply fixture, `origin=capture:` header                |
 | `db/results/<target>.toml`                             | The conformance/caniuse seed: answered/silent/timeout per id      |
 
+`qdb run` writes only the results seed — the conformance pass mints no trust artifacts.
+
 A minted fixture's path is added to the reply entry's `fixtures` array (a scripted edit that
 preserves formatting). The entry's quarantined `syntax` is **not** touched — deriving syntax from
 captured bytes is review work a later slice does, citing the capture. **Silence is data**: a query
 the target does not answer is recorded as a `timeout` result, not dropped. Entries whose probe
 would be side-effecting or ill-defined to send blind (iTerm2 `RequestUpload`, `Button`) are skipped
-honestly as `unprobeable` with a reason in the capture code.
+honestly as `unprobeable` with a reason in the runner code. A reply that merely echoes the query
+is recorded `echo_suspect` and never becomes a fixture — the fabrication guard.
 
-Live capture needs the target tools installed and is deliberately **not** in the `check` chain
+Live runs need the target tools installed and are deliberately **not** in the `check` chain
 (`just capture` skips cleanly when a tool is missing, like `just verify-emulators`). The pure
-minting logic — JSON parsing, sidecar/fixture/results rendering, the TOML fixture-array edit — is
-unit-tested with canned probe output, so it is covered by `just check` without a live terminal.
+logic — the runner loop against a scripted fake target, sidecar/fixture/results rendering, the
+TOML fixture-array edit — is unit-tested, so it is covered by `just check` without a live
+terminal.
 
 ## Support matrix (`qdb generate matrix`)
 

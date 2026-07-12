@@ -3732,7 +3732,16 @@ mod ctrl_event_map_tests {
 // per the MW-2 spec.
 #[cfg(all(test, windows))]
 mod windows_live_tests {
-    //! See the module comment above: construction + teardown over the real console, no key reads.
+    //! See the module comment above. Two groups of live-console tests share this module (and its
+    //! one `CONSOLE` serialization lock):
+    //!
+    //! - **Construction + teardown** (MW-2/MW-3): open and tear the session down over the real
+    //!   console without reading input.
+    //! - **Read path end-to-end** (MW-5): inject console input records with `WriteConsoleInputW`
+    //!   and assert the decoded [`Event`] the async session yields — the injection helpers
+    //!   ([`inject_text`], [`inject_resize`]) and the `*_reads_*` tests below. This drives the real
+    //!   `open()` session (no production test-seam), proving the transport `records -> worker ->
+    //!   channel -> decoder -> next_event` and the query correlator over it.
 
     // SAFETY: `AllocConsole` takes no arguments and is only reached inside `console_guard`; the
     // crate lint is `unsafe_code = "deny"`, so this test-only console attach opts in the same
@@ -3760,9 +3769,14 @@ mod windows_live_tests {
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::Console::{GetConsoleMode, GetConsoleOutputCP};
+    use windows_sys::Win32::System::Console::{
+        COORD, FlushConsoleInputBuffer, GetConsoleMode, GetConsoleOutputCP, INPUT_RECORD,
+        INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, WINDOW_BUFFER_SIZE_EVENT,
+        WINDOW_BUFFER_SIZE_RECORD, WriteConsoleInputW,
+    };
 
     use super::*;
+    use crate::Key;
 
     /// Serializes console access: the console modes are process-global, so two tests entering raw
     /// mode at once would corrupt each other's captured/restored state.
@@ -3945,5 +3959,271 @@ mod windows_live_tests {
             .expect("install console control listeners");
 
         session.leave().await.expect("leave");
+    }
+
+    // --- MW-5: console input injection + read-path integration tests -----------------------------
+    //
+    // These drive the real `open()` session and assert the decoded events. Input is injected with
+    // `WriteConsoleInputW` (the only way to feed a real console object — a pipe cannot back
+    // `ReadConsoleInputW`), which the worker reads exactly as it would live input. Every read is
+    // bounded by a timeout so a transport-wiring bug fails the CI job fast instead of hanging it.
+
+    /// The upper bound on every `next_event`/query await in these tests.
+    ///
+    /// Injected records are already pending when the worker's wait wakes, so a correct transport
+    /// delivers in milliseconds; this generous ceiling exists only so a *broken* transport fails
+    /// the CI job promptly instead of hanging it.
+    const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Injects `text` as a run of key-down records — one `KEY_EVENT_RECORD` per UTF-16 code unit —
+    /// into the shared console input buffer, exactly as conhost delivers VT bytes under VT input.
+    ///
+    /// Each unit becomes a `bKeyDown = 1`, `wRepeatCount = 1` record whose `UnicodeChar` is the
+    /// unit; the readiness worker's `translate_key` reads `UnicodeChar` straight back and re-emits
+    /// it (pairing surrogates across records through its persistent carry). So the three units of
+    /// `"\x1b[C"` reach the decoder as the bytes `ESC [ C`, and an emoji's two surrogate units
+    /// reach it as the one astral code point. The whole run is written in a single
+    /// `WriteConsoleInputW` call so it lands atomically and the worker reads it as one batch —
+    /// the session then decodes a complete sequence in one read, with no lone-`ESC` flush race.
+    fn inject_text(input: &OwnedHandle, text: &str) {
+        let records: Vec<INPUT_RECORD> = text
+            .encode_utf16()
+            .map(|unit| INPUT_RECORD {
+                EventType: u16::try_from(KEY_EVENT).expect("KEY_EVENT fits in u16"),
+                Event: INPUT_RECORD_0 {
+                    KeyEvent: KEY_EVENT_RECORD {
+                        bKeyDown: 1,
+                        wRepeatCount: 1,
+                        wVirtualKeyCode: 0,
+                        wVirtualScanCode: 0,
+                        uChar: KEY_EVENT_RECORD_0 { UnicodeChar: unit },
+                        dwControlKeyState: 0,
+                    },
+                },
+            })
+            .collect();
+        write_records(input, &records);
+    }
+
+    /// Injects a single `WINDOW_BUFFER_SIZE_EVENT` record into the shared console input buffer.
+    ///
+    /// The worker's resize path re-reads the live window rectangle via
+    /// `GetConsoleScreenBufferInfo`, never the record's `dwSize` (which is the scrollback buffer),
+    /// so the `dwSize` here is deliberately meaningless — the record only needs to be the type that
+    /// drives resize synthesis.
+    fn inject_resize(input: &OwnedHandle) {
+        let record = INPUT_RECORD {
+            EventType: u16::try_from(WINDOW_BUFFER_SIZE_EVENT)
+                .expect("WINDOW_BUFFER_SIZE_EVENT fits in u16"),
+            Event: INPUT_RECORD_0 {
+                WindowBufferSizeEvent: WINDOW_BUFFER_SIZE_RECORD {
+                    dwSize: COORD { X: 0, Y: 0 },
+                },
+            },
+        };
+        write_records(input, &[record]);
+    }
+
+    /// Writes a slice of input records into the console input buffer via `WriteConsoleInputW`.
+    ///
+    /// Constructing the `INPUT_RECORD` union above needs no `unsafe` (only *reading* an inactive
+    /// union field would); the sole FFI is this one call.
+    fn write_records(input: &OwnedHandle, records: &[INPUT_RECORD]) {
+        let count = u32::try_from(records.len()).expect("record count fits in u32");
+        let mut written: u32 = 0;
+        // SAFETY: `input` is a live owned console input handle opened with GENERIC_WRITE; `records`
+        // is readable for `count` entries; `written` is a live out-param.
+        let ok = unsafe {
+            WriteConsoleInputW(
+                input.as_raw_handle() as HANDLE,
+                records.as_ptr(),
+                count,
+                &raw mut written,
+            )
+        };
+        assert!(ok != 0, "WriteConsoleInputW");
+        assert_eq!(written as usize, records.len(), "all records written");
+    }
+
+    /// Empties the shared console input buffer so a test starts from a known-clean slate.
+    ///
+    /// The console input buffer is process-global and survives across the serialized tests; this
+    /// drops any record a prior test left behind (or any stray focus/menu record the host queued)
+    /// before injection, so each test observes only the records it wrote.
+    fn flush_console_input(input: &OwnedHandle) {
+        // SAFETY: `input` is a live owned console input handle.
+        let ok = unsafe { FlushConsoleInputBuffer(input.as_raw_handle() as HANDLE) };
+        assert!(ok != 0, "FlushConsoleInputBuffer");
+    }
+
+    /// Awaits the next key event, bounded by [`READ_TIMEOUT`], skipping a stray resize.
+    ///
+    /// A freshly attached console can surface an unsolicited `WINDOW_BUFFER_SIZE_EVENT`; it carries
+    /// no key intent, so it is skipped rather than allowed to fail a key assertion. Any other
+    /// unexpected event is a real transport defect and panics.
+    async fn expect_key(session: &mut TokioTerminalSession<Terminal>) -> Key {
+        let deadline = Instant::now() + READ_TIMEOUT;
+        loop {
+            let event = timeout_at(deadline, session.next_event())
+                .await
+                .expect("a key event arrives within the CI read timeout")
+                .expect("next_event decodes without error");
+            match event {
+                Event::Key(key) => return key.key(),
+                // A stray resize carries no key intent: skip it and read again.
+                Event::Resize(_) => {}
+                other => panic!("unexpected event while awaiting a key: {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn open_reads_a_plain_key_from_an_injected_record() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // One record (`UnicodeChar = 'a'`) -> one VT byte -> `Key::Char('a')`.
+        inject_text(&injector, "a");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char('a'),
+            "an injected 'a' record decodes to Key::Char('a')"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_reassembles_a_multi_record_arrow_sequence() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // Three separate records (`ESC` `[` `C`) reassemble through the channel and decoder into a
+        // single right-arrow key — the multi-record reassembly proof.
+        inject_text(&injector, "\x1b[C");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Right,
+            "the three-record ESC [ C sequence decodes to one right-arrow key"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_carries_an_astral_surrogate_pair_across_records() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // U+1F600 is a surrogate pair in UTF-16: two records, translated with the worker's carry
+        // pairing them into one astral code point.
+        let emoji = '\u{1f600}';
+        inject_text(&injector, "\u{1f600}");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char(emoji),
+            "the two surrogate records pair into one astral Key::Char"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn request_cursor_position_correlates_an_injected_report() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // Queue the report before the request: the request writes DSR to output (the console
+        // discards it) and then reads, and the correlator only matches replies fed *after* it
+        // registers the expectation, so a report already waiting in the worker's channel is
+        // consumed by the very first read of the query's deadline loop.
+        inject_text(&injector, "\x1b[10;20R");
+        let report = session
+            .request_cursor_position(READ_TIMEOUT)
+            .await
+            .expect("the injected cursor report resolves the query");
+        assert_eq!(report.row(), 10, "the correlator reports the injected row");
+        assert_eq!(
+            report.column(),
+            20,
+            "the correlator reports the injected column"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_reads_a_resize_from_an_injected_record() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // A window-buffer-size record drives in-band resize synthesis from the live window rect.
+        inject_resize(&injector);
+        let event = timeout_at(Instant::now() + READ_TIMEOUT, session.next_event())
+            .await
+            .expect("a resize event arrives within the CI read timeout")
+            .expect("next_event decodes without error");
+        let Event::Resize(resize) = event else {
+            panic!("expected a resize event, got {event:?}");
+        };
+        // The geometry is the live console window, not the record's `dwSize`; assert only that it
+        // is a sane, positive extent (the same tolerance as the device's `size` live test).
+        let cells = resize.cells();
+        assert!(cells.columns() > 0, "resize reports positive columns");
+        assert!(cells.rows() > 0, "resize reports positive rows");
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn leave_restores_the_console_after_reads() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        // Capture the live modes/codepage before the session enters raw mode, so the post-`leave`
+        // readback proves teardown put the captured originals back after a real read.
+        let output = open_console("CONOUT$");
+        let original_input = console_mode(&injector);
+        let original_output = console_mode(&output);
+        let original_codepage = output_codepage();
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        inject_text(&injector, "a");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char('a'),
+            "the session reads before teardown"
+        );
+
+        session.leave().await.expect("leave restores the console");
+
+        assert_eq!(
+            console_mode(&injector),
+            original_input,
+            "input mode restored"
+        );
+        assert_eq!(
+            console_mode(&output),
+            original_output,
+            "output mode restored"
+        );
+        assert_eq!(output_codepage(), original_codepage, "codepage restored");
     }
 }

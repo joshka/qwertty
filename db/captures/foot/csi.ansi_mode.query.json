@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;4;22c",
+    "target": "foot",
+    "version": "foot(1.16.2)",
+    "xtversion_escaped": "\\eP>|foot(1.16.2)\\e\\\\"
+  },
+  "query_id": "csi.ansi_mode.query",
+  "reply_escaped": "",
+  "reply_id": "csi.ansi_mode.report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "foot",
+  "timestamp": "2026-07-12T14:51:01Z"
+}

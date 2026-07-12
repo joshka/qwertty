@@ -1,0 +1,2 @@
+#! direction=terminal-to-host origin=capture:foot-1.16.2 date=2026-07-12
+\e[>1;011602;0c

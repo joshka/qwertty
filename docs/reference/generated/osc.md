@@ -56,7 +56,7 @@ Asks the terminal to report its current default foreground color.
 - Responds with: `osc.10.foreground_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/foreground_query.seq`](../../../fixtures/osc/foreground_query.seq)
-- Conformance: alacritty supported (25); betamax no-reply; kitty supported (25); tmux no-reply; wezterm supported (25)
+- Conformance: alacritty supported (25); betamax no-reply; foot supported (25); kitty supported (25); tmux no-reply; wezterm supported (25); xterm supported (25)
 
 ## Foreground Color Report (`osc.10.foreground_report`)
 
@@ -64,7 +64,7 @@ Reports the terminal's current default foreground color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_foot.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_foot.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Foreground Color (`osc.10.foreground_set`)
@@ -94,7 +94,7 @@ Asks the terminal to report its current default background color.
 - Responds with: `osc.11.background_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/background_query.seq`](../../../fixtures/osc/background_query.seq)
-- Conformance: alacritty supported (25); betamax no-reply; kitty supported (25); tmux no-reply; wezterm supported (25)
+- Conformance: alacritty supported (25); betamax no-reply; foot supported (25); kitty supported (25); tmux no-reply; wezterm supported (25); xterm supported (25)
 
 ## Background Color Report (`osc.11.background_report`)
 
@@ -102,7 +102,7 @@ Reports the terminal's current default background color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_11_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_11_background_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_alacritty.seq), [`fixtures/osc/osc_11_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_11_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_11_background_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_alacritty.seq), [`fixtures/osc/osc_11_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_wezterm.seq), [`fixtures/osc/osc_11_background_report_report_capture_foot.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_foot.seq), [`fixtures/osc/osc_11_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Background Color (`osc.11.background_set`)
@@ -123,7 +123,7 @@ Asks the terminal to report its current text-cursor color.
 - Responds with: `osc.12.cursor_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/cursor_query.seq`](../../../fixtures/osc/cursor_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (25); tmux no-reply; wezterm supported (25)
+- Conformance: alacritty no-reply; betamax no-reply; foot supported (19); kitty supported (25); tmux no-reply; wezterm supported (25); xterm supported (25)
 
 ## Cursor Color Report (`osc.12.cursor_report`)
 
@@ -131,7 +131,7 @@ Reports the terminal's current text-cursor color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_foot.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_foot.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Cursor Color (`osc.12.cursor_set`)
@@ -152,7 +152,7 @@ Fixture uses palette index 2.
 - Responds with: `osc.4.palette_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/palette_query.seq`](../../../fixtures/osc/palette_query.seq)
-- Conformance: alacritty supported (26); betamax no-reply; kitty supported (26); tmux no-reply; wezterm supported (26)
+- Conformance: alacritty supported (26); betamax no-reply; foot supported (26); kitty supported (26); tmux no-reply; wezterm supported (26); xterm supported (26)
 
 ## Palette Color Report (`osc.4.palette_report`)
 
@@ -160,7 +160,7 @@ Reports the RGB value of an indexed palette color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_4_palette_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_kitty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_4_palette_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_kitty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq), [`fixtures/osc/osc_4_palette_report_report_capture_foot.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_foot.seq), [`fixtures/osc/osc_4_palette_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Palette Color (`osc.4.palette_set`)
@@ -190,7 +190,7 @@ Fixture queries special color index 1.
 - Responds with: `osc.5.special_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/special_query.seq`](../../../fixtures/osc/special_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm supported (26)
 
 ## Special Color Report (`osc.5.special_report`)
 
@@ -198,6 +198,7 @@ Fixture reports special color index 1.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/osc/osc_5_special_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_5_special_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Special Color (`osc.5.special_set`)
@@ -227,7 +228,7 @@ Fixture queries the pointer foreground color.
 - Responds with: `osc.13.pointer_foreground_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/pointer_foreground_query.seq`](../../../fixtures/osc/pointer_foreground_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm supported (25)
 
 ## Pointer Foreground Color Report (`osc.13.pointer_foreground_report`)
 
@@ -235,6 +236,7 @@ Reports the terminal's current mouse-pointer foreground color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/osc/osc_13_pointer_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_13_pointer_foreground_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Pointer Foreground Color (`osc.13.pointer_foreground_set`)
@@ -264,7 +266,7 @@ Fixture queries the pointer background color.
 - Responds with: `osc.14.pointer_background_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/pointer_background_query.seq`](../../../fixtures/osc/pointer_background_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm supported (25)
 
 ## Pointer Background Color Report (`osc.14.pointer_background_report`)
 
@@ -272,6 +274,7 @@ Reports the terminal's current mouse-pointer background color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/osc/osc_14_pointer_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_14_pointer_background_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Pointer Background Color (`osc.14.pointer_background_set`)
@@ -301,7 +304,7 @@ Fixture queries the highlight background color.
 - Responds with: `osc.17.highlight_background_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/highlight_background_query.seq`](../../../fixtures/osc/highlight_background_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (25); tmux no-reply; wezterm supported (25)
+- Conformance: alacritty no-reply; betamax no-reply; foot supported (25); kitty supported (25); tmux no-reply; wezterm supported (25); xterm supported (25)
 
 ## Highlight Background Color Report (`osc.17.highlight_background_report`)
 
@@ -309,7 +312,7 @@ Reports the terminal's current selection-highlight background color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_foot.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_foot.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Highlight Background Color (`osc.17.highlight_background_set`)
@@ -339,7 +342,7 @@ Fixture queries the highlight foreground color.
 - Responds with: `osc.19.highlight_foreground_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/highlight_foreground_query.seq`](../../../fixtures/osc/highlight_foreground_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (25); tmux no-reply; wezterm supported (25)
+- Conformance: alacritty no-reply; betamax no-reply; foot supported (25); kitty supported (25); tmux no-reply; wezterm supported (25); xterm supported (25)
 
 ## Highlight Foreground Color Report (`osc.19.highlight_foreground_report`)
 
@@ -347,7 +350,7 @@ Reports the terminal's current selection-highlight foreground color.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_foot.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_foot.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## Set Highlight Foreground Color (`osc.19.highlight_foreground_set`)
@@ -413,7 +416,7 @@ Fixture queries target `c`; terminals may deny or ignore clipboard reads.
 - Responds with: `osc.52.clipboard_report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/clipboard_query.seq`](../../../fixtures/osc/clipboard_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## OSC 52 Clipboard Report (`osc.52.clipboard_report`)
 

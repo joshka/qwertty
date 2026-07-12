@@ -29,7 +29,7 @@ Uses Kitty's string-key color protocol instead of xterm OSC color selectors.
 - Responds with: `kitty.color.report`
 - References: [kitty: Saving and restoring colors](https://sw.kovidgoyal.net/kitty/color-stack/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/color_query.seq`](../../../fixtures/kitty/color_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (30); tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty supported (30); tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## Set Kitty Color Key (`kitty.color.set`)
 

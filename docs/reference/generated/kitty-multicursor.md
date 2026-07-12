@@ -38,7 +38,7 @@ The spec recommends following this query with primary DA to avoid timeout waits.
 - Responds with: `kitty.multicursor.support_report`
 - References: [kitty Multiple Cursors Protocol](https://sw.kovidgoyal.net/kitty/multiple-cursors-protocol/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/multicursor_query_support.seq`](../../../fixtures/kitty/multicursor_query_support.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## Kitty Multiple Cursor Support Report (`kitty.multicursor.support_report`)
 

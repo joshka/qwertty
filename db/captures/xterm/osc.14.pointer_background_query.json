@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?64;1;2;6;9;15;16;17;18;21;22;28c",
+    "target": "xterm",
+    "version": "XTerm(390)",
+    "xtversion_escaped": "\\eP>|XTerm(390)\\e\\\\"
+  },
+  "query_id": "osc.14.pointer_background_query",
+  "reply_escaped": "\\e]14;rgb:ffff/ffff/ffff\\e\\\\",
+  "reply_id": "osc.14.pointer_background_report",
+  "reply_len": 25,
+  "status": "answered",
+  "target": "xterm",
+  "timestamp": "2026-07-12T14:51:10Z"
+}

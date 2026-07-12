@@ -7,14 +7,14 @@ queryable entries — live-capture evidence, not a hand-claimed table. See the f
 [support matrix](matrix.md) for per-sequence verdicts and the per-family pages for
 citations and fixtures.
 
-| Family | Queries | alacritty | betamax | kitty | tmux | wezterm |
-| --- | --- | --- | --- | --- | --- | --- |
-| `ecma48-csi` | 8 | 7/8 | 5/8 | 7/8 | 7/8 | 8/8 |
-| `iterm2` | 7 | 0/7 | 1/7 | 1/7 | 1/7 | 2/7 |
-| `kitty-color` | 1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 |
-| `kitty-keyboard` | 1 | 1/1 | 1/1 | 1/1 | 0/1 | 0/1 |
-| `kitty-multicursor` | 1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 |
-| `kitty-pointer` | 1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 |
-| `osc` | 10 | 3/10 | 0/10 | 6/10 | 0/10 | 6/10 |
-| `xterm-capabilities` | 2 | 0/2 | 0/2 | 1/2 | 0/2 | 1/2 |
-| `xterm-modes` | 4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |
+| Family | Queries | alacritty | betamax | foot | kitty | tmux | wezterm | xterm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ecma48-csi` | 8 | 7/8 | 5/8 | 7/8 | 7/8 | 7/8 | 8/8 | 6/8 |
+| `iterm2` | 7 | 0/7 | 1/7 | 1/7 | 1/7 | 1/7 | 2/7 | 1/7 |
+| `kitty-color` | 1 | 0/1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 | 0/1 |
+| `kitty-keyboard` | 1 | 1/1 | 1/1 | 1/1 | 1/1 | 0/1 | 0/1 | 0/1 |
+| `kitty-multicursor` | 1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 |
+| `kitty-pointer` | 1 | 0/1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 | 0/1 |
+| `osc` | 10 | 3/10 | 0/10 | 6/10 | 6/10 | 0/10 | 6/10 | 9/10 |
+| `xterm-capabilities` | 2 | 0/2 | 0/2 | 1/2 | 1/2 | 0/2 | 1/2 | 1/2 |
+| `xterm-modes` | 4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |

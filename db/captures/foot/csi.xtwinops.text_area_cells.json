@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;4;22c",
+    "target": "foot",
+    "version": "foot(1.16.2)",
+    "xtversion_escaped": "\\eP>|foot(1.16.2)\\e\\\\"
+  },
+  "query_id": "csi.xtwinops.text_area_cells",
+  "reply_escaped": "\\e[8;53;212t",
+  "reply_id": "csi.xtwinops.text_area_cells_report",
+  "reply_len": 11,
+  "status": "answered",
+  "target": "foot",
+  "timestamp": "2026-07-12T14:51:01Z"
+}

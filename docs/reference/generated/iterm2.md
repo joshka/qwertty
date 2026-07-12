@@ -11,7 +11,7 @@ iTerm2 extends OSC 4 reports with -2 for default background.
 - Responds with: `iterm2.osc4.default_background_report`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/default_background_query.seq`](../../../fixtures/iterm2/default_background_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## iTerm2 OSC 4 Default Foreground Query (`iterm2.osc4.default_foreground_query`)
 
@@ -22,7 +22,7 @@ iTerm2 extends OSC 4 reports with -1 for default foreground.
 - Responds with: `iterm2.osc4.default_foreground_report`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/default_foreground_query.seq`](../../../fixtures/iterm2/default_foreground_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## iTerm2 OSC 4 Default Background Report (`iterm2.osc4.default_background_report`)
 
@@ -212,7 +212,7 @@ Requests cell height, width, and optional scale.
 - Responds with: `iterm2.osc1337.report_cell_size_report`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/report_cell_size_query.seq`](../../../fixtures/iterm2/report_cell_size_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm supported (31)
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm supported (31); xterm no-reply
 
 ## iTerm2 Report Cell Size Response (`iterm2.osc1337.report_cell_size_report`)
 
@@ -241,7 +241,7 @@ Requests an iTerm2 scripting variable by base64-encoded name.
 - Responds with: `iterm2.osc1337.report_variable_report`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/report_variable_query.seq`](../../../fixtures/iterm2/report_variable_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm no-reply
 
 ## iTerm2 Report Variable Response (`iterm2.osc1337.report_variable_report`)
 
@@ -269,7 +269,7 @@ Requests a user-selected tar.gz upload from iTerm2.
 - Responds with: `iterm2.osc1337.request_upload_response`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/request_upload.seq`](../../../fixtures/iterm2/request_upload.seq)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## iTerm2 Request Upload Response (`iterm2.osc1337.request_upload_response`)
 
@@ -414,7 +414,7 @@ Requests iTerm2 terminal name and version.
 - Responds with: `iterm2.dcs.extended_device_attributes_response`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/extended_device_attributes_query.seq`](../../../fixtures/iterm2/extended_device_attributes_query.seq)
-- Conformance: alacritty no-reply; betamax supported (16); kitty supported (19); tmux supported (15); wezterm supported (38)
+- Conformance: alacritty no-reply; betamax supported (16); foot supported (18); kitty supported (19); tmux supported (15); wezterm supported (38); xterm supported (16)
 
 ## iTerm2 Extended Device Attributes Response (`iterm2.dcs.extended_device_attributes_response`)
 
@@ -422,7 +422,7 @@ Reports terminal name and version, such as iTerm2 3.4.0.
 
 - Direction: terminal-to-host
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_tmux.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_betamax.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_kitty.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_wezterm.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_foot.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_foot.seq), [`fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_xterm.seq`](../../../fixtures/iterm2/iterm2_dcs_extended_device_attributes_response_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## iTerm2 Open URL (`iterm2.osc1337.open_url`)
@@ -479,7 +479,7 @@ Omitting code and icon invalidates existing custom buttons.
 - Responds with: `iterm2.csi.button_custom_event`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/iterm2/button_custom.seq`](../../../fixtures/iterm2/button_custom.seq)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## iTerm2 Custom Button Event (`iterm2.csi.button_custom_event`)
 

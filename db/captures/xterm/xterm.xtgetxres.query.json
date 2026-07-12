@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?64;1;2;6;9;15;16;17;18;21;22;28c",
+    "target": "xterm",
+    "version": "XTerm(390)",
+    "xtversion_escaped": "\\eP>|XTerm(390)\\e\\\\"
+  },
+  "query_id": "xterm.xtgetxres.query",
+  "reply_escaped": "\\eP1+R666F6E74=2D6D6973632D66697865642D6D656469756D2D722D73656D69636F6E64656E7365642D2D31332D3132302D37352D37352D632D36302D69736F31303634362D31\\e\\\\",
+  "reply_id": "xterm.xtgetxres.report",
+  "reply_len": 144,
+  "status": "answered",
+  "target": "xterm",
+  "timestamp": "2026-07-12T14:51:10Z"
+}

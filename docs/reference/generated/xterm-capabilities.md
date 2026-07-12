@@ -11,7 +11,7 @@ Fixture queries `TN`, encoded as hex `544E`.
 - Responds with: `xterm.xtgettcap.report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/xterm/xtgettcap_query.seq`](../../../fixtures/xterm/xtgettcap_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty supported (34); tmux no-reply; wezterm supported (26)
+- Conformance: alacritty no-reply; betamax no-reply; foot supported (20); kitty supported (34); tmux no-reply; wezterm supported (26); xterm no-reply
 
 ## XTGETXRES Query (`xterm.xtgetxres.query`)
 
@@ -22,7 +22,7 @@ Fixture queries `font`, encoded as hex `666F6E74`.
 - Responds with: `xterm.xtgetxres.report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/xterm/xtgetxres_query.seq`](../../../fixtures/xterm/xtgetxres_query.seq)
-- Conformance: alacritty no-reply; betamax no-reply; kitty no-reply; tmux no-reply; wezterm no-reply
+- Conformance: alacritty no-reply; betamax no-reply; foot no-reply; kitty no-reply; tmux no-reply; wezterm no-reply; xterm supported (144)
 
 ## XTGETXRES Report (`xterm.xtgetxres.report`)
 
@@ -30,6 +30,7 @@ Fixture reports hex payload `font=mono` and preserves the encoded string.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/xterm/xterm_xtgetxres_report_report_capture_xterm.seq`](../../../fixtures/xterm/xterm_xtgetxres_report_report_capture_xterm.seq)
 - Notes: reply syntax pending live capture
 
 ## XTSETTCAP Set (`xterm.xtsettcap.set`)
@@ -47,5 +48,5 @@ Payload stays hex encoded until a termcap-specific helper decodes it.
 
 - Direction: terminal-to-host
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq`](../../../fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq), [`fixtures/xterm/xterm_xtgettcap_report_report_capture_wezterm.seq`](../../../fixtures/xterm/xterm_xtgettcap_report_report_capture_wezterm.seq)
+- Fixtures: [`fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq`](../../../fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq), [`fixtures/xterm/xterm_xtgettcap_report_report_capture_wezterm.seq`](../../../fixtures/xterm/xterm_xtgettcap_report_report_capture_wezterm.seq), [`fixtures/xterm/xterm_xtgettcap_report_report_capture_foot.seq`](../../../fixtures/xterm/xterm_xtgettcap_report_report_capture_foot.seq)
 - Notes: reply syntax pending live capture

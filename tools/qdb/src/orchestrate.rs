@@ -17,9 +17,11 @@ use crate::model::Database;
 use crate::runner::{self, IdentityCheck, RunnerOptions};
 use crate::targets::alacritty::AlacrittyTarget;
 use crate::targets::betamax::BetamaxTarget;
+use crate::targets::foot::FootTarget;
 use crate::targets::kitty::KittyTarget;
 use crate::targets::tmux::TmuxTarget;
 use crate::targets::wezterm::WeztermTarget;
+use crate::targets::xterm::XtermTarget;
 use crate::targets::{AdapterKind, Target};
 
 /// Which adapter the orchestrator drives.
@@ -36,6 +38,10 @@ pub enum TargetKind {
     Alacritty,
     /// A headless `wezterm-mux-server` session hosting the byte relay.
     Wezterm,
+    /// A self-managed headless-sway foot session hosting the byte relay. Linux-only, CI-driven.
+    Foot,
+    /// A self-managed headless-Xvfb xterm session hosting the byte relay. Linux-only, CI-driven.
+    Xterm,
 }
 
 impl TargetKind {
@@ -48,6 +54,8 @@ impl TargetKind {
             "kitty" => Some(Self::Kitty),
             "alacritty" => Some(Self::Alacritty),
             "wezterm" => Some(Self::Wezterm),
+            "foot" => Some(Self::Foot),
+            "xterm" => Some(Self::Xterm),
             _ => None,
         }
     }
@@ -61,6 +69,8 @@ impl TargetKind {
             Self::Kitty => "kitty",
             Self::Alacritty => "alacritty",
             Self::Wezterm => "wezterm",
+            Self::Foot => "foot",
+            Self::Xterm => "xterm",
         }
     }
 
@@ -73,6 +83,8 @@ impl TargetKind {
             Self::Kitty => Box::new(KittyTarget::new()),
             Self::Alacritty => Box::new(AlacrittyTarget::new()),
             Self::Wezterm => Box::new(WeztermTarget::new()),
+            Self::Foot => Box::new(FootTarget::new()),
+            Self::Xterm => Box::new(XtermTarget::new()),
         }
     }
 
@@ -82,9 +94,13 @@ impl TargetKind {
     #[must_use]
     pub const fn adapter_kind(self) -> AdapterKind {
         match self {
-            Self::Tmux | Self::Betamax | Self::Kitty | Self::Alacritty | Self::Wezterm => {
-                AdapterKind::PtyHosted
-            }
+            Self::Tmux
+            | Self::Betamax
+            | Self::Kitty
+            | Self::Alacritty
+            | Self::Wezterm
+            | Self::Foot
+            | Self::Xterm => AdapterKind::PtyHosted,
         }
     }
 }

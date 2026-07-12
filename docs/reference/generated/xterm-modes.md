@@ -172,7 +172,7 @@ Probes mode 2026; the DA1-fenced capability bundle routes the reply by mode numb
 - Syntax: `CSI ? 2026 $ p`
 - Responds with: `dec.mode.synchronized_output.report`
 - References: [Contour: Synchronized Output VT extension](https://contour-terminal.org/vt-extensions/synchronized-output/) (retrieved 2026-07-06)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## DECRPM Synchronized Output (2026) (`dec.mode.synchronized_output.report`)
 
@@ -190,7 +190,7 @@ Probes mode 2027; the DA1-fenced capability bundle routes the reply by mode numb
 - Syntax: `CSI ? 2027 $ p`
 - Responds with: `dec.mode.grapheme_clustering.report`
 - References: [WezTerm Escape Sequences](https://wezterm.org/escape-sequences.html) (retrieved 2026-07-06)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## DECRPM Grapheme Clustering (2027) (`dec.mode.grapheme_clustering.report`)
 
@@ -208,7 +208,7 @@ Probes mode 2048; the DA1-fenced capability bundle routes the reply by mode numb
 - Syntax: `CSI ? 2048 $ p`
 - Responds with: `dec.mode.in_band_resize.report`
 - References: [WezTerm Escape Sequences](https://wezterm.org/escape-sequences.html) (retrieved 2026-07-06)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## DECRPM In-Band Resize (2048) (`dec.mode.in_band_resize.report`)
 
@@ -226,7 +226,7 @@ Probes mode 2004; the DA1-fenced capability bundle routes the reply by mode numb
 - Syntax: `CSI ? 2004 $ p`
 - Responds with: `dec.mode.bracketed_paste.report`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
-- Conformance: alacritty unprobeable; betamax unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable
+- Conformance: alacritty unprobeable; betamax unprobeable; foot unprobeable; kitty unprobeable; tmux unprobeable; wezterm unprobeable; xterm unprobeable
 
 ## DECRPM Bracketed Paste (2004) (`dec.mode.bracketed_paste.report`)
 

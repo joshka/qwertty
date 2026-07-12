@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;4;22c",
+    "target": "foot",
+    "version": "foot(1.16.2)",
+    "xtversion_escaped": "\\eP>|foot(1.16.2)\\e\\\\"
+  },
+  "query_id": "osc.11.background_query",
+  "reply_escaped": "\\e]11;rgb:2424/2424/2424\\e\\\\",
+  "reply_id": "osc.11.background_report",
+  "reply_len": 25,
+  "status": "answered",
+  "target": "foot",
+  "timestamp": "2026-07-12T14:51:01Z"
+}

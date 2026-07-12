@@ -18,6 +18,8 @@ pub mod alacritty;
 #[cfg(unix)]
 pub mod betamax;
 #[cfg(unix)]
+pub mod foot;
+#[cfg(unix)]
 pub mod kitty;
 #[cfg(unix)]
 pub mod relay;
@@ -27,6 +29,8 @@ pub mod tmux;
 pub(crate) mod util;
 #[cfg(unix)]
 pub mod wezterm;
+#[cfg(unix)]
+pub mod xterm;
 
 /// How a target is hosted — recorded with results so the matrix never implies an automation
 /// level the adapter doesn't have (the attended-cells honesty rule).

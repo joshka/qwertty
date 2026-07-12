@@ -54,58 +54,19 @@ use self::readiness::FdReadiness;
 #[cfg(any(unix, windows))]
 use crate::ResizeEvent;
 use crate::caps::{
-    Capabilities, Finding, identity_from_env, infer_hyperlinks, infer_truecolor, std_env_source,
+    Capabilities, ProbeBundle, identity_from_env, infer_hyperlinks, infer_truecolor,
+    probe_bundle_commands, std_env_source, store_bundle_reply,
 };
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
-use crate::report::{
-    CursorPositionReport, DecPrivateModeReport, OscColorKind, TerminalStatusReport,
-};
+use crate::report::{CursorPositionReport, TerminalStatusReport};
 use crate::{
-    Command, CommandBuffer, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant,
-    SemanticDecoder, Terminal, TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
+    Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, SemanticDecoder, Terminal,
+    TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
 
 /// The internal readiness transport: `AsyncFd`/`rustix` live here, not in the session body.
 mod readiness;
-
-/// The DEC private modes the capability probe bundle queries, and the [`Capabilities`] field each
-/// answer sets. Kept as one table so the write side, the register side, and the collect side stay
-/// in agreement (design 03 probe bundle).
-const PROBE_MODES: [ProbeMode; 4] = [
-    ProbeMode {
-        mode: 2026,
-        field: CapabilityField::SynchronizedOutput,
-    },
-    ProbeMode {
-        mode: 2027,
-        field: CapabilityField::GraphemeClustering,
-    },
-    ProbeMode {
-        mode: 2048,
-        field: CapabilityField::InBandResize,
-    },
-    ProbeMode {
-        mode: 2004,
-        field: CapabilityField::BracketedPaste,
-    },
-];
-
-/// One DEC private mode the probe asks about, and which [`Capabilities`] boolean its answer sets.
-#[derive(Clone, Copy)]
-struct ProbeMode {
-    mode: u16,
-    field: CapabilityField,
-}
-
-/// Which [`Capabilities`] boolean a DECRQM answer populates.
-#[derive(Clone, Copy)]
-enum CapabilityField {
-    SynchronizedOutput,
-    GraphemeClustering,
-    InBandResize,
-    BracketedPaste,
-}
 
 #[cfg(unix)]
 const DEV_TTY: &str = "/dev/tty";
@@ -1214,21 +1175,13 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // Step 2: register the bundle. DA1 is registered like any other; the fence *semantics* is
         // this method's, keyed on the DA1 id. The M3 vocabulary within one bundle never overlaps
         // (distinct modes, distinct colours, distinct frames), so registration never conflicts.
-        let bundle = self.register_probe_bundle();
+        let bundle = ProbeBundle::register(&mut self.correlator);
+        self.active_probe.extend(bundle.ids());
 
-        // Step 3: write the whole bundle in ONE buffer, DA1 last as the fence, then flush.
-        let mut buffer = CommandBuffer::new();
-        buffer
-            .command(commands::terminal::request_xtversion())
-            .command(commands::terminal::request_kitty_keyboard_flags())
-            .command(commands::osc::request_foreground_color())
-            .command(commands::osc::request_background_color());
-        for probe in PROBE_MODES {
-            buffer.command(commands::terminal::request_dec_private_mode(probe.mode));
-        }
-        // DA1 last: the fence.
-        buffer.command(commands::terminal::request_primary_device_attributes());
-        self.bytes(buffer.into_bytes()).await?;
+        // Step 3: write the whole bundle in ONE buffer, DA1 last as the fence, then flush. The
+        // command set is shared with the sync driver's `probe_capabilities` (`caps::
+        // probe_bundle_commands`) so the two can never drift apart.
+        self.bytes(probe_bundle_commands().into_bytes()).await?;
         self.flush().await?;
 
         // The env-inferred findings and the env-only identity fallback never come from a terminal
@@ -1266,7 +1219,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
                         self.finish_probe(&bundle);
                         return Ok(capabilities);
                     }
-                    self.resolve_bundle(&bundle, Resolution::Cancelled);
+                    bundle.resolve_all(&mut self.correlator, Resolution::Cancelled);
                     self.active_probe.clear();
                     return Err(err);
                 }
@@ -1286,52 +1239,6 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
                 return Ok(capabilities);
             }
         }
-    }
-
-    /// Registers the DA1-fenced probe bundle and records its ids for the fence and cancel-sweep.
-    ///
-    /// Returns the bundle: the DA1 fence id, and each other expectation id paired with the
-    /// [`Capabilities`] slot its reply populates. Every id is also recorded in `active_probe` so a
-    /// dropped probe future's expectations are swept before the next query (cancel-safety).
-    fn register_probe_bundle(&mut self) -> ProbeBundle {
-        // Register in a fixed order; DA1 is registered *last* so it is the fence (its id keys the
-        // whole fence semantics). Every field is set at construction so the struct never sits in a
-        // half-initialized state.
-        let xtversion = Some(self.register_probe(Expectation::XtVersion));
-        let kitty = Some(self.register_probe(Expectation::KittyKeyboardFlags));
-        let foreground = Some(self.register_probe(Expectation::OscColor {
-            which: OscColorKind::Foreground,
-        }));
-        let background = Some(self.register_probe(Expectation::OscColor {
-            which: OscColorKind::Background,
-        }));
-        let modes = PROBE_MODES
-            .iter()
-            .map(|probe| {
-                let id = self.register_probe(Expectation::DecPrivateMode { mode: probe.mode });
-                (id, probe.field)
-            })
-            .collect();
-        let fence = Some(self.register_probe(Expectation::PrimaryDeviceAttributes));
-
-        ProbeBundle {
-            fence,
-            xtversion,
-            kitty,
-            foreground,
-            background,
-            modes,
-        }
-    }
-
-    /// Registers one bundle expectation, recording its id in `active_probe` for the cancel-sweep.
-    fn register_probe(&mut self, expectation: Expectation) -> ExpectationId {
-        let id = self
-            .correlator
-            .register(expectation)
-            .expect("bundle expectations never overlap: distinct modes/colours/frames");
-        self.active_probe.push(id);
-        id
     }
 
     /// Feeds a whole decode batch through the correlator, collecting bundle replies into
@@ -1356,7 +1263,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
                         .take_reply(id)
                         .expect("a completion always has a reply to take");
                     store_bundle_reply(bundle, id, reply, capabilities);
-                    if Some(id) == bundle.fence {
+                    if Some(id) == bundle.fence() {
                         // The fence completed — but keep feeding the rest of the batch first.
                         fenced = true;
                     }
@@ -1375,15 +1282,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// it so a later matching reply passes through as an event (rule 4), and leaves its
     /// [`Capabilities`] field `None` (unknown, FM-C4).
     fn finish_probe(&mut self, bundle: &ProbeBundle) {
-        self.resolve_bundle(bundle, Resolution::NoReply);
+        bundle.resolve_all(&mut self.correlator, Resolution::NoReply);
         self.active_probe.clear();
-    }
-
-    /// Resolves every still-registered bundle expectation with `resolution`.
-    fn resolve_bundle(&mut self, bundle: &ProbeBundle, resolution: Resolution) {
-        for id in bundle.ids() {
-            self.correlator.resolve(id, resolution);
-        }
     }
 
     /// Sweeps a leftover probe bundle from a dropped/cancelled prior probe as cancelled.
@@ -2782,114 +2682,6 @@ fn take_coalesced_event(pending: &mut VecDeque<Event>) -> Option<Event> {
         return Some(event);
     }
     None
-}
-
-/// The registered expectation ids of one capability probe bundle (design 03).
-///
-/// Keyed for the fence and for reply collection: `fence` is the DA1 expectation whose completion
-/// resolves the rest as no-reply; the others are paired with the [`Capabilities`] field their reply
-/// fills. Every id is also mirrored in the session's `active_probe` for the cancel-sweep.
-#[derive(Default)]
-struct ProbeBundle {
-    fence: Option<ExpectationId>,
-    xtversion: Option<ExpectationId>,
-    kitty: Option<ExpectationId>,
-    foreground: Option<ExpectationId>,
-    background: Option<ExpectationId>,
-    modes: Vec<(ExpectationId, CapabilityField)>,
-}
-
-impl ProbeBundle {
-    /// Returns every registered id in the bundle (fence included), for whole-bundle resolution.
-    fn ids(&self) -> Vec<ExpectationId> {
-        let mut ids = Vec::new();
-        ids.extend(self.fence);
-        ids.extend(self.xtversion);
-        ids.extend(self.kitty);
-        ids.extend(self.foreground);
-        ids.extend(self.background);
-        ids.extend(self.modes.iter().map(|(id, _)| *id));
-        ids
-    }
-}
-
-/// The evidence label recorded on every DECRQM-backed [`Finding`] the probe bundle populates.
-///
-/// One stable string per mode number so a consumer's `Evidence::Probed { via }` match names the
-/// exact query that answered (design 06).
-const fn decrqm_evidence(mode: u16) -> &'static str {
-    match mode {
-        2026 => "DECRQM 2026",
-        2027 => "DECRQM 2027",
-        2048 => "DECRQM 2048",
-        2004 => "DECRQM 2004",
-        _ => "DECRQM",
-    }
-}
-
-/// Records one bundle reply into the matching [`Capabilities`] field, as a [`Finding`] with
-/// [`Evidence::Probed`] naming the query that answered.
-///
-/// The XTVERSION reply also feeds `capabilities.identity` (design 06, R-CAP-5: identity is a
-/// finding too) via [`identity_from_env`], cross-checked against the environment.
-fn store_bundle_reply(
-    bundle: &ProbeBundle,
-    id: ExpectationId,
-    reply: Reply,
-    capabilities: &mut Capabilities,
-) {
-    match reply {
-        Reply::XtVersion(report) => {
-            let version = report.version().to_owned();
-            capabilities.identity = identity_from_env(Some(&version), std_env_source);
-        }
-        Reply::KittyKeyboardFlags(bits) => {
-            capabilities.kitty_keyboard =
-                Finding::probed(Some(KittyKeyboardFlags::from_bits(bits)), "CSI ?u");
-        }
-        Reply::OscColor(report) => match report.kind() {
-            OscColorKind::Foreground => {
-                capabilities.foreground_color = Finding::probed(Some(report.rgb()), "OSC 10");
-            }
-            OscColorKind::Background => {
-                capabilities.background_color = Finding::probed(Some(report.rgb()), "OSC 11");
-            }
-        },
-        Reply::DecPrivateMode(report) => store_mode_reply(bundle, id, report, capabilities),
-        Reply::PrimaryDeviceAttributes(attrs) => {
-            capabilities.primary_device_attributes = Some(attrs.into());
-        }
-        // The bundle never registers CursorPosition/TerminalStatus expectations, so those reply
-        // variants cannot appear here.
-        Reply::CursorPosition(_) | Reply::TerminalStatus(_) => {}
-    }
-}
-
-/// Stores a DECRQM answer into the [`Capabilities`] finding its mode maps to (via the bundle), as
-/// [`Evidence::Probed`] naming the exact mode queried.
-///
-/// The mode's enabled/reset/permanently-* state becomes a `Some(true)`/`Some(false)` finding value;
-/// a "not recognized" (value 0) answer leaves the finding's value `None` but its evidence is still
-/// `Probed` — the terminal *did* answer, just in the negative-unknown way DECRQM allows (FM-C4).
-/// The bundle maps the completing expectation id back to which of the four fields it fills.
-fn store_mode_reply(
-    bundle: &ProbeBundle,
-    id: ExpectationId,
-    report: DecPrivateModeReport,
-    capabilities: &mut Capabilities,
-) {
-    let Some((_, field)) = bundle.modes.iter().find(|(mode_id, _)| *mode_id == id) else {
-        return;
-    };
-    let enabled = report.is_enabled();
-    let evidence_via = decrqm_evidence(report.mode());
-    let finding = Finding::probed(enabled, evidence_via);
-    match field {
-        CapabilityField::SynchronizedOutput => capabilities.synchronized_output = finding,
-        CapabilityField::GraphemeClustering => capabilities.grapheme_clustering = finding,
-        CapabilityField::InBandResize => capabilities.in_band_resize = finding,
-        CapabilityField::BracketedPaste => capabilities.bracketed_paste = finding,
-    }
 }
 
 /// Builds the error for the impossible "wrong reply type completed a typed query" case.

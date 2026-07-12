@@ -16,6 +16,8 @@ use std::time::Duration;
 #[cfg(unix)]
 pub mod betamax;
 #[cfg(unix)]
+pub mod kitty;
+#[cfg(unix)]
 pub mod relay;
 #[cfg(unix)]
 pub mod tmux;

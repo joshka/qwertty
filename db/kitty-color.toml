@@ -48,6 +48,6 @@ name        = "Kitty Color Key Report"
 description = "Reports are preserved syntax today; typed event promotion can be added later."
 direction   = "terminal-to-host"
 refs        = [{ doc = "kitty-color-stack" }]
-fixtures    = []
+fixtures    = ["fixtures/kitty/kitty_color_report_report_capture_kitty.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"

@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;c",
+    "target": "kitty",
+    "version": "kitty(0.39.1)",
+    "xtversion_escaped": "\\eP>|kitty(0.39.1)\\e\\\\"
+  },
+  "query_id": "csi.ansi_mode.query",
+  "reply_escaped": "\\e[4;2$y",
+  "reply_id": "csi.ansi_mode.report",
+  "reply_len": 7,
+  "status": "answered",
+  "target": "kitty",
+  "timestamp": "2026-07-12T08:18:09Z"
+}

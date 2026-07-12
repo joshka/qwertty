@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;c",
+    "target": "kitty",
+    "version": "kitty(0.39.1)",
+    "xtversion_escaped": "\\eP>|kitty(0.39.1)\\e\\\\"
+  },
+  "query_id": "osc.5.special_query",
+  "reply_escaped": "",
+  "reply_id": "osc.5.special_report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "kitty",
+  "timestamp": "2026-07-12T08:18:09Z"
+}

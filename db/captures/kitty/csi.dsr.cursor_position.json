@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;c",
+    "target": "kitty",
+    "version": "kitty(0.39.1)",
+    "xtversion_escaped": "\\eP>|kitty(0.39.1)\\e\\\\"
+  },
+  "query_id": "csi.dsr.cursor_position",
+  "reply_escaped": "\\e[1;1R",
+  "reply_id": "csi.cpr",
+  "reply_len": 6,
+  "status": "answered",
+  "target": "kitty",
+  "timestamp": "2026-07-12T08:18:09Z"
+}

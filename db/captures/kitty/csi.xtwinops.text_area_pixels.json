@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;c",
+    "target": "kitty",
+    "version": "kitty(0.39.1)",
+    "xtversion_escaped": "\\eP>|kitty(0.39.1)\\e\\\\"
+  },
+  "query_id": "csi.xtwinops.text_area_pixels",
+  "reply_escaped": "\\e[4;1000;1680t",
+  "reply_id": "csi.xtwinops.text_area_pixels_report",
+  "reply_len": 14,
+  "status": "answered",
+  "target": "kitty",
+  "timestamp": "2026-07-12T08:18:09Z"
+}

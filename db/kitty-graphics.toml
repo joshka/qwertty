@@ -1,25 +1,52 @@
-# kitty-graphics sequence family. Harvested from the audited reference prototype
-# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+# kitty-graphics sequence family. Initially harvested from the audited reference prototype
+# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2; extended for the G2
+# graphics slice from the kitty graphics protocol spec (sources.toml key `kitty-graphics`), per
+# the approved graphics design (work/phase2/design/11-graphics.md). Response syntax comes from
+# the spec text and live capture only — never invented.
 
 [[sequence]]
 id          = "kitty.graphics.response"
 name        = "Kitty Graphics Response"
-description = "Fixture reports image id 7, placement id 3, and response code `OK`."
+description = "Acknowledges an id-carrying graphics command with `OK`, echoing the image id."
 direction   = "terminal-to-host"
-refs        = [{ doc = "kitty-graphics" }]
-fixtures    = []
+syntax      = "APC G i=<id> ; OK ST"
+refs        = [{ doc = "kitty-graphics", section = "Querying support and available transmission mediums" }]
+fixtures    = ["fixtures/kitty/kitty_graphics_response_report_capture_kitty.seq", "fixtures/kitty/kitty_graphics_response_report_capture_betamax.seq", "fixtures/kitty/kitty_graphics_response_report_capture_wezterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Response form documented verbatim in the spec (`<ESC>_Gi=31;OK<ESC>\\`); placement acknowledgements add `p=<placement id>`. Decoded as `report::KittyGraphicsReport`."
 
 [[sequence]]
 id          = "kitty.graphics.response_error"
 name        = "Kitty Graphics Error Response"
-description = "Fixture preserves a non-OK response code and message text."
+description = "Reports a failed graphics command with an ASCII error message, echoing the image id."
 direction   = "terminal-to-host"
-refs        = [{ doc = "kitty-graphics" }]
+syntax      = "APC G i=<id> ; <error>:<message> ST"
+refs        = [{ doc = "kitty-graphics", section = "Display images on screen" }]
 fixtures    = []
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Error form documented verbatim in the spec (`<ESC>_Gi=<id>;ENOENT:<some detailed error msg><ESC>\\`); message is printable ASCII. Decoded as `report::KittyGraphicsReport`."
+
+[[sequence]]
+id          = "kitty.graphics.query_support"
+name        = "Kitty Graphics Support Query"
+description = "Probes graphics protocol support by query-transmitting one black RGB pixel."
+direction   = "host-to-terminal"
+syntax      = "APC G i=<id> , s=1 , v=1 , a=q , t=d , f=24 ; AAAA ST"
+refs        = [{ doc = "kitty-graphics", section = "Querying support and available transmission mediums" }]
+fixtures    = ["fixtures/kitty/graphics_query_support.seq"]
+replay      = "safe"
+responds    = "kitty.graphics.response"
+notes       = "The spec's own recommended probe, paired with a trailing DA1 request as the no-answer fence. The query action stores nothing terminal-side."
+
+[[sequence]]
+id          = "kitty.graphics.transmit"
+name        = "Kitty Graphics Transmit"
+description = "Fixture transmits a one-pixel RGB image directly, without displaying it."
+direction   = "host-to-terminal"
+syntax      = "APC G a=t , i=<id> , f=<fmt> [, s=<w> , v=<h>] ; <base64 data> ST"
+refs        = [{ doc = "kitty-graphics", section = "Transferring pixel data" }]
+fixtures    = ["fixtures/kitty/graphics_transmit.seq"]
+replay      = "safe"
 
 [[sequence]]
 id          = "kitty.graphics.transmit_display"
@@ -28,8 +55,9 @@ description = "Fixture uses an already-encoded payload and a minimal format hint
 direction   = "host-to-terminal"
 syntax      = "APC G a=T,... ; payload ST"
 refs        = [{ doc = "kitty-graphics" }]
-fixtures    = ["fixtures/kitty/graphics_transmit_display.seq", "fixtures/kitty/negative/policy_denied/graphics_transmit_display.seq"]
+fixtures    = ["fixtures/kitty/graphics_transmit_display.seq"]
 replay      = "safe"
+notes       = "Direct (inline) transmission carries bytes the app already owns and is not policy-gated (design 11 policy split); only the file/temp-file/shared-memory transmission modes are."
 
 [[sequence]]
 id          = "kitty.graphics.place"
@@ -40,6 +68,39 @@ syntax      = "APC G a=p,i=id ; ST"
 refs        = [{ doc = "kitty-graphics" }]
 fixtures    = ["fixtures/kitty/graphics_place.seq"]
 replay      = "safe"
+
+[[sequence]]
+id          = "kitty.graphics.transmit_file"
+name        = "Kitty Graphics Transmit From File"
+description = "Names a file path the terminal itself opens and reads pixel data from."
+direction   = "host-to-terminal"
+syntax      = "APC G a=t , i=<id> , f=<fmt> , t=f ; <base64 path> ST"
+refs        = [{ doc = "kitty-graphics", section = "The transmission medium" }]
+fixtures    = ["fixtures/kitty/graphics_transmit_file.seq", "fixtures/kitty/negative/policy_denied/graphics_transmit_file.seq"]
+replay      = "safe"
+notes       = "A resource-naming read primitive (FM-X4): the terminal opens the named path. Session emit is gated behind the `file transfer` policy gate (design 11)."
+
+[[sequence]]
+id          = "kitty.graphics.transmit_temp_file"
+name        = "Kitty Graphics Transmit From Temporary File"
+description = "Names a temporary file the terminal reads and then deletes."
+direction   = "host-to-terminal"
+syntax      = "APC G a=t , i=<id> , f=<fmt> , t=t ; <base64 path> ST"
+refs        = [{ doc = "kitty-graphics", section = "The transmission medium" }]
+fixtures    = ["fixtures/kitty/graphics_transmit_temp_file.seq", "fixtures/kitty/negative/policy_denied/graphics_transmit_temp_file.seq"]
+replay      = "safe"
+notes       = "Terminals only delete files in known temp directories whose path contains `tty-graphics-protocol` (spec's deletion consent rule). Same policy gate as transmit_file."
+
+[[sequence]]
+id          = "kitty.graphics.transmit_shared_memory"
+name        = "Kitty Graphics Transmit From Shared Memory"
+description = "Names a POSIX shared-memory object the terminal opens, reads, and unlinks."
+direction   = "host-to-terminal"
+syntax      = "APC G a=t , i=<id> , f=<fmt> [, s=<w> , v=<h>] , t=s ; <base64 name> ST"
+refs        = [{ doc = "kitty-graphics", section = "The transmission medium" }]
+fixtures    = ["fixtures/kitty/graphics_transmit_shared_memory.seq", "fixtures/kitty/negative/policy_denied/graphics_transmit_shared_memory.seq"]
+replay      = "safe"
+notes       = "Same resource-naming class and policy gate as transmit_file (design 11)."
 
 [[sequence]]
 id          = "kitty.text_size.scaled"

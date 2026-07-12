@@ -205,6 +205,19 @@ pub enum Error {
         /// The gate whose policy field was off.
         gate: PolicyGate,
     },
+    /// A capability-gated emit was refused because no finding affirms the terminal supports it.
+    ///
+    /// The operation required a [`Finding`](crate::Finding) whose value is a known `true` — a
+    /// probe answer, or conformance evidence — and the finding passed in was unknown or `false`.
+    /// Nothing was written: emitting a protocol into a terminal that never affirmed it leaks raw
+    /// escape bytes onto screens that do not understand them (FM-V4), and *unknown is not
+    /// unsupported* (FM-C4) — probe first (for example
+    /// `TokioTerminalSession::probe_capabilities`), or pass an explicitly constructed finding if
+    /// support was verified out of band.
+    CapabilityUnverified {
+        /// The operation that was refused.
+        operation: &'static str,
+    },
 }
 
 impl Error {
@@ -289,6 +302,9 @@ impl fmt::Display for Error {
             Self::PolicyDenied { gate } => {
                 write!(f, "operation denied by policy: {gate}")
             }
+            Self::CapabilityUnverified { operation } => {
+                write!(f, "no capability finding affirms support for {operation}")
+            }
         }
     }
 }
@@ -306,7 +322,8 @@ impl error::Error for Error {
             | Self::QueryTimeout { .. }
             | Self::Unsupported { .. }
             | Self::DegenerateProcessGroup { .. }
-            | Self::PolicyDenied { .. } => None,
+            | Self::PolicyDenied { .. }
+            | Self::CapabilityUnverified { .. } => None,
         }
     }
 }

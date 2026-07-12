@@ -692,6 +692,27 @@ Reports text area height and width in pixels.
 - Fixtures: [`fixtures/ecma48/csi_xtwinops_text_area_pixels_query.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_query.seq)
 - Conformance: alacritty supported (14); betamax no-reply; foot supported (13); kitty supported (14); tmux supported (14); wezterm supported (8); xterm no-reply
 
+## XTWINOPS: Query Character Cell Size In Pixels (`csi.xtwinops.cell_size`)
+
+Reports the height and width of one character cell in pixels.
+
+- Direction: host-to-terminal
+- Syntax: `CSI 16 t`
+- Responds with: `csi.xtwinops.cell_size_report`
+- References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/ecma48/csi_xtwinops_cell_size_query.seq`](../../../fixtures/ecma48/csi_xtwinops_cell_size_query.seq)
+- Notes: The cells-to-pixels conversion needed to size kitty graphics placements; supported by fewer terminals than CSI 14 t (the kitty graphics spec calls it the more precise, less supported form).
+- Conformance: alacritty no-reply; betamax no-reply; foot supported (9); kitty supported (10); tmux supported (10); wezterm supported (8); xterm no-reply
+
+## XTWINOPS: Character Cell Size In Pixels (`csi.xtwinops.cell_size_report`)
+
+Parsed as a cell-size report; zero dimensions are preserved but never become a geometry.
+
+- Direction: terminal-to-host
+- References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_foot.seq)
+- Notes: reply syntax pending live capture; decoded as `report::CellSizeReport` (`CSI 6 ; height ; width t` per xterm ctlseqs).
+
 ## XTWINOPS: Text Area Size In Pixels (`csi.xtwinops.text_area_pixels_report`)
 
 Decoded as a resize event with `TextAreaPixels` source.

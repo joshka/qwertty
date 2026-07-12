@@ -758,6 +758,28 @@ replay      = "safe"
 responds    = "csi.xtwinops.text_area_pixels_report"
 
 [[sequence]]
+id          = "csi.xtwinops.cell_size"
+name        = "XTWINOPS: Query Character Cell Size In Pixels"
+description = "Reports the height and width of one character cell in pixels."
+direction   = "host-to-terminal"
+syntax      = "CSI 16 t"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_xtwinops_cell_size_query.seq"]
+replay      = "safe"
+responds    = "csi.xtwinops.cell_size_report"
+notes       = "The cells-to-pixels conversion needed to size kitty graphics placements; supported by fewer terminals than CSI 14 t (the kitty graphics spec calls it the more precise, less supported form)."
+
+[[sequence]]
+id          = "csi.xtwinops.cell_size_report"
+name        = "XTWINOPS: Character Cell Size In Pixels"
+description = "Parsed as a cell-size report; zero dimensions are preserved but never become a geometry."
+direction   = "terminal-to-host"
+refs        = [{ doc = "xterm-ctlseqs" }]
+fixtures    = ["fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_kitty.seq", "fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_tmux.seq", "fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_xtwinops_cell_size_report_report_capture_foot.seq"]
+replay      = "safe"
+notes       = "reply syntax pending live capture; decoded as `report::CellSizeReport` (`CSI 6 ; height ; width t` per xterm ctlseqs)."
+
+[[sequence]]
 id          = "csi.xtwinops.text_area_pixels_report"
 name        = "XTWINOPS: Text Area Size In Pixels"
 description = "Decoded as a resize event with `TextAreaPixels` source."

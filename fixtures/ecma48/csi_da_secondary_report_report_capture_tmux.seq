@@ -1,2 +1,2 @@
-#! direction=terminal-to-host origin=capture:tmux-3.7b date=2026-07-07
+#! direction=terminal-to-host origin=capture:tmux-3.7b date=2026-07-12
 \e[>84;0;0c

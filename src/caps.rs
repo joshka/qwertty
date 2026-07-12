@@ -179,10 +179,21 @@ pub enum Evidence {
 /// answer a DECRQM query with "mode not recognized" (`Probed` evidence, `None` value) just as
 /// easily as never answer at all (`Unknown` evidence, `None` value); both are "do not assume this
 /// feature," and a consumer that cares about the difference reads `evidence`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Finding<T> {
     value: Option<T>,
     evidence: Evidence,
+}
+
+impl<T> Default for Finding<T> {
+    /// Returns [`Finding::unknown`]: no value, no evidence.
+    ///
+    /// Implemented by hand rather than derived so the value type needs no `Default` of its own —
+    /// the default finding holds no value at all, and inventing a default measurement (a zero
+    /// [`PixelSize`](crate::PixelSize), say) is exactly what the unknown state exists to avoid.
+    fn default() -> Self {
+        Self::unknown()
+    }
 }
 
 impl<T> Finding<T> {
@@ -715,6 +726,23 @@ pub struct Capabilities {
     pub hyperlinks: Finding<bool>,
     /// Truecolor (24-bit RGB SGR) support, inferred from `COLORTERM` (FM-C12: no query exists).
     pub truecolor: Finding<bool>,
+    /// kitty graphics protocol support, probed with the protocol's own `a=q` query.
+    ///
+    /// `Some(true)` means the terminal answered the query with `OK` — it speaks the protocol.
+    /// `Some(false)` means it answered with an error: it parses graphics escapes but refused the
+    /// canonical one-pixel probe, so emitting images to it is not safe. `None` means silence —
+    /// *unknown*, never unsupported (FM-C4): a multiplexer may simply have swallowed the APC.
+    pub kitty_graphics: Finding<bool>,
+    /// The text-area size in pixels, from the XTWINOPS `CSI 14 t` query.
+    ///
+    /// A terminal that answered with zero dimensions gets a `Probed` finding with a `None` value:
+    /// the zeros are an admission of not knowing, never turned into a fabricated geometry (FM-Z5).
+    pub text_area_pixels: Finding<crate::PixelSize>,
+    /// The character-cell size in pixels, from the XTWINOPS `CSI 16 t` query.
+    ///
+    /// This is the cells-to-pixels conversion needed to size image placements. Zero answers stay
+    /// `None` exactly as in [`text_area_pixels`](Self::text_area_pixels) (FM-Z5).
+    pub cell_size: Finding<crate::PixelSize>,
     /// The terminal's derived identity: program, version, and multiplexer stack (R-CAP-5).
     pub identity: TerminalIdentity,
     /// `Some` when the probe driver detected a dumb terminal and never wrote the bundle
@@ -749,6 +777,9 @@ impl Capabilities {
             && self.primary_device_attributes.is_none()
             && !self.foreground_color.is_known()
             && !self.background_color.is_known()
+            && !self.kitty_graphics.is_known()
+            && !self.text_area_pixels.is_known()
+            && !self.cell_size.is_known()
     }
 }
 
@@ -852,6 +883,14 @@ mod bundle {
         BracketedPaste,
     }
 
+    /// The image id the bundle's kitty graphics `a=q` query uses.
+    ///
+    /// The query action stores nothing and replaces nothing terminal-side, so any nonzero id is
+    /// safe even if an application uses the same one; `u32::MAX` is simply the value least likely
+    /// to collide with app-chosen ids (which typically count up from 1). The id's only job is to
+    /// let the correlator match the response echo (the discriminator).
+    const GRAPHICS_PROBE_IMAGE_ID: u32 = u32::MAX;
+
     /// Builds the probe bundle's request bytes in the fixed order the fence semantics depend on:
     /// DA1 **last**, so it is the fence every other query races against.
     pub(crate) fn probe_bundle_commands() -> crate::CommandBuffer {
@@ -859,6 +898,11 @@ mod bundle {
         buffer
             .command(crate::commands::terminal::request_xtversion())
             .command(crate::commands::terminal::request_kitty_keyboard_flags())
+            .command(crate::commands::graphics::kitty::query_support(
+                GRAPHICS_PROBE_IMAGE_ID,
+            ))
+            .command(crate::commands::terminal::request_text_area_pixels())
+            .command(crate::commands::terminal::request_cell_size())
             .command(crate::commands::osc::request_foreground_color())
             .command(crate::commands::osc::request_background_color());
         for probe in PROBE_MODES {
@@ -879,6 +923,9 @@ mod bundle {
         fence: Option<crate::correlate::ExpectationId>,
         xtversion: Option<crate::correlate::ExpectationId>,
         kitty: Option<crate::correlate::ExpectationId>,
+        graphics: Option<crate::correlate::ExpectationId>,
+        text_area_pixels: Option<crate::correlate::ExpectationId>,
+        cell_size: Option<crate::correlate::ExpectationId>,
         foreground: Option<crate::correlate::ExpectationId>,
         background: Option<crate::correlate::ExpectationId>,
         modes: Vec<(crate::correlate::ExpectationId, CapabilityField)>,
@@ -905,6 +952,20 @@ mod bundle {
             let kitty = Some(register(
                 correlator,
                 crate::correlate::Expectation::KittyKeyboardFlags,
+            ));
+            let graphics = Some(register(
+                correlator,
+                crate::correlate::Expectation::KittyGraphics {
+                    image_id: GRAPHICS_PROBE_IMAGE_ID,
+                },
+            ));
+            let text_area_pixels = Some(register(
+                correlator,
+                crate::correlate::Expectation::TextAreaPixels,
+            ));
+            let cell_size = Some(register(
+                correlator,
+                crate::correlate::Expectation::CellSize,
             ));
             let foreground = Some(register(
                 correlator,
@@ -937,6 +998,9 @@ mod bundle {
                 fence,
                 xtversion,
                 kitty,
+                graphics,
+                text_area_pixels,
+                cell_size,
                 foreground,
                 background,
                 modes,
@@ -949,6 +1013,9 @@ mod bundle {
             ids.extend(self.fence);
             ids.extend(self.xtversion);
             ids.extend(self.kitty);
+            ids.extend(self.graphics);
+            ids.extend(self.text_area_pixels);
+            ids.extend(self.cell_size);
             ids.extend(self.foreground);
             ids.extend(self.background);
             ids.extend(self.modes.iter().map(|(id, _)| *id));
@@ -1024,6 +1091,22 @@ mod bundle {
             }
             crate::correlate::Reply::PrimaryDeviceAttributes(attrs) => {
                 capabilities.primary_device_attributes = Some(attrs.into());
+            }
+            crate::correlate::Reply::KittyGraphics(report) => {
+                // OK means the terminal loaded the probe's one-pixel query: it speaks the
+                // protocol. An error response still proves it parses graphics escapes, but
+                // refusing the canonical probe means emitting images is not safe — recorded as a
+                // probed `false`.
+                capabilities.kitty_graphics =
+                    Finding::probed(Some(report.is_ok()), "kitty graphics a=q");
+            }
+            crate::correlate::Reply::TextAreaPixels(report) => {
+                // `pixel_size()` is `None` for a zero answer: Probed evidence, unknown value
+                // (FM-Z5 — answered zeros is an admission, not a measurement).
+                capabilities.text_area_pixels = Finding::probed(report.pixel_size(), "CSI 14 t");
+            }
+            crate::correlate::Reply::CellSize(report) => {
+                capabilities.cell_size = Finding::probed(report.pixel_size(), "CSI 16 t");
             }
             // The bundle never registers CursorPosition/TerminalStatus expectations, so those reply
             // variants cannot appear here.

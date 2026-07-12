@@ -421,6 +421,115 @@ impl<D: TerminalDevice> TerminalSession<D> {
         self.command(commands::osc::set_clipboard(selection, data))
     }
 
+    /// Transmits a kitty graphics image by naming a **file the terminal opens**, through both the
+    /// [`Policy`] file-transfer gate and a capability check (FM-X4, R-CAP-4).
+    ///
+    /// When the policy allows [`PolicyGate::FileTransfer`] **and** `support` is a known-`true`
+    /// finding, this emits [`commands::graphics::kitty::transmit_file`] through the same
+    /// immediate-write path as [`command`](Self::command). `support` is the
+    /// [`kitty_graphics`](crate::Capabilities::kitty_graphics) finding from a capability probe
+    /// (or conformance evidence the caller trusts); requiring it here keeps graphics escapes out
+    /// of terminals that never affirmed the protocol. A caller that has verified support out of
+    /// band constructs its own finding (for example
+    /// `Finding::probed(Some(true), "out-of-band")`) — the escape hatch is explicit, never
+    /// silent.
+    ///
+    /// The file-naming transmission modes are gated where inline (direct) transmission is not
+    /// because the escape carries a **path the terminal itself opens and reads**: attacker-
+    /// influenced output could steer a supporting terminal into reading any readable file — a
+    /// local-file-read and exfiltration primitive, which is exactly the attack class the
+    /// [`file transfer`](PolicyGate::FileTransfer) gate exists for. The default
+    /// [`Policy::restricted`] keeps it off.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::PolicyDenied`] with [`PolicyGate::FileTransfer`] when the
+    /// policy has file transfer off, and [`terminal::Error::CapabilityUnverified`] when `support`
+    /// is not a known `true` — in both cases **without writing anything**. Otherwise returns the
+    /// terminal device's write error if the encoded bytes cannot be written.
+    pub fn transmit_kitty_file(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image_id: u32,
+        format: commands::graphics::kitty::Format,
+        size: Option<commands::graphics::kitty::ImageSize>,
+        path: &[u8],
+    ) -> terminal::Result<&mut Self> {
+        self.check_kitty_resource_gates(support, "kitty graphics file transmission")?;
+        self.command(commands::graphics::kitty::transmit_file(
+            image_id, format, size, path,
+        ))
+    }
+
+    /// Transmits a kitty graphics image by naming a **temporary file the terminal reads and
+    /// deletes**, through both the [`Policy`] file-transfer gate and a capability check.
+    ///
+    /// Identical gating to [`transmit_kitty_file`](Self::transmit_kitty_file); the emitted
+    /// command is [`commands::graphics::kitty::transmit_temp_file`]. The spec's deletion consent
+    /// rule applies: the file should live in a known temporary directory and its path should
+    /// contain `tty-graphics-protocol`.
+    ///
+    /// # Errors
+    ///
+    /// As [`transmit_kitty_file`](Self::transmit_kitty_file): `PolicyDenied`,
+    /// `CapabilityUnverified`, or the device write error.
+    pub fn transmit_kitty_temp_file(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image_id: u32,
+        format: commands::graphics::kitty::Format,
+        size: Option<commands::graphics::kitty::ImageSize>,
+        path: &[u8],
+    ) -> terminal::Result<&mut Self> {
+        self.check_kitty_resource_gates(support, "kitty graphics temp-file transmission")?;
+        self.command(commands::graphics::kitty::transmit_temp_file(
+            image_id, format, size, path,
+        ))
+    }
+
+    /// Transmits a kitty graphics image by naming a **shared-memory object the terminal opens**,
+    /// through both the [`Policy`] file-transfer gate and a capability check.
+    ///
+    /// Identical gating to [`transmit_kitty_file`](Self::transmit_kitty_file); the emitted
+    /// command is [`commands::graphics::kitty::transmit_shared_memory`]. Naming an IPC object the
+    /// terminal opens is the same resource-naming read primitive as naming a file.
+    ///
+    /// # Errors
+    ///
+    /// As [`transmit_kitty_file`](Self::transmit_kitty_file): `PolicyDenied`,
+    /// `CapabilityUnverified`, or the device write error.
+    pub fn transmit_kitty_shared_memory(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image_id: u32,
+        format: commands::graphics::kitty::Format,
+        size: Option<commands::graphics::kitty::ImageSize>,
+        name: &[u8],
+    ) -> terminal::Result<&mut Self> {
+        self.check_kitty_resource_gates(support, "kitty graphics shared-memory transmission")?;
+        self.command(commands::graphics::kitty::transmit_shared_memory(
+            image_id, format, size, name,
+        ))
+    }
+
+    /// Applies the two gates every kitty resource-naming transmission passes: policy first (the
+    /// security gate is never bypassed by an unknown capability), then the capability finding.
+    fn check_kitty_resource_gates(
+        &self,
+        support: &crate::Finding<bool>,
+        operation: &'static str,
+    ) -> terminal::Result<()> {
+        if !self.policy.allows(PolicyGate::FileTransfer) {
+            return Err(terminal::Error::PolicyDenied {
+                gate: PolicyGate::FileTransfer,
+            });
+        }
+        if support.value_copied() != Some(true) {
+            return Err(terminal::Error::CapabilityUnverified { operation });
+        }
+        Ok(())
+    }
+
     /// Writes one terminal command immediately.
     ///
     /// Commands, raw bytes, and text are written in the order their session methods are called.
@@ -1098,15 +1207,17 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// Probes terminal capabilities with the DA1-fenced bundle, blocking without an async runtime.
     ///
     /// This is the synchronous mirror of `TokioTerminalSession::probe_capabilities` (design 03):
-    /// one write of XTVERSION, the kitty keyboard flags query, OSC 10/11, and the DEC private
-    /// mode queries (synchronized output 2026, grapheme clustering 2027, in-band resize 2048,
-    /// bracketed paste 2004), with Primary Device Attributes (DA1) last as the fence — a terminal
-    /// that answers DA1 has finished answering everything it is going to answer, so the fence
-    /// firing ends the probe without waiting out the full timeout on a terminal that replied fast.
-    /// A terminal that never answers DA1 is bounded by `timeout` instead (FM-C6: one timeout for
-    /// the whole bundle, not one per query). It shares its bundle contents, reply-to-field
-    /// mapping, and env-inferred fallbacks (hyperlinks, truecolor, identity) with the Tokio
-    /// driver via `crate::caps` — the two can never drift silently out of sync with each other.
+    /// one write of XTVERSION, the kitty keyboard flags query, the kitty graphics support query
+    /// (`a=q`), the XTWINOPS pixel-geometry queries (`CSI 14 t` / `CSI 16 t`), OSC 10/11, and the
+    /// DEC private mode queries (synchronized output 2026, grapheme clustering 2027, in-band
+    /// resize 2048, bracketed paste 2004), with Primary Device Attributes (DA1) last as the fence —
+    /// a terminal that answers DA1 has finished answering everything it is going to answer, so
+    /// the fence firing ends the probe without waiting out the full timeout on a terminal that
+    /// replied fast. A terminal that never answers DA1 is bounded by `timeout` instead (FM-C6:
+    /// one timeout for the whole bundle, not one per query). It shares its bundle contents,
+    /// reply-to-field mapping, and env-inferred fallbacks (hyperlinks, truecolor, identity)
+    /// with the Tokio driver via `crate::caps` — the two can never drift silently out of sync
+    /// with each other.
     ///
     /// Every unanswered field is `None`, meaning *unknown*, never unsupported (FM-C4): a DECRQM
     /// "mode not recognized" answer is `None` too, and a fully silent terminal yields an
@@ -1661,6 +1772,90 @@ mod tests {
         // framing.
         let mut expected = Vec::new();
         osc::set_clipboard(ClipboardSelection::Clipboard, b"Hello").encode(&mut expected);
+        assert_eq!(fake_terminal.output().expect("output"), expected);
+    }
+
+    #[test]
+    fn kitty_resource_transmit_denied_by_default_policy_writes_zero_bytes() {
+        use crate::commands::graphics::kitty::Format;
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // Even a probed-true capability finding cannot bypass the policy gate: the default
+        // restricted() policy has file transfer off.
+        let support = crate::Finding::probed(Some(true), "test");
+        let result = session.transmit_kitty_file(&support, 1, Format::Png, None, b"/etc/passwd");
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::PolicyDenied {
+                    gate: PolicyGate::FileTransfer
+                })
+            ),
+            "expected PolicyDenied, got {result:?}",
+        );
+        assert_eq!(
+            fake_terminal.output().expect("output"),
+            Vec::<u8>::new(),
+            "a denied file transmission must not emit any bytes",
+        );
+    }
+
+    #[test]
+    fn kitty_resource_transmit_requires_a_known_true_finding() {
+        use crate::commands::graphics::kitty::Format;
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+        session.set_policy(Policy::trusted());
+
+        // Policy allows, but no finding affirms support: unknown is not unsupported, and it is
+        // also not permission to emit (R-CAP-4 / FM-V4).
+        for support in [
+            crate::Finding::unknown(),
+            crate::Finding::probed(Some(false), "test"),
+            crate::Finding::probed(None, "test"),
+        ] {
+            let result =
+                session.transmit_kitty_shared_memory(&support, 1, Format::Png, None, b"/shm");
+            assert!(
+                matches!(result, Err(Error::CapabilityUnverified { .. })),
+                "expected CapabilityUnverified for {support:?}, got {result:?}",
+            );
+        }
+        assert_eq!(fake_terminal.output().expect("output"), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn kitty_resource_transmit_allowed_writes_exact_command_bytes_and_chains() {
+        use crate::commands::graphics::kitty::Format;
+        use crate::commands::graphics::{self};
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+        session.set_policy(Policy::trusted());
+        let support = crate::Finding::probed(Some(true), "kitty graphics a=q");
+
+        session
+            .transmit_kitty_file(&support, 1, Format::Png, None, b"/tmp/a.png")
+            .expect("file transmission allowed")
+            .transmit_kitty_temp_file(&support, 2, Format::Png, None, b"/tmp/b.png")
+            .expect("temp-file transmission allowed")
+            .transmit_kitty_shared_memory(&support, 3, Format::Png, None, b"/shm-c")
+            .expect("shared-memory transmission allowed")
+            .flush()
+            .expect("flush");
+
+        // The exact bytes are the three command builders' own encodings, in call order — the
+        // session gate adds no framing.
+        let mut expected = Vec::new();
+        graphics::kitty::transmit_file(1, Format::Png, None, b"/tmp/a.png").encode(&mut expected);
+        graphics::kitty::transmit_temp_file(2, Format::Png, None, b"/tmp/b.png")
+            .encode(&mut expected);
+        graphics::kitty::transmit_shared_memory(3, Format::Png, None, b"/shm-c")
+            .encode(&mut expected);
         assert_eq!(fake_terminal.output().expect("output"), expected);
     }
 

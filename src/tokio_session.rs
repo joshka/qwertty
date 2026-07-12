@@ -1014,6 +1014,11 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///   [`in_band_resize`](Capabilities::in_band_resize),
     ///   [`bracketed_paste`](Capabilities::bracketed_paste));
     /// - kitty keyboard flags (`CSI ? u`) → [`kitty_keyboard`](Capabilities::kitty_keyboard);
+    /// - the kitty graphics support query (`APC G … a=q … ST`, the protocol spec's own probe) →
+    ///   [`kitty_graphics`](Capabilities::kitty_graphics);
+    /// - XTWINOPS text-area and cell pixel sizes (`CSI 14 t`, `CSI 16 t`) →
+    ///   [`text_area_pixels`](Capabilities::text_area_pixels) /
+    ///   [`cell_size`](Capabilities::cell_size), zero answers staying unknown (FM-Z5);
     /// - OSC 10 / OSC 11 → [`foreground_color`](Capabilities::foreground_color) /
     ///   [`background_color`](Capabilities::background_color);
     /// - DA1 (`CSI c`), the fence →

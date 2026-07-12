@@ -4,7 +4,7 @@ target = "tmux"
 version = "tmux 3.7b"
 version_source = "xtversion"
 adapter = "pty-headless"
-captured = "2026-07-12T08:29:20Z"
+captured = "2026-07-12T14:51:52Z"
 runner = "qdb 0.0.0"
 geometry = { cols = 120, rows = 40 }
 
@@ -57,6 +57,12 @@ verdict = "supported"
 reply_len = 14
 
 [[result]]
+id = "csi.xtwinops.cell_size"
+reply_id = "csi.xtwinops.cell_size_report"
+verdict = "supported"
+reply_len = 10
+
+[[result]]
 id = "iterm2.osc4.default_background_query"
 reply_id = "iterm2.osc4.default_background_report"
 verdict = "no-reply"
@@ -89,6 +95,12 @@ reply_len = 15
 [[result]]
 id = "kitty.color.query"
 reply_id = "kitty.color.report"
+verdict = "no-reply"
+reply_len = 0
+
+[[result]]
+id = "kitty.graphics.query_support"
+reply_id = "kitty.graphics.response"
 verdict = "no-reply"
 reply_len = 0
 

@@ -2,9 +2,10 @@
 //!
 //! A report is a host-visible reply a terminal sends in answer to a query: a cursor position
 //! report, a device status report, primary device attributes, DEC private mode reports, an
-//! XTVERSION report, and OSC colour reports. Each type parses one complete syntax token — a CSI
-//! [`ControlSequence`], a DCS string, or an OSC payload from the [syntax layer](crate::SyntaxToken)
-//! — into a typed value, rejecting anything that is not exactly the report shape it recognizes.
+//! XTVERSION report, OSC colour reports, kitty graphics responses, and XTWINOPS pixel-geometry
+//! reports. Each type parses one complete syntax token — a CSI [`ControlSequence`], a DCS/APC
+//! string, or an OSC payload from the [syntax layer](crate::SyntaxToken) — into a typed value,
+//! rejecting anything that is not exactly the report shape it recognizes.
 //!
 //! These parsers are **pure and side-effect-free**: they read a syntax token and return a typed
 //! value or `None`. They do not read a terminal, prove which request caused a report, or apply
@@ -24,7 +25,7 @@
 
 use crate::ProtocolPosition;
 use crate::caps::Rgb;
-use crate::syntax::{ControlSequence, StringSequence};
+use crate::syntax::{ControlSequence, StringKind, StringSequence};
 
 /// A parsed terminal cursor position report.
 ///
@@ -632,6 +633,372 @@ impl OscColorReport {
     }
 }
 
+/// A parsed kitty graphics response.
+///
+/// A terminal that speaks the kitty graphics protocol answers every id-carrying graphics command —
+/// a transmission, a placement, or the
+/// [`query_support`](crate::commands::graphics::kitty::query_support) probe — with an APC of the
+/// form `APC G <keys> ; <message> ST`, where the keys echo the ids from the command (`i=<image
+/// id>`, and `p=<placement id>` / `I=<image number>` when those were given) and the message is `OK`
+/// on success or an ASCII error string such as `ENOENT:…` (kitty graphics protocol spec, "Querying
+/// support" and "Display images on screen").
+///
+/// The echoed image id is the discriminator the query correlator matches on, exactly as the DECRQM
+/// mode number is for private-mode reports: two graphics commands in flight with different ids can
+/// never complete each other's query.
+///
+/// # Accepted shape
+///
+/// The token must be an APC string sequence whose payload is `G`, then a comma-separated list of
+/// `key=value` pairs, then `;`, then the message. Key values for `i`, `p`, and `I` must be decimal
+/// and fit `u32`; unrecognized keys are tolerated and skipped (the protocol grows keys), but a
+/// malformed pair (no `=`, or a bad known-key value) rejects. The message must be non-empty,
+/// ASCII, and printable (the spec constrains it to printable characters and spaces). Anything
+/// else — a non-APC token, a payload without the leading `G` or the `;`, or a non-ASCII message —
+/// is rejected with `None`.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::report::KittyGraphicsReport;
+/// use qwertty::{SyntaxParser, SyntaxToken};
+///
+/// let mut parser = SyntaxParser::new();
+/// let tokens = parser.feed(b"\x1b_Gi=31;OK\x1b\\");
+/// let SyntaxToken::Apc(apc) = &tokens[0] else {
+///     panic!("expected an APC token");
+/// };
+///
+/// let report = KittyGraphicsReport::from_string_sequence(apc).expect("graphics response");
+/// assert_eq!(report.image_id(), Some(31));
+/// assert!(report.is_ok());
+/// ```
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct KittyGraphicsReport {
+    image_id: Option<u32>,
+    image_number: Option<u32>,
+    placement_id: Option<u32>,
+    message: String,
+}
+
+impl KittyGraphicsReport {
+    /// Creates a kitty graphics response value.
+    #[must_use]
+    pub fn new(
+        image_id: Option<u32>,
+        image_number: Option<u32>,
+        placement_id: Option<u32>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            image_id,
+            image_number,
+            placement_id,
+            message: message.into(),
+        }
+    }
+
+    /// Parses a kitty graphics response from a complete APC string sequence.
+    ///
+    /// Returns `None` when the sequence is not exactly the response shape: see the
+    /// [type docs](Self#accepted-shape).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use qwertty::report::KittyGraphicsReport;
+    /// use qwertty::{SyntaxParser, SyntaxToken};
+    ///
+    /// let mut parser = SyntaxParser::new();
+    /// // A non-graphics APC (no leading `G`) is not a graphics response: rejected.
+    /// let tokens = parser.feed(b"\x1b_zpayload\x1b\\");
+    /// let SyntaxToken::Apc(apc) = &tokens[0] else {
+    ///     panic!("expected an APC token");
+    /// };
+    /// assert!(KittyGraphicsReport::from_string_sequence(apc).is_none());
+    /// ```
+    #[must_use]
+    pub fn from_string_sequence(apc: &StringSequence) -> Option<Self> {
+        if apc.kind() != StringKind::Apc {
+            return None;
+        }
+        let payload = apc.payload().strip_prefix(b"G")?;
+        let (keys, message) = split_once(payload, b';')?;
+
+        let mut image_id = None;
+        let mut image_number = None;
+        let mut placement_id = None;
+        if !keys.is_empty() {
+            for pair in keys.split(|&byte| byte == b',') {
+                let (key, value) = split_once(pair, b'=')?;
+                match key {
+                    b"i" => image_id = Some(parse_u32(value)?),
+                    b"I" => image_number = Some(parse_u32(value)?),
+                    b"p" => placement_id = Some(parse_u32(value)?),
+                    // The protocol grows keys; an unknown key does not reject the response.
+                    _ => {}
+                }
+            }
+        }
+
+        // The spec constrains the message to "printable characters and spaces"; an empty or
+        // non-printable message is not a graphics response.
+        if message.is_empty()
+            || !message
+                .iter()
+                .all(|&byte| byte.is_ascii_graphic() || byte == b' ')
+        {
+            return None;
+        }
+        let message = std::str::from_utf8(message).ok()?;
+
+        Some(Self::new(image_id, image_number, placement_id, message))
+    }
+
+    /// Returns the echoed image id (`i=…`), the correlator's discriminator.
+    #[must_use]
+    pub const fn image_id(&self) -> Option<u32> {
+        self.image_id
+    }
+
+    /// Returns the echoed image number (`I=…`), present when the command used a number instead of
+    /// an id; the terminal's reply then also carries `i=` with the id it allocated.
+    #[must_use]
+    pub const fn image_number(&self) -> Option<u32> {
+        self.image_number
+    }
+
+    /// Returns the echoed placement id (`p=…`), present when the command gave one.
+    #[must_use]
+    pub const fn placement_id(&self) -> Option<u32> {
+        self.placement_id
+    }
+
+    /// Returns `true` when the terminal reported success (`OK`).
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        self.message == "OK"
+    }
+
+    /// Returns the response message verbatim: `OK`, or an error string such as
+    /// `ENOENT:image not found`.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// A parsed text-area pixel-size report (XTWINOPS `CSI 4 ; height ; width t`).
+///
+/// A terminal sends this in answer to the `CSI 14 t` window-operation query
+/// ([`request_text_area_pixels`](crate::commands::terminal::request_text_area_pixels)). The
+/// reported values are the size of the text area in pixels, height first.
+///
+/// # Zeros are preserved, not trusted (FM-Z5)
+///
+/// Some terminal stacks answer this query with zero dimensions — the transport answered, but the
+/// value is not a real measurement. This parser preserves what the terminal said
+/// ([`height`](Self::height)/[`width`](Self::width) return the raw values);
+/// [`pixel_size`](Self::pixel_size) is the honest accessor, returning `None` unless both
+/// dimensions are nonzero, so a zero report never becomes a fabricated geometry.
+///
+/// # Accepted shape
+///
+/// - final byte `t`, no private markers, no intermediates;
+/// - exactly three `;`-separated decimal parameters, each fitting `u16`;
+/// - the first parameter exactly `4` (the XTWINOPS reply discriminator).
+///
+/// Anything else is rejected with `None`. The in-band resize report (`CSI 48 ; … t`, mode 2048)
+/// has a different discriminator and decodes as a [`ResizeEvent`](crate::ResizeEvent), not here.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::report::TextAreaPixelsReport;
+/// use qwertty::{PixelSize, SyntaxParser, SyntaxToken};
+///
+/// let mut parser = SyntaxParser::new();
+/// let tokens = parser.feed(b"\x1b[4;1000;1680t");
+/// let SyntaxToken::Csi(csi) = &tokens[0] else {
+///     panic!("expected a CSI token");
+/// };
+///
+/// let report = TextAreaPixelsReport::from_control_sequence(csi).expect("text-area report");
+/// assert_eq!(report.pixel_size(), Some(PixelSize::new(1680, 1000)));
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TextAreaPixelsReport {
+    height: u16,
+    width: u16,
+}
+
+impl TextAreaPixelsReport {
+    /// Creates a text-area pixel-size report value (wire order: height, then width).
+    #[must_use]
+    pub const fn new(height: u16, width: u16) -> Self {
+        Self { height, width }
+    }
+
+    /// Parses a text-area pixel-size report from a complete CSI control sequence.
+    ///
+    /// Returns `None` when the sequence is not exactly `CSI 4 ; height ; width t`; see the
+    /// [type docs](Self#accepted-shape).
+    #[must_use]
+    pub fn from_control_sequence(csi: &ControlSequence) -> Option<Self> {
+        let (height, width) = parse_xtwinops_report(csi, b"4")?;
+        Some(Self::new(height, width))
+    }
+
+    /// Returns the reported text-area height in pixels, verbatim (zero is preserved).
+    #[must_use]
+    pub const fn height(self) -> u16 {
+        self.height
+    }
+
+    /// Returns the reported text-area width in pixels, verbatim (zero is preserved).
+    #[must_use]
+    pub const fn width(self) -> u16 {
+        self.width
+    }
+
+    /// Returns the reported size as a [`PixelSize`](crate::PixelSize), or `None` when either
+    /// dimension is zero.
+    ///
+    /// This is the honesty rule (FM-Z5): a zero dimension is a terminal admitting it has no real
+    /// measurement, so it never becomes a usable geometry value.
+    #[must_use]
+    pub const fn pixel_size(self) -> Option<crate::PixelSize> {
+        if self.height == 0 || self.width == 0 {
+            return None;
+        }
+        Some(crate::PixelSize::new(self.width, self.height))
+    }
+}
+
+/// A parsed character-cell pixel-size report (XTWINOPS `CSI 6 ; height ; width t`).
+///
+/// A terminal sends this in answer to the `CSI 16 t` window-operation query
+/// ([`request_cell_size`](crate::commands::terminal::request_cell_size)). The reported values are
+/// the size of one character cell in pixels, height first — the geometry an application needs to
+/// convert between cells and pixels when sizing image placements.
+///
+/// Zeros are preserved but never trusted, exactly as in [`TextAreaPixelsReport`]:
+/// [`pixel_size`](Self::pixel_size) returns `None` unless both dimensions are nonzero (FM-Z5).
+///
+/// # Accepted shape
+///
+/// As [`TextAreaPixelsReport`](TextAreaPixelsReport#accepted-shape), with first parameter
+/// exactly `6`.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::report::CellSizeReport;
+/// use qwertty::{PixelSize, SyntaxParser, SyntaxToken};
+///
+/// let mut parser = SyntaxParser::new();
+/// let tokens = parser.feed(b"\x1b[6;25;14t");
+/// let SyntaxToken::Csi(csi) = &tokens[0] else {
+///     panic!("expected a CSI token");
+/// };
+///
+/// let report = CellSizeReport::from_control_sequence(csi).expect("cell-size report");
+/// assert_eq!(report.pixel_size(), Some(PixelSize::new(14, 25)));
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CellSizeReport {
+    height: u16,
+    width: u16,
+}
+
+impl CellSizeReport {
+    /// Creates a cell pixel-size report value (wire order: height, then width).
+    #[must_use]
+    pub const fn new(height: u16, width: u16) -> Self {
+        Self { height, width }
+    }
+
+    /// Parses a cell pixel-size report from a complete CSI control sequence.
+    ///
+    /// Returns `None` when the sequence is not exactly `CSI 6 ; height ; width t`; see the
+    /// [type docs](Self#accepted-shape).
+    #[must_use]
+    pub fn from_control_sequence(csi: &ControlSequence) -> Option<Self> {
+        let (height, width) = parse_xtwinops_report(csi, b"6")?;
+        Some(Self::new(height, width))
+    }
+
+    /// Returns the reported cell height in pixels, verbatim (zero is preserved).
+    #[must_use]
+    pub const fn height(self) -> u16 {
+        self.height
+    }
+
+    /// Returns the reported cell width in pixels, verbatim (zero is preserved).
+    #[must_use]
+    pub const fn width(self) -> u16 {
+        self.width
+    }
+
+    /// Returns the reported size as a [`PixelSize`](crate::PixelSize), or `None` when either
+    /// dimension is zero (FM-Z5: zeros are an admission, not a measurement).
+    #[must_use]
+    pub const fn pixel_size(self) -> Option<crate::PixelSize> {
+        if self.height == 0 || self.width == 0 {
+            return None;
+        }
+        Some(crate::PixelSize::new(self.width, self.height))
+    }
+}
+
+/// Parses an XTWINOPS size report `CSI <op> ; height ; width t` with the given operation
+/// discriminator, returning `(height, width)`.
+///
+/// The shape rule shared by the text-area (`4`) and cell-size (`6`) reports: final byte `t`, no
+/// private markers or intermediates, exactly three decimal parameters, the first byte-equal to
+/// `op`. Zero dimensions are accepted and preserved; the report types' `pixel_size` accessors
+/// apply the zeros-are-unknown honesty rule.
+fn parse_xtwinops_report(csi: &ControlSequence, op: &[u8]) -> Option<(u16, u16)> {
+    let params = csi.params();
+    if params.final_byte() != b't'
+        || !params.private_markers().is_empty()
+        || !params.intermediates().is_empty()
+    {
+        return None;
+    }
+
+    let mut fields = params.param_bytes().split(|&byte| byte == b';');
+    if fields.next()? != op {
+        return None;
+    }
+    let height = parse_u16(fields.next()?)?;
+    let width = parse_u16(fields.next()?)?;
+    if fields.next().is_some() {
+        return None;
+    }
+    Some((height, width))
+}
+
+/// Parses a non-empty run of ASCII decimal digits into a `u32`, allowing zero.
+///
+/// Returns `None` for an empty field, a non-digit byte, or a value that overflows `u32`. The kitty
+/// graphics id space is the full 32-bit range, so this is the graphics-report analogue of
+/// [`parse_u16`].
+fn parse_u32(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut value: u32 = 0;
+    for &byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        let digit = u32::from(byte - b'0');
+        value = value.checked_mul(10)?.checked_add(digit)?;
+    }
+    Some(value)
+}
+
 /// Splits `bytes` at the first occurrence of `sep`, returning the parts around it, or `None` when
 /// `sep` is absent.
 fn split_once(bytes: &[u8], sep: u8) -> Option<(&[u8], &[u8])> {
@@ -984,6 +1351,161 @@ mod tests {
                 .rgb(),
             Rgb::new(0xf0, 0x00, 0x80)
         );
+    }
+
+    /// Parses `bytes` through the syntax layer and returns the single APC token it must contain.
+    fn apc(bytes: &[u8]) -> StringSequence {
+        let mut parser = SyntaxParser::new();
+        let mut tokens = parser.feed(bytes);
+        tokens.extend(parser.finish());
+        assert_eq!(tokens.len(), 1, "expected exactly one token from {bytes:?}");
+        match tokens.into_iter().next().expect("one token") {
+            SyntaxToken::Apc(apc) => apc,
+            other => panic!("expected an APC token, got {other:?}"),
+        }
+    }
+
+    // --- kitty graphics response ----------------------------------------------------------------
+
+    #[test]
+    fn kitty_graphics_report_parses_ok() {
+        let report =
+            KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=31;OK\x1b\\")).expect("OK");
+        assert_eq!(report.image_id(), Some(31));
+        assert_eq!(report.placement_id(), None);
+        assert_eq!(report.image_number(), None);
+        assert!(report.is_ok());
+        assert_eq!(report.message(), "OK");
+    }
+
+    #[test]
+    fn kitty_graphics_report_parses_placement_and_number_keys() {
+        let report = KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=7,p=3;OK\x1b\\"))
+            .expect("placement echo");
+        assert_eq!(report.image_id(), Some(7));
+        assert_eq!(report.placement_id(), Some(3));
+
+        // An image-number transmission is answered with both the allocated id and the number.
+        let report = KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=99,I=13;OK\x1b\\"))
+            .expect("number echo");
+        assert_eq!(report.image_id(), Some(99));
+        assert_eq!(report.image_number(), Some(13));
+    }
+
+    #[test]
+    fn kitty_graphics_report_parses_error_message() {
+        let report = KittyGraphicsReport::from_string_sequence(&apc(
+            b"\x1b_Gi=10;ENOENT:image not found\x1b\\",
+        ))
+        .expect("error response");
+        assert_eq!(report.image_id(), Some(10));
+        assert!(!report.is_ok());
+        assert_eq!(report.message(), "ENOENT:image not found");
+    }
+
+    #[test]
+    fn kitty_graphics_report_tolerates_unknown_keys() {
+        // The protocol grows keys; an unknown key must not reject the response.
+        let report = KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=5,zz=9;OK\x1b\\"))
+            .expect("unknown key tolerated");
+        assert_eq!(report.image_id(), Some(5));
+    }
+
+    #[test]
+    fn kitty_graphics_report_parses_max_u32_id() {
+        let report =
+            KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=4294967295;OK\x1b\\"))
+                .expect("max id");
+        assert_eq!(report.image_id(), Some(u32::MAX));
+    }
+
+    #[test]
+    fn kitty_graphics_report_rejects_malformed() {
+        // No leading G.
+        assert!(KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_zi=1;OK\x1b\\")).is_none());
+        // No `;` separator.
+        assert!(KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=1\x1b\\")).is_none());
+        // Empty message.
+        assert!(KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=1;\x1b\\")).is_none());
+        // Malformed key pair (no `=`).
+        assert!(KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi;OK\x1b\\")).is_none());
+        // Overflowing id.
+        assert!(
+            KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=4294967296;OK\x1b\\"))
+                .is_none()
+        );
+        // Non-decimal id.
+        assert!(KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=x;OK\x1b\\")).is_none());
+        // Non-printable message byte.
+        assert!(
+            KittyGraphicsReport::from_string_sequence(&apc(b"\x1b_Gi=1;O\x01K\x1b\\")).is_none()
+        );
+    }
+
+    #[test]
+    fn kitty_graphics_report_rejects_non_apc_strings() {
+        // The same payload in a DCS frame is not a graphics response.
+        assert!(KittyGraphicsReport::from_string_sequence(&dcs(b"\x1bPGi=1;OK\x1b\\")).is_none());
+    }
+
+    // --- XTWINOPS pixel geometry ----------------------------------------------------------------
+
+    #[test]
+    fn text_area_pixels_report_parses_and_orders_dimensions() {
+        // The kitty capture (db/captures/kitty/csi.xtwinops.text_area_pixels.json): height 1000,
+        // width 1680.
+        let report = TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[4;1000;1680t"))
+            .expect("text-area report");
+        assert_eq!(report.height(), 1000);
+        assert_eq!(report.width(), 1680);
+        assert_eq!(report.pixel_size(), Some(crate::PixelSize::new(1680, 1000)));
+    }
+
+    #[test]
+    fn cell_size_report_parses_and_orders_dimensions() {
+        let report =
+            CellSizeReport::from_control_sequence(&csi(b"\x1b[6;25;14t")).expect("cell-size");
+        assert_eq!(report.height(), 25);
+        assert_eq!(report.width(), 14);
+        assert_eq!(report.pixel_size(), Some(crate::PixelSize::new(14, 25)));
+    }
+
+    #[test]
+    fn geometry_reports_preserve_zeros_but_never_trust_them() {
+        // FM-Z5: a zero dimension is preserved verbatim and pixel_size refuses it.
+        let report = TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[4;0;0t"))
+            .expect("zero report parses");
+        assert_eq!(report.height(), 0);
+        assert_eq!(report.width(), 0);
+        assert_eq!(report.pixel_size(), None);
+
+        let report =
+            CellSizeReport::from_control_sequence(&csi(b"\x1b[6;25;0t")).expect("one zero");
+        assert_eq!(report.pixel_size(), None);
+    }
+
+    #[test]
+    fn geometry_reports_require_their_discriminator() {
+        // The discriminators do not cross-match, and other window ops match neither.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[6;25;14t")).is_none());
+        assert!(CellSizeReport::from_control_sequence(&csi(b"\x1b[4;1000;1680t")).is_none());
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[8;40;120t")).is_none());
+        // The in-band resize report (48) is a ResizeEvent, never a geometry report.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[48;40;120t")).is_none());
+    }
+
+    #[test]
+    fn geometry_reports_reject_wrong_shapes() {
+        // Missing a field.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[4;1000t")).is_none());
+        // Extra field.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[4;1;2;3t")).is_none());
+        // Private marker.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[?4;1;2t")).is_none());
+        // Wrong final byte.
+        assert!(TextAreaPixelsReport::from_control_sequence(&csi(b"\x1b[4;1;2u")).is_none());
+        // Overflowing dimension.
+        assert!(CellSizeReport::from_control_sequence(&csi(b"\x1b[6;65536;14t")).is_none());
     }
 
     #[test]

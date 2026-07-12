@@ -11,13 +11,13 @@ an assumed pass or fail.
 
 Captured:
 
-- **alacritty** (alacritty 0.17.0 (94e7c88), pty-headless) — 2026-07-12T12:45:20Z
-- **betamax** (libghostty, pty-headless) — 2026-07-12T08:29:31Z
-- **foot** (foot(1.16.2), pty-headless) — 2026-07-12T14:51:01Z
-- **kitty** (kitty(0.39.1), pty-headless) — 2026-07-12T08:29:55Z
-- **tmux** (tmux 3.7b, pty-headless) — 2026-07-12T08:29:20Z
-- **wezterm** (WezTerm 20240203-110809-5046fc22, pty-headless) — 2026-07-12T12:58:04Z
-- **xterm** (XTerm(390), pty-headless) — 2026-07-12T14:51:10Z
+- **alacritty** (alacritty 0.17.0 (94e7c88), pty-headless) — 2026-07-12T14:52:35Z
+- **betamax** (libghostty, pty-headless) — 2026-07-12T14:52:04Z
+- **foot** (foot(1.16.2), pty-headless) — 2026-07-12T23:04:31Z
+- **kitty** (kitty(0.39.1), pty-headless) — 2026-07-12T14:51:17Z
+- **tmux** (tmux 3.7b, pty-headless) — 2026-07-12T14:51:52Z
+- **wezterm** (WezTerm 20240203-110809-5046fc22, pty-headless) — 2026-07-12T14:52:49Z
+- **xterm** (XTerm(390), pty-headless) — 2026-07-12T23:04:40Z
 
 ## Legend
 
@@ -41,6 +41,7 @@ Captured:
 | DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | supported (7) | no-reply | no-reply | supported (7) | supported (7) | supported (7) | supported (7) |
 | XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | supported (11) | no-reply | supported (11) | supported (11) | supported (11) | supported (11) | no-reply |
 | XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | supported (14) | no-reply | supported (13) | supported (14) | supported (14) | supported (8) | no-reply |
+| XTWINOPS: Query Character Cell Size In Pixels | `csi.xtwinops.cell_size` | no-reply | no-reply | supported (9) | supported (10) | supported (10) | supported (8) | no-reply |
 
 ## `iterm2`
 
@@ -59,6 +60,12 @@ Captured:
 | Sequence | id | alacritty | betamax | foot | kitty | tmux | wezterm | xterm |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Query Kitty Color Key | `kitty.color.query` | no-reply | no-reply | no-reply | supported (30) | no-reply | no-reply | no-reply |
+
+## `kitty-graphics`
+
+| Sequence | id | alacritty | betamax | foot | kitty | tmux | wezterm | xterm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Kitty Graphics Support Query | `kitty.graphics.query_support` | no-reply | supported (12) | no-reply | supported (12) | no-reply | supported (12) | no-reply |
 
 ## `kitty-keyboard`
 

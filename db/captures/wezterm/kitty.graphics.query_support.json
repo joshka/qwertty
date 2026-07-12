@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?65;4;6;18;22c",
+    "target": "wezterm",
+    "version": "WezTerm 20240203-110809-5046fc22",
+    "xtversion_escaped": "\\eP>|WezTerm 20240203-110809-5046fc22\\e\\\\"
+  },
+  "query_id": "kitty.graphics.query_support",
+  "reply_escaped": "\\e_Gi=31;OK\\e\\\\",
+  "reply_id": "kitty.graphics.response",
+  "reply_len": 12,
+  "status": "answered",
+  "target": "wezterm",
+  "timestamp": "2026-07-12T14:52:49Z"
+}

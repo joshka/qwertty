@@ -39,10 +39,10 @@
 //! - [Bracketed paste](bracketed_paste) — telling pasted input apart from typed input.
 //! - [Kitty keyboard](kitty_keyboard) — progressive-enhancement key reporting and
 //!   verify-after-push.
+//! - [Graphics](graphics) — inline images: the protocol landscape, probe-based capability, the
+//!   resource-naming policy split, pixel-geometry honesty, and app-owned image lifecycle.
 //! - [Keybinding portability](keybinding_portability) — which key combinations a terminal can tell
 //!   apart, the legacy collisions, and the kitty/win32-input enhancement ladder.
-//! - [Graphics](graphics) — inline images: the kitty graphics protocol's transmit/place/delete
-//!   command bytes, and the capability and policy obligations that live above the encode layer.
 
 #[doc = include_str!("../docs/reference/why-qwertty.md")]
 pub mod why_qwertty {}
@@ -116,8 +116,8 @@ pub mod bracketed_paste {}
 #[doc = include_str!("../docs/reference/kitty-keyboard.md")]
 pub mod kitty_keyboard {}
 
-#[doc = include_str!("../docs/reference/keybinding-portability.md")]
-pub mod keybinding_portability {}
-
 #[doc = include_str!("../docs/reference/graphics.md")]
 pub mod graphics {}
+
+#[doc = include_str!("../docs/reference/keybinding-portability.md")]
+pub mod keybinding_portability {}

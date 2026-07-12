@@ -4,19 +4,43 @@
 
 ## Kitty Graphics Response (`kitty.graphics.response`)
 
-Fixture reports image id 7, placement id 3, and response code `OK`.
+Acknowledges an id-carrying graphics command with `OK`, echoing the image id.
 
 - Direction: terminal-to-host
-- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
-- Notes: reply syntax pending live capture
+- Syntax: `APC G i=<id> ; OK ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §Querying support and available transmission mediums (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/kitty_graphics_response_report_capture_kitty.seq`](../../../fixtures/kitty/kitty_graphics_response_report_capture_kitty.seq), [`fixtures/kitty/kitty_graphics_response_report_capture_betamax.seq`](../../../fixtures/kitty/kitty_graphics_response_report_capture_betamax.seq), [`fixtures/kitty/kitty_graphics_response_report_capture_wezterm.seq`](../../../fixtures/kitty/kitty_graphics_response_report_capture_wezterm.seq)
+- Notes: Response form documented verbatim in the spec (`<ESC>_Gi=31;OK<ESC>\`); placement acknowledgements add `p=<placement id>`. Decoded as `report::KittyGraphicsReport`.
 
 ## Kitty Graphics Error Response (`kitty.graphics.response_error`)
 
-Fixture preserves a non-OK response code and message text.
+Reports a failed graphics command with an ASCII error message, echoing the image id.
 
 - Direction: terminal-to-host
-- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
-- Notes: reply syntax pending live capture
+- Syntax: `APC G i=<id> ; <error>:<message> ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §Display images on screen (retrieved 2026-07-06)
+- Notes: Error form documented verbatim in the spec (`<ESC>_Gi=<id>;ENOENT:<some detailed error msg><ESC>\`); message is printable ASCII. Decoded as `report::KittyGraphicsReport`.
+
+## Kitty Graphics Support Query (`kitty.graphics.query_support`)
+
+Probes graphics protocol support by query-transmitting one black RGB pixel.
+
+- Direction: host-to-terminal
+- Syntax: `APC G i=<id> , s=1 , v=1 , a=q , t=d , f=24 ; AAAA ST`
+- Responds with: `kitty.graphics.response`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §Querying support and available transmission mediums (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_query_support.seq`](../../../fixtures/kitty/graphics_query_support.seq)
+- Notes: The spec's own recommended probe, paired with a trailing DA1 request as the no-answer fence. The query action stores nothing terminal-side.
+- Conformance: alacritty no-reply; betamax supported (12); foot no-reply; kitty supported (12); tmux no-reply; wezterm supported (12); xterm no-reply
+
+## Kitty Graphics Transmit (`kitty.graphics.transmit`)
+
+Fixture transmits a one-pixel RGB image directly, without displaying it.
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=t , i=<id> , f=<fmt> [, s=<w> , v=<h>] ; <base64 data> ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §Transferring pixel data (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_transmit.seq`](../../../fixtures/kitty/graphics_transmit.seq)
 
 ## Kitty Graphics Transmit And Display (`kitty.graphics.transmit_display`)
 
@@ -25,7 +49,8 @@ Fixture uses an already-encoded payload and a minimal format hint.
 - Direction: host-to-terminal
 - Syntax: `APC G a=T,... ; payload ST`
 - References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/kitty/graphics_transmit_display.seq`](../../../fixtures/kitty/graphics_transmit_display.seq), [`fixtures/kitty/negative/policy_denied/graphics_transmit_display.seq`](../../../fixtures/kitty/negative/policy_denied/graphics_transmit_display.seq)
+- Fixtures: [`fixtures/kitty/graphics_transmit_display.seq`](../../../fixtures/kitty/graphics_transmit_display.seq)
+- Notes: Direct (inline) transmission carries bytes the app already owns and is not policy-gated (design 11 policy split); only the file/temp-file/shared-memory transmission modes are.
 
 ## Kitty Graphics Place Image (`kitty.graphics.place`)
 
@@ -35,6 +60,36 @@ Fixture places image id 7 at the current cursor position.
 - Syntax: `APC G a=p,i=id ; ST`
 - References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/graphics_place.seq`](../../../fixtures/kitty/graphics_place.seq)
+
+## Kitty Graphics Transmit From File (`kitty.graphics.transmit_file`)
+
+Names a file path the terminal itself opens and reads pixel data from.
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=t , i=<id> , f=<fmt> , t=f ; <base64 path> ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §The transmission medium (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_transmit_file.seq`](../../../fixtures/kitty/graphics_transmit_file.seq), [`fixtures/kitty/negative/policy_denied/graphics_transmit_file.seq`](../../../fixtures/kitty/negative/policy_denied/graphics_transmit_file.seq)
+- Notes: A resource-naming read primitive (FM-X4): the terminal opens the named path. Session emit is gated behind the `file transfer` policy gate (design 11).
+
+## Kitty Graphics Transmit From Temporary File (`kitty.graphics.transmit_temp_file`)
+
+Names a temporary file the terminal reads and then deletes.
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=t , i=<id> , f=<fmt> , t=t ; <base64 path> ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §The transmission medium (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_transmit_temp_file.seq`](../../../fixtures/kitty/graphics_transmit_temp_file.seq), [`fixtures/kitty/negative/policy_denied/graphics_transmit_temp_file.seq`](../../../fixtures/kitty/negative/policy_denied/graphics_transmit_temp_file.seq)
+- Notes: Terminals only delete files in known temp directories whose path contains `tty-graphics-protocol` (spec's deletion consent rule). Same policy gate as transmit_file.
+
+## Kitty Graphics Transmit From Shared Memory (`kitty.graphics.transmit_shared_memory`)
+
+Names a POSIX shared-memory object the terminal opens, reads, and unlinks.
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=t , i=<id> , f=<fmt> [, s=<w> , v=<h>] , t=s ; <base64 name> ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) §The transmission medium (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_transmit_shared_memory.seq`](../../../fixtures/kitty/graphics_transmit_shared_memory.seq), [`fixtures/kitty/negative/policy_denied/graphics_transmit_shared_memory.seq`](../../../fixtures/kitty/negative/policy_denied/graphics_transmit_shared_memory.seq)
+- Notes: Same resource-naming class and policy gate as transmit_file (design 11).
 
 ## Kitty Text Sizing Scaled Text (`kitty.text_size.scaled`)
 

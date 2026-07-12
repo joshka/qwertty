@@ -177,8 +177,9 @@ pub use event::{
 pub use input::InputBytes;
 pub use policy::{Policy, PolicyGate};
 pub use report::{
-    CursorPositionReport, DecPrivateModeReport, DecPrivateModeState, OscColorKind, OscColorReport,
-    TerminalStatus, TerminalStatusReport, XtVersionReport,
+    CellSizeReport, CursorPositionReport, DecPrivateModeReport, DecPrivateModeState,
+    KittyGraphicsReport, OscColorKind, OscColorReport, TerminalStatus, TerminalStatusReport,
+    TextAreaPixelsReport, XtVersionReport,
 };
 #[cfg(any(unix, windows))]
 pub use session::RestoreHandle;

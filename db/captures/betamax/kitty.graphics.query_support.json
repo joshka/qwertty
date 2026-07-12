@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?62;22c",
+    "target": "betamax",
+    "version": "libghostty",
+    "xtversion_escaped": "\\eP>|libghostty\\e\\\\"
+  },
+  "query_id": "kitty.graphics.query_support",
+  "reply_escaped": "\\e_Gi=31;OK\\e\\\\",
+  "reply_id": "kitty.graphics.response",
+  "reply_len": 12,
+  "status": "answered",
+  "target": "betamax",
+  "timestamp": "2026-07-12T14:52:04Z"
+}

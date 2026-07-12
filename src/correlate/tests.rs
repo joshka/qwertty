@@ -31,7 +31,23 @@ fn all_variants() -> Vec<Expectation> {
         Expectation::OscColor {
             which: OscColorKind::Background,
         },
+        Expectation::KittyGraphics { image_id: 31 },
+        Expectation::KittyGraphics { image_id: 32 },
+        Expectation::TextAreaPixels,
+        Expectation::CellSize,
     ]
+}
+
+/// Builds an `Event::Syntax` from the single APC token `bytes` must encode.
+fn apc_event(bytes: &[u8]) -> Event {
+    let mut parser = SyntaxParser::new();
+    let mut tokens = parser.feed(bytes);
+    tokens.extend(parser.finish());
+    assert_eq!(tokens.len(), 1, "expected one token from {bytes:?}");
+    match tokens.into_iter().next().expect("one token") {
+        token @ SyntaxToken::Apc(_) => Event::Syntax(token),
+        other => panic!("expected an APC token, got {other:?}"),
+    }
 }
 
 /// Builds an `Event::Syntax` from the single OSC token `bytes` must encode.
@@ -93,7 +109,7 @@ fn csi_event(bytes: &[u8]) -> Event {
 fn distinguishes_is_false_on_identical_pairs() {
     for expectation in all_variants() {
         assert!(
-            !distinguishes(&expectation, &expectation),
+            !distinguishes(expectation, expectation),
             "{expectation:?} must not distinguish from itself (that is the coalescing case)"
         );
     }
@@ -106,7 +122,7 @@ fn distinguishes_is_true_on_every_different_pair() {
         for (j, b) in variants.iter().enumerate() {
             if i != j {
                 assert!(
-                    distinguishes(a, b),
+                    distinguishes(*a, *b),
                     "{a:?} and {b:?} have disjoint reply shapes/discriminators and must distinguish"
                 );
             }
@@ -121,13 +137,13 @@ fn two_different_dec_private_modes_distinguish() {
     let a = Expectation::DecPrivateMode { mode: 2026 };
     let b = Expectation::DecPrivateMode { mode: 2027 };
     assert!(
-        distinguishes(&a, &b),
+        distinguishes(a, b),
         "DecPrivateMode(2026) and DecPrivateMode(2027) must distinguish (FM-Q10)"
     );
     // Same mode coalesces (does not distinguish).
     assert!(!distinguishes(
-        &a,
-        &Expectation::DecPrivateMode { mode: 2026 }
+        a,
+        Expectation::DecPrivateMode { mode: 2026 }
     ));
 }
 
@@ -140,12 +156,12 @@ fn two_different_osc_colors_distinguish() {
         which: OscColorKind::Background,
     };
     assert!(
-        distinguishes(&fg, &bg),
+        distinguishes(fg, bg),
         "OscColor(Foreground) and OscColor(Background) must distinguish"
     );
     assert!(!distinguishes(
-        &fg,
-        &Expectation::OscColor {
+        fg,
+        Expectation::OscColor {
             which: OscColorKind::Foreground
         }
     ));
@@ -157,8 +173,8 @@ fn distinguishes_is_symmetric() {
     for a in &variants {
         for b in &variants {
             assert_eq!(
-                distinguishes(a, b),
-                distinguishes(b, a),
+                distinguishes(*a, *b),
+                distinguishes(*b, *a),
                 "distinguishes must be symmetric for {a:?}, {b:?}"
             );
         }
@@ -174,7 +190,7 @@ fn non_distinguishing_pairs_are_all_identical() {
     let variants = all_variants();
     for a in &variants {
         for b in &variants {
-            if !distinguishes(a, b) {
+            if !distinguishes(*a, *b) {
                 assert_eq!(a, b, "a non-distinguishing pair must be identical");
             }
         }
@@ -225,6 +241,133 @@ fn decrqm_reply_for_unregistered_mode_passes_through() {
         .expect("register 2026");
     let event = csi_event(b"\x1b[?2048;1$y");
     assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
+}
+
+// --- kitty graphics (APC-framed) and XTWINOPS geometry matching -----------------------------
+
+#[test]
+fn kitty_graphics_reply_completes_only_the_matching_image_id() {
+    // Two concurrent graphics expectations for image ids 31 and 32: the FM-Q10 discriminator rule
+    // applied to the APC response's echoed id.
+    let mut correlator = Correlator::new();
+    let id31 = correlator
+        .register(Expectation::KittyGraphics { image_id: 31 })
+        .expect("register image 31");
+    let id32 = correlator
+        .register(Expectation::KittyGraphics { image_id: 32 })
+        .expect("register image 32");
+
+    let feed = correlator.feed(apc_event(b"\x1b_Gi=31;OK\x1b\\"));
+    let Feed::Completed { id, reply } = feed else {
+        panic!("expected the image-31 expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, id31, "only the image-31 expectation completes");
+    let Reply::KittyGraphics(report) = reply else {
+        panic!("expected a KittyGraphics reply");
+    };
+    assert_eq!(report.image_id(), Some(31));
+    assert!(report.is_ok());
+    assert!(
+        correlator.contains(id32),
+        "the image-32 expectation is untouched by the image-31 response"
+    );
+
+    // An error response still completes its own expectation: an answer is an answer.
+    let feed = correlator.feed(apc_event(b"\x1b_Gi=32;EBADPNG:bad data\x1b\\"));
+    let Feed::Completed { id, reply } = feed else {
+        panic!("expected the image-32 expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, id32);
+    let Reply::KittyGraphics(report) = reply else {
+        panic!("expected a KittyGraphics reply");
+    };
+    assert!(!report.is_ok());
+    assert_eq!(report.message(), "EBADPNG:bad data");
+}
+
+#[test]
+fn kitty_graphics_reply_for_unregistered_id_passes_through() {
+    // A graphics response echoing an id nothing is waiting on is ordinary input (rule 4).
+    let mut correlator = Correlator::new();
+    correlator
+        .register(Expectation::KittyGraphics { image_id: 31 })
+        .expect("register image 31");
+    let event = apc_event(b"\x1b_Gi=99;OK\x1b\\");
+    assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
+}
+
+#[test]
+fn non_graphics_apc_passes_through_with_graphics_pending() {
+    // An APC that is not a graphics response (no leading G) never completes the expectation.
+    let mut correlator = Correlator::new();
+    correlator
+        .register(Expectation::KittyGraphics { image_id: 31 })
+        .expect("register image 31");
+    let event = apc_event(b"\x1b_zsome-other-apc\x1b\\");
+    assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
+}
+
+#[test]
+fn geometry_replies_complete_only_their_own_op_code() {
+    // Text-area (op 4) and cell-size (op 6) share the `t` final; the leading op code is the
+    // discriminator. Register both, answer in reverse order.
+    let mut correlator = Correlator::new();
+    let text_area = correlator
+        .register(Expectation::TextAreaPixels)
+        .expect("register text-area");
+    let cell = correlator
+        .register(Expectation::CellSize)
+        .expect("register cell-size");
+
+    let feed = correlator.feed(csi_event(b"\x1b[6;25;14t"));
+    let Feed::Completed { id, reply } = feed else {
+        panic!("expected the cell-size expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, cell, "op 6 completes only the cell-size expectation");
+    let Reply::CellSize(report) = reply else {
+        panic!("expected a CellSize reply");
+    };
+    assert_eq!(report.pixel_size(), Some(crate::PixelSize::new(14, 25)));
+
+    let feed = correlator.feed(csi_event(b"\x1b[4;1000;1680t"));
+    let Feed::Completed { id, reply } = feed else {
+        panic!("expected the text-area expectation to complete, got {feed:?}");
+    };
+    assert_eq!(id, text_area);
+    let Reply::TextAreaPixels(report) = reply else {
+        panic!("expected a TextAreaPixels reply");
+    };
+    assert_eq!(report.pixel_size(), Some(crate::PixelSize::new(1680, 1000)));
+}
+
+#[test]
+fn other_xtwinops_t_reports_pass_through_geometry_expectations() {
+    // The cells report (op 8) matches neither geometry expectation.
+    let mut correlator = Correlator::new();
+    correlator
+        .register(Expectation::TextAreaPixels)
+        .expect("register text-area");
+    correlator
+        .register(Expectation::CellSize)
+        .expect("register cell-size");
+    let event = csi_event(b"\x1b[8;40;120t");
+    assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
+}
+
+#[test]
+fn zero_geometry_reply_still_completes_with_unknown_pixel_size() {
+    // FM-Z5: a zero answer is an answer (Probed evidence) whose value is unknown — the completion
+    // must happen so the probe records "answered zeros", not a timeout.
+    let mut correlator = Correlator::new();
+    let id = correlator
+        .register(Expectation::TextAreaPixels)
+        .expect("register text-area");
+    let feed = correlator.feed(csi_event(b"\x1b[4;0;0t"));
+    assert!(matches!(feed, Feed::Completed { id: done, .. } if done == id));
+    let Some(Reply::TextAreaPixels(report)) = correlator.take_reply(id) else {
+        panic!("expected a TextAreaPixels reply");
+    };
+    assert_eq!(report.pixel_size(), None, "zeros never become a geometry");
 }
 
 // --- XTVERSION (DCS-framed) and OSC colour (OSC-framed) matching ----------------------------

@@ -368,8 +368,10 @@ const BASE64_ALPHABET: &[u8; 64] =
 /// Encodes `data` as standard base64 (RFC 4648), with `=` padding.
 ///
 /// qwertty hand-rolls this rather than take a dependency on it (design 08's dependency-policy
-/// affirmation, ADR 0016): OSC 52 is the only base64 consumer in this crate, and the standard
-/// alphabet with padding is a small, stable, easily-tested transform.
+/// affirmation, ADR 0016): OSC 52 and the kitty graphics payloads
+/// ([`commands::graphics::kitty`](crate::commands::graphics::kitty)) are the only base64
+/// consumers in this crate, and the standard alphabet with padding is a small, stable,
+/// easily-tested transform.
 ///
 /// Three raw bytes become four output characters; a final group of one or two bytes is padded
 /// with `=` to keep the output length a multiple of four, per RFC 4648.

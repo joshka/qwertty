@@ -9,9 +9,10 @@ citations and fixtures.
 
 | Family | Queries | alacritty | betamax | foot | kitty | tmux | wezterm | xterm |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ecma48-csi` | 8 | 7/8 | 5/8 | 7/8 | 7/8 | 7/8 | 8/8 | 6/8 |
+| `ecma48-csi` | 9 | 7/9 | 5/9 | 8/9 | 8/9 | 8/9 | 9/9 | 6/9 |
 | `iterm2` | 7 | 0/7 | 1/7 | 1/7 | 1/7 | 1/7 | 2/7 | 1/7 |
 | `kitty-color` | 1 | 0/1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 | 0/1 |
+| `kitty-graphics` | 1 | 0/1 | 1/1 | 0/1 | 1/1 | 0/1 | 1/1 | 0/1 |
 | `kitty-keyboard` | 1 | 1/1 | 1/1 | 1/1 | 1/1 | 0/1 | 0/1 | 0/1 |
 | `kitty-multicursor` | 1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 | 0/1 |
 | `kitty-pointer` | 1 | 0/1 | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 | 0/1 |

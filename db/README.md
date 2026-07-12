@@ -175,9 +175,12 @@ version and timestamp. A cell reports what that target did when probed:
 | `unprobeable`  | The entry is a query but the harness will not send it blind.        |
 | `—`            | No result: this target has not captured this entry.                 |
 
-**Honesty about what this is not**: every capture behind this matrix today is headless — tmux
-driven by `send-keys`, betamax (libghostty) driven by an on-the-fly tape — not an attended,
-interactive terminal session. The matrix does not claim otherwise: an unlisted or dash-marked
+**Honesty about what this is not**: every capture behind this matrix today is unattended and
+scripted, not an attended, interactive terminal session — but not every target is headless. tmux
+is driven by `send-keys` and betamax (libghostty) by an on-the-fly tape, both without a display;
+alacritty has no headless mode, so its capture briefly opens a real GUI window that closes itself
+the moment the scripted probe pass ends (recorded as its adapter kind in the results file). The
+matrix does not claim otherwise: an unlisted or dash-marked
 target/entry pair means *no evidence*, never an assumed pass or fail. This is evidence from real
 captures, not a hand-curated support claim; when the hand-curated prototype conflated "what the
 world defines" with "what a terminal actually does," gap-report machinery had to police the

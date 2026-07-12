@@ -14,6 +14,8 @@
 use std::time::Duration;
 
 #[cfg(unix)]
+pub mod alacritty;
+#[cfg(unix)]
 pub mod betamax;
 #[cfg(unix)]
 pub mod kitty;

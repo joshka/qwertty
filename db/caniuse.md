@@ -11,6 +11,7 @@ pass or fail.
 
 Captured:
 
+- **alacritty** (alacritty 0.17.0 (94e7c88)) — 2026-07-12T08:33:00Z
 - **betamax** (libghostty) — 2026-07-07T10:56:32Z
 - **kitty** (kitty(0.39.1)) — 2026-07-12T08:18:09Z
 - **tmux** (tmux 3.7b) — 2026-07-07T10:59:13Z
@@ -27,80 +28,80 @@ Captured:
 
 ## `ecma48-csi`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| DSR: Query Cursor Position | `csi.dsr.cursor_position` | answered (6) | answered (6) | answered (6) |
-| DA1: Query Primary Device Attributes | `csi.da.primary` | answered (9) | answered (7) | answered (9) |
-| DA2: Query Secondary Device Attributes | `csi.da.secondary` | answered (9) | answered (13) | answered (10) |
-| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | answered (14) | timeout | timeout |
-| DSR: Query Terminal Status | `csi.dsr.status` | answered (4) | answered (4) | answered (4) |
-| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | timeout | answered (7) | answered (7) |
-| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | timeout | answered (11) | answered (11) |
-| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | timeout | answered (14) | answered (14) |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| DSR: Query Cursor Position | `csi.dsr.cursor_position` | answered (6) | answered (6) | answered (6) | answered (6) |
+| DA1: Query Primary Device Attributes | `csi.da.primary` | answered (5) | answered (9) | answered (7) | answered (9) |
+| DA2: Query Secondary Device Attributes | `csi.da.secondary` | answered (12) | answered (9) | answered (13) | answered (10) |
+| DA3: Query Tertiary Device Attributes | `csi.da.tertiary` | timeout | answered (14) | timeout | timeout |
+| DSR: Query Terminal Status | `csi.dsr.status` | answered (4) | answered (4) | answered (4) | answered (4) |
+| DECRQM: Query ANSI Mode | `csi.ansi_mode.query` | answered (7) | timeout | answered (7) | answered (7) |
+| XTWINOPS: Query Text Area Size In Cells | `csi.xtwinops.text_area_cells` | answered (11) | timeout | answered (11) | answered (11) |
+| XTWINOPS: Query Text Area Size In Pixels | `csi.xtwinops.text_area_pixels` | answered (14) | timeout | answered (14) | answered (14) |
 
 ## `iterm2`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | timeout | timeout | timeout |
-| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | timeout | timeout | timeout |
-| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | timeout | timeout | timeout |
-| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | timeout | timeout | timeout |
-| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | — | — | — |
-| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | answered (16) | answered (19) | answered (15) |
-| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | — | — | — |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| iTerm2 OSC 4 Default Background Query | `iterm2.osc4.default_background_query` | timeout | timeout | timeout | timeout |
+| iTerm2 OSC 4 Default Foreground Query | `iterm2.osc4.default_foreground_query` | timeout | timeout | timeout | timeout |
+| iTerm2 Report Cell Size Query | `iterm2.osc1337.report_cell_size_query` | timeout | timeout | timeout | timeout |
+| iTerm2 Report Variable Query | `iterm2.osc1337.report_variable_query` | timeout | timeout | timeout | timeout |
+| iTerm2 Request Upload | `iterm2.osc1337.request_upload` | — | — | — | — |
+| iTerm2 Extended Device Attributes | `iterm2.dcs.extended_device_attributes` | timeout | answered (16) | answered (19) | answered (15) |
+| iTerm2 Custom Button | `iterm2.osc1337.button_custom` | — | — | — | — |
 
 ## `kitty-color`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Color Key | `kitty.color.query` | timeout | answered (30) | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Color Key | `kitty.color.query` | timeout | timeout | answered (30) | timeout |
 
 ## `kitty-keyboard`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | answered (5) | answered (5) | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Kitty Keyboard Flags Query | `kitty.keyboard.flags_query` | answered (5) | answered (5) | answered (5) | timeout |
 
 ## `kitty-multicursor`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | timeout | timeout | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Multiple Cursor Support | `kitty.multicursor.query_support` | timeout | timeout | timeout | timeout |
 
 ## `kitty-pointer`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Kitty Pointer Shape | `kitty.pointer.query` | timeout | answered (8) | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Kitty Pointer Shape | `kitty.pointer.query` | timeout | timeout | answered (8) | timeout |
 
 ## `osc`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| Query Foreground Color | `osc.10.foreground_query` | timeout | answered (25) | timeout |
-| Query Background Color | `osc.11.background_query` | timeout | answered (25) | timeout |
-| Query Cursor Color | `osc.12.cursor_query` | timeout | answered (25) | timeout |
-| Query Palette Color | `osc.4.palette_query` | timeout | answered (26) | timeout |
-| Query Special Color | `osc.5.special_query` | timeout | timeout | timeout |
-| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | timeout | timeout | timeout |
-| Query Pointer Background Color | `osc.14.pointer_background_query` | timeout | timeout | timeout |
-| Query Highlight Background Color | `osc.17.highlight_background_query` | timeout | answered (25) | timeout |
-| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | timeout | answered (25) | timeout |
-| OSC 52 Clipboard Query | `osc.52.clipboard_query` | timeout | timeout | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| Query Foreground Color | `osc.10.foreground_query` | answered (25) | timeout | answered (25) | timeout |
+| Query Background Color | `osc.11.background_query` | answered (25) | timeout | answered (25) | timeout |
+| Query Cursor Color | `osc.12.cursor_query` | timeout | timeout | answered (25) | timeout |
+| Query Palette Color | `osc.4.palette_query` | answered (26) | timeout | answered (26) | timeout |
+| Query Special Color | `osc.5.special_query` | timeout | timeout | timeout | timeout |
+| Query Pointer Foreground Color | `osc.13.pointer_foreground_query` | timeout | timeout | timeout | timeout |
+| Query Pointer Background Color | `osc.14.pointer_background_query` | timeout | timeout | timeout | timeout |
+| Query Highlight Background Color | `osc.17.highlight_background_query` | timeout | timeout | answered (25) | timeout |
+| Query Highlight Foreground Color | `osc.19.highlight_foreground_query` | timeout | timeout | answered (25) | timeout |
+| OSC 52 Clipboard Query | `osc.52.clipboard_query` | timeout | timeout | timeout | timeout |
 
 ## `xterm-capabilities`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| XTGETTCAP Query | `xterm.xtgettcap.query` | timeout | answered (34) | timeout |
-| XTGETXRES Query | `xterm.xtgetxres.query` | timeout | timeout | timeout |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| XTGETTCAP Query | `xterm.xtgettcap.query` | timeout | timeout | answered (34) | timeout |
+| XTGETXRES Query | `xterm.xtgetxres.query` | timeout | timeout | timeout | timeout |
 
 ## `xterm-modes`
 
-| Sequence | id | betamax | kitty | tmux |
-| --- | --- | --- | --- | --- |
-| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | — | — | — |
-| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | — | — | — |
-| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | — | — | — |
-| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | — | — | — |
+| Sequence | id | alacritty | betamax | kitty | tmux |
+| --- | --- | --- | --- | --- | --- |
+| DECRQM Synchronized Output (2026) | `dec.mode.synchronized_output.query` | — | — | — | — |
+| DECRQM Grapheme Clustering (2027) | `dec.mode.grapheme_clustering.query` | — | — | — | — |
+| DECRQM In-Band Resize (2048) | `dec.mode.in_band_resize.query` | — | — | — | — |
+| DECRQM Bracketed Paste (2004) | `dec.mode.bracketed_paste.query` | — | — | — | — |

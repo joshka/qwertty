@@ -68,7 +68,7 @@ name        = "Foreground Color Report"
 description = "Reports the terminal's current default foreground color."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = ["fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq"]
+fixtures    = ["fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq", "fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -109,7 +109,7 @@ name        = "Background Color Report"
 description = "Reports the terminal's current default background color."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = ["fixtures/osc/osc_11_background_report_report_capture_kitty.seq"]
+fixtures    = ["fixtures/osc/osc_11_background_report_report_capture_kitty.seq", "fixtures/osc/osc_11_background_report_report_capture_alacritty.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 
@@ -171,7 +171,7 @@ name        = "Palette Color Report"
 description = "Reports the RGB value of an indexed palette color."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = ["fixtures/osc/osc_4_palette_report_report_capture_kitty.seq"]
+fixtures    = ["fixtures/osc/osc_4_palette_report_report_capture_kitty.seq", "fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"
 

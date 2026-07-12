@@ -1,0 +1,2 @@
+#! direction=terminal-to-host origin=capture:alacritty-0.17.0-94e7c88 date=2026-07-12
+\e[0n

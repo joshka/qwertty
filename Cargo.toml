@@ -96,12 +96,14 @@ tokio = { version = "1.37", optional = true, default-features = false, features 
     "time",
 ] }
 
-# Windows console FFI for the `#[cfg(windows)]` terminal device (src/terminal/windows.rs). Only the
-# raw console entry points the device calls are pulled in — no higher-level wrappers — so the crate
-# talks to the console host directly (ADR 0022). `Win32_Security` and `Win32_System_IO` carry only
-# the `SECURITY_ATTRIBUTES` and `OVERLAPPED` types named (as null pointers) in the `CreateFileW` and
-# `WriteFile` signatures. The async readiness model (no `AsyncFd` equivalent) is deliberately NOT
-# built here; see work/phase4/windows-readiness-analysis.md.
+# Windows console FFI for the `#[cfg(windows)]` terminal device (src/terminal/windows.rs) and the
+# async readiness worker (src/tokio_session/readiness.rs). Only the raw console entry points the
+# device and worker call are pulled in — no higher-level wrappers — so the crate talks to the
+# console host directly (ADR 0022). `Win32_Security` and `Win32_System_IO` carry only the
+# `SECURITY_ATTRIBUTES` and `OVERLAPPED` types named (as null pointers) in the `CreateFileW` and
+# `WriteFile` signatures. `Win32_System_Threading` carries the waker event and cancellable-wait
+# primitives (`CreateEventW`, `SetEvent`, `WaitForMultipleObjects`) the readiness worker uses
+# instead of an `AsyncFd` equivalent (ADR 0022 §4; MW-2).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
@@ -109,4 +111,16 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_IO",
+    "Win32_System_Threading",
+] }
+# The Tokio session runs on Windows through the worker-thread readiness transport (MW-2): the worker
+# feeds a `tokio::sync::mpsc` channel the async session `recv`s. Windows needs no reactor
+# registration (`net`) and no Unix signals (`signal`); it needs the channel (`sync`), the deadline
+# clock (`time`), a current-thread runtime for the driver, and the test macros. The floor matches
+# the Unix `tokio` floor so the workspace resolves a single version (see the `cfg(unix)` note above).
+tokio = { version = "1.37", optional = true, default-features = false, features = [
+    "macros",
+    "rt",
+    "sync",
+    "time",
 ] }

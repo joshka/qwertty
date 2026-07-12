@@ -7,20 +7,52 @@
 //! the decoder, correlator, and pending-event queue stay on the session so cancel-safety keeps
 //! falling out of the "state lives on the struct" invariant (design 04).
 //!
-//! This is the Unix transport over a pollable descriptor. The type is intentionally not a trait or
-//! a generic parameter — design 04 rejects speculative runtime generics, and the windows-readiness
-//! analysis (§3–§4) settles that a later `#[cfg(windows)]` transport (a worker thread plus a waker
-//! event and a channel, which never has an fd) arrives as a cfg-gated sibling in this same module
-//! without changing one public signature. Everything here is therefore Unix-specific lifecycle
-//! detail — the fd dup, the `O_NONBLOCK` bookkeeping, the `fcntl` flag restore — and stays that
-//! way.
+//! There are two transports, resolved by `cfg`, with the same narrow surface the session body
+//! calls (`read`/`write_all`):
+//!
+//! - **Unix** ([`FdReadiness`]): a pollable descriptor dup registered with the Tokio reactor. This
+//!   is the design-04 model — await readiness, then a non-blocking read/write. The Unix-only
+//!   lifecycle methods (`reassert_nonblocking`, `flush_input`, `detach`/`reattach`, `dup_fd`,
+//!   `restore_flags`) live here because their only callers (suspend/resume, the detached handoff,
+//!   the resize stream) are Unix-gated off the Windows build.
+//! - **Windows** ([`ConsoleReadiness`]): a worker thread plus a waker event and a channel, aliased
+//!   to `FdReadiness` by the session body's `cfg` import so its references resolve on both
+//!   platforms. A console handle is not pollable and cannot be registered with a reactor, so the
+//!   worker waits on `[console input, waker event]` and only reads after the wait says records are
+//!   pending — the cancellable-wait model of ADR 0022 §4. The channel between the worker and the
+//!   session owns all in-flight bytes, so the public cancel-safety contract holds unchanged (the
+//!   windows-readiness analysis §3–§4 settled that this arrives without one public signature
+//!   changing).
+//!
+//! The type is intentionally not a trait or a generic parameter — design 04 rejects speculative
+//! runtime generics; the two transports are cfg siblings, not implementations of a shared trait.
 
+// The Windows transport is FFI-only: the waker event, the cancellable wait, and the handle dups are
+// `windows-sys` calls with no safe wrapper. The crate lint is `unsafe_code = "deny"` (not `forbid`)
+// so this `#[cfg(windows)]` code can opt in; the Unix transport below carries no `unsafe`, so the
+// allow is scoped to Windows and the Unix path stays effectively forbidden. See ADR 0021.
+#![cfg_attr(
+    windows,
+    allow(
+        unsafe_code,
+        reason = "the Windows readiness worker is FFI-only; the waker event and cancellable wait \
+                  are unsafe `windows-sys` calls with no safe wrapper in the dependency tree"
+    )
+)]
+
+#[cfg(unix)]
 use std::io::{self, ErrorKind};
+#[cfg(unix)]
 use std::os::fd::{BorrowedFd, OwnedFd};
 
+#[cfg(unix)]
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+#[cfg(unix)]
 use tokio::io::unix::AsyncFd;
 
+#[cfg(windows)]
+pub(super) use self::windows_transport::ConsoleReadiness;
+#[cfg(unix)]
 use crate::terminal;
 
 /// The Unix readiness transport: an [`AsyncFd`]-registered dup plus its saved `fcntl` flags.
@@ -36,6 +68,7 @@ use crate::terminal;
 /// [`original_flags`](Self::original_flags) captures what to put back on teardown; a leaked
 /// non-blocking flag would corrupt the parent shell's own reads when the dup came from inherited
 /// standard input (FM-L class).
+#[cfg(unix)]
 #[derive(Debug)]
 pub(super) struct FdReadiness {
     /// The dup registered with Tokio readiness. All read/write I/O runs on this fd.
@@ -46,6 +79,7 @@ pub(super) struct FdReadiness {
     original_flags: OFlags,
 }
 
+#[cfg(unix)]
 impl FdReadiness {
     /// Duplicates `fd`, sets the dup non-blocking, and registers it with the current Tokio reactor.
     ///
@@ -273,6 +307,7 @@ impl FdReadiness {
 /// bytes. On the non-blocking descriptor a short write advances the caller's remaining slice, and a
 /// `WouldBlock` surfaces as an error so `try_io` clears the readiness guard and the caller retries
 /// on the next writable notification.
+#[cfg(unix)]
 fn fd_write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
     rustix::io::write(fd, bytes).map_err(io::Error::from)
 }
@@ -281,6 +316,365 @@ fn fd_write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
 ///
 /// Returns `Ok(0)` at end of input. Runs on the registered fd for the same readiness-correctness
 /// reason as [`fd_write`].
+#[cfg(unix)]
 fn fd_read(fd: &OwnedFd, buffer: &mut [u8]) -> io::Result<usize> {
     rustix::io::read(fd, buffer).map_err(io::Error::from)
+}
+
+/// The Windows readiness transport: a cancellable-wait worker thread feeding a channel.
+#[cfg(windows)]
+mod windows_transport {
+    use std::collections::VecDeque;
+    use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
+    use std::ptr;
+    use std::thread::JoinHandle;
+
+    use tokio::sync::mpsc;
+    use windows_sys::Win32::Foundation::{
+        DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::Storage::FileSystem::WriteFile;
+    use windows_sys::Win32::System::Console::INPUT_RECORD;
+    use windows_sys::Win32::System::Threading::{
+        CreateEventW, GetCurrentProcess, INFINITE, SetEvent, WaitForMultipleObjects,
+    };
+
+    use crate::terminal::{
+        self, ConsoleHandles, ConsoleInputReader, RECORD_BATCH, read_input_records,
+    };
+
+    /// How many byte chunks the worker→session channel buffers before the worker's `blocking_send`
+    /// parks. Human-paced console input never fills this; teardown drops the receiver so a parked
+    /// send unblocks regardless (see [`ConsoleReadiness`]'s teardown contract).
+    const CHANNEL_CAPACITY: usize = 256;
+
+    /// The Windows readiness transport: a worker thread, a waker event, and a channel.
+    ///
+    /// # The cancellable-wait model (ADR 0022 §4)
+    ///
+    /// A console input handle is not pollable, and `ReadConsoleInputW` blocks. The classic hazard
+    /// (FM-A1, tokio's own `io::Stdin` "impossible to cancel" trap) is a worker parked *inside* a
+    /// blocking read that runtime shutdown then cannot join. This transport defeats it by never
+    /// parking inside the read: the worker waits on `[console input, waker event]` with
+    /// `WaitForMultipleObjects` and calls `read_input_records` **only after** the wait reports the
+    /// input handle signalled, so the read returns immediately with records already pending. The
+    /// worker is therefore always unblockable — it is either in the wait (which the waker frees) or
+    /// in a bounded, non-blocking stretch about to re-enter it.
+    ///
+    /// # Cancel-safety of the session `read`
+    ///
+    /// The only await in [`read`](Self::read) is the channel `recv`. A `recv` future dropped
+    /// mid-await strands nothing: bytes the worker already sent sit in the channel (on-struct
+    /// state), and the leftover buffer holds any remainder of a short read — exactly as a dropped
+    /// Unix `AsyncFd` read leaves bytes in the OS. State lives on the struct, so the public
+    /// cancel-safety contract holds unchanged.
+    ///
+    /// # Teardown cannot wedge shutdown (RR-2 / FM-A1)
+    ///
+    /// Drop signals the waker event ([`SetEvent`]) and drops the channel receiver, then joins the
+    /// worker. The worker observes the teardown one of two ways with no third option: if it is
+    /// parked in `WaitForMultipleObjects`, the waker signal frees it immediately and it breaks; if
+    /// it is instead parked in `blocking_send` on a full channel, the dropped receiver makes the
+    /// send return an error and it breaks. Either path reaches the loop exit within one bounded
+    /// step — a `WaitForMultipleObjects` return or a `blocking_send` return — so the join always
+    /// completes and a wedged `ReadConsoleInputW` (which the worker never enters uncancellably) can
+    /// never hang shutdown.
+    #[derive(Debug)]
+    pub(in crate::tokio_session) struct ConsoleReadiness {
+        /// The manual-reset waker event. Teardown [`SetEvent`]s it to free a worker parked in the
+        /// wait; a duplicate of the same underlying event object is what the worker waits on.
+        waker: OwnedHandle,
+        /// The receiver end of the worker→session byte channel. Dropped on teardown so a worker
+        /// parked in `blocking_send` unblocks. `Option` only so it can be dropped *before* the
+        /// join inside [`Drop`].
+        receiver: Option<mpsc::Receiver<Vec<u8>>>,
+        /// A duplicate of the console output handle, written by [`write_all`](Self::write_all).
+        output: OwnedHandle,
+        /// Bytes recv'd from the channel but not yet returned to a short caller buffer, drained
+        /// before the next `recv`. This is the on-struct state that makes `read` cancel-safe
+        /// across a buffer smaller than one channel chunk.
+        leftover: VecDeque<u8>,
+        /// The worker thread's join handle, joined on teardown. `Option` so [`Drop`] can take it.
+        worker: Option<JoinHandle<()>>,
+    }
+
+    impl ConsoleReadiness {
+        /// Duplicates the console handles, spawns the cancellable-wait worker, and wires the
+        /// channel.
+        ///
+        /// Both handles are duplicated so the worker and transport own descriptors independent of
+        /// the device's: the worker gets an input dup (for its waited reads) and an output dup (to
+        /// measure resize geometry); the transport keeps an output dup (for writes) and the waker
+        /// event. A second waker handle — a dup of the same event object — travels to the worker so
+        /// a `SetEvent` on the transport's copy frees the worker's wait.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`terminal::Error::OpenTerminal`] when a handle or the waker event cannot be
+        /// duplicated or created.
+        pub(in crate::tokio_session) fn new(handles: ConsoleHandles<'_>) -> terminal::Result<Self> {
+            let worker_input = duplicate_handle(handles.input)?;
+            let worker_output = duplicate_handle(handles.output)?;
+            let write_output = duplicate_handle(handles.output)?;
+
+            let waker = create_manual_reset_event()?;
+            let worker_waker = duplicate_handle(waker.as_handle())?;
+
+            let (sender, receiver) = mpsc::channel::<Vec<u8>>(CHANNEL_CAPACITY);
+
+            let worker = std::thread::Builder::new()
+                .name("qwertty-console-reader".to_owned())
+                .spawn(move || worker_loop(&worker_input, &worker_output, &worker_waker, &sender))
+                .map_err(terminal::Error::open_terminal)?;
+
+            Ok(Self {
+                waker,
+                receiver: Some(receiver),
+                output: write_output,
+                leftover: VecDeque::new(),
+                worker: Some(worker),
+            })
+        }
+
+        /// Drains the leftover buffer first; otherwise awaits the next channel chunk and returns as
+        /// many of its bytes as fit, stashing the remainder.
+        ///
+        /// The awaited `recv` is the sole await and the sole cancellation point. `recv` returning
+        /// `None` means the worker is gone (a broken console, the EOF-equivalent), reported as
+        /// `Ok(0)`.
+        ///
+        /// # Errors
+        ///
+        /// Never returns an error today; the `Result` shape matches the Unix transport so the
+        /// session body's `read` call site is identical on both platforms.
+        pub(in crate::tokio_session) async fn read(
+            &mut self,
+            buffer: &mut [u8],
+        ) -> terminal::Result<usize> {
+            if !self.leftover.is_empty() {
+                return Ok(take_leftover(&mut self.leftover, buffer));
+            }
+            let receiver = self.receiver.as_mut().expect(
+                "the receiver is present for the whole session lifetime; Drop takes it last",
+            );
+            match receiver.recv().await {
+                Some(chunk) => {
+                    self.leftover.extend(chunk);
+                    Ok(take_leftover(&mut self.leftover, buffer))
+                }
+                None => Ok(0),
+            }
+        }
+
+        /// Writes every byte of `bytes` to the console output dup via `WriteFile`.
+        ///
+        /// Console writes complete immediately, so there is no meaningful await; the method stays
+        /// `async` to match the Unix transport's `write_all` at the session call site. A short
+        /// write advances the slice; a zero-progress write is surfaced as an error.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`terminal::Error::WriteTerminal`] when a write fails or makes no progress.
+        #[expect(
+            clippy::unused_async,
+            reason = "console WriteFile completes synchronously, but the async shape matches the \
+                      Unix transport so the session's `write_all` call site is identical"
+        )]
+        pub(in crate::tokio_session) async fn write_all(
+            &mut self,
+            bytes: &[u8],
+        ) -> terminal::Result<()> {
+            write_console(&self.output, bytes)
+        }
+    }
+
+    impl Drop for ConsoleReadiness {
+        fn drop(&mut self) {
+            // Free a worker parked in the wait, then close the channel so a worker parked in
+            // `blocking_send` also unblocks; either way it breaks within one bounded step. Only
+            // then join — the worker cannot wedge shutdown (see the type's teardown contract).
+            set_event(&self.waker);
+            drop(self.receiver.take());
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    /// The cancellable-wait worker loop: wait, read only when input is ready, translate, send.
+    ///
+    /// Waits on `[input, waker]`; a waker signal (or a wait failure) breaks; an input signal reads
+    /// a record batch — which returns immediately, records already pending — translates it
+    /// through the worker's own [`ConsoleInputReader`], and `blocking_send`s the bytes. A
+    /// closed channel (receiver dropped) or a broken console (`Ok(0)` records) breaks the loop,
+    /// dropping the sender so the session's `recv` returns `None` (EOF).
+    fn worker_loop(
+        input: &OwnedHandle,
+        output: &OwnedHandle,
+        waker: &OwnedHandle,
+        sender: &mpsc::Sender<Vec<u8>>,
+    ) {
+        let mut reader = ConsoleInputReader::new();
+        // SAFETY: a zeroed INPUT_RECORD array is a valid initial value; `read_input_records`
+        // overwrites the `count`-length prefix it fills, and only that prefix is read afterward.
+        let mut records: [INPUT_RECORD; RECORD_BATCH] = unsafe { std::mem::zeroed() };
+        let handles = [
+            input.as_raw_handle() as HANDLE,
+            waker.as_raw_handle() as HANDLE,
+        ];
+
+        loop {
+            // SAFETY: `handles` is a live 2-element array of borrowed console/event handles; the
+            // count matches; `INFINITE` waits until one signals; `false` waits for any, not all.
+            let wait = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };
+            if wait != WAIT_OBJECT_0 {
+                // WAIT_OBJECT_0 + 1 is the waker (shutdown); WAIT_FAILED/abandoned also break.
+                break;
+            }
+
+            // A broken console (read error) reads as EOF for the session: break, dropping the
+            // sender so the session's `recv` returns `None`.
+            let Ok(count) = read_input_records(input, &mut records) else {
+                break;
+            };
+            if count == 0 {
+                reader.flush_carry();
+                let tail = reader.take_pending();
+                if !tail.is_empty() {
+                    let _ = sender.blocking_send(tail);
+                }
+                break; // EOF: drop the sender so the session sees the channel close.
+            }
+
+            reader.translate_records(&records[..count], output);
+            let bytes = reader.take_pending();
+            if !bytes.is_empty() && sender.blocking_send(bytes).is_err() {
+                break; // The session dropped the receiver: shut the worker down.
+            }
+        }
+    }
+
+    /// Copies as many leftover bytes as fit into `buffer`, retaining the remainder, returning the
+    /// count.
+    ///
+    /// Pure (no FFI), so the short-read carry is unit-tested cross-platform below.
+    fn take_leftover(leftover: &mut VecDeque<u8>, buffer: &mut [u8]) -> usize {
+        let count = buffer.len().min(leftover.len());
+        for (slot, byte) in buffer.iter_mut().zip(leftover.drain(..count)) {
+            *slot = byte;
+        }
+        count
+    }
+
+    /// Creates a manual-reset, initially-unset event for the shutdown waker via `CreateEventW`.
+    fn create_manual_reset_event() -> terminal::Result<OwnedHandle> {
+        // SAFETY: null security attributes and name are permitted; `1` (manual reset) and `0`
+        // (initially unset) are plain flags. The handle is validated before adoption.
+        let handle = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
+        if handle.is_null() {
+            return Err(terminal::Error::open_terminal(
+                std::io::Error::last_os_error(),
+            ));
+        }
+        // SAFETY: CreateEventW returned a non-null event handle; adopting it transfers sole
+        // ownership so it is closed exactly once when the OwnedHandle drops.
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
+    }
+
+    /// Duplicates a borrowed handle into an independently-owned one with the same access rights.
+    fn duplicate_handle(source: BorrowedHandle<'_>) -> terminal::Result<OwnedHandle> {
+        let mut out: HANDLE = ptr::null_mut();
+        // SAFETY: the current-process pseudo-handle is always valid; `source` is a live borrowed
+        // handle; `out` is a live out-param; DUPLICATE_SAME_ACCESS copies the source's rights and a
+        // null options/inherit pair is permitted.
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                source.as_raw_handle() as HANDLE,
+                GetCurrentProcess(),
+                &raw mut out,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if ok == 0 {
+            return Err(terminal::Error::open_terminal(
+                std::io::Error::last_os_error(),
+            ));
+        }
+        // SAFETY: DuplicateHandle produced a valid owned handle; adopting it transfers sole
+        // ownership so it is closed exactly once when the OwnedHandle drops.
+        Ok(unsafe { OwnedHandle::from_raw_handle(out) })
+    }
+
+    /// Signals the manual-reset waker event via `SetEvent`, best-effort (teardown has nothing
+    /// better to do with a failure).
+    fn set_event(event: &OwnedHandle) {
+        // SAFETY: `event` is a live owned event handle.
+        let _ = unsafe { SetEvent(event.as_raw_handle() as HANDLE) };
+    }
+
+    /// Writes all of `bytes` to the console output handle via `WriteFile`, looping over partial
+    /// writes.
+    fn write_console(output: &OwnedHandle, bytes: &[u8]) -> terminal::Result<()> {
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let chunk = &bytes[offset..];
+            let length = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
+            let mut written: u32 = 0;
+            // SAFETY: `output` is a live owned console handle; `chunk` is readable for `length`
+            // bytes; `written` is a live out-param; a null OVERLAPPED is valid for the synchronous
+            // console handle.
+            let ok = unsafe {
+                WriteFile(
+                    output.as_raw_handle() as HANDLE,
+                    chunk.as_ptr(),
+                    length,
+                    &raw mut written,
+                    ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                return Err(terminal::Error::write_terminal(
+                    std::io::Error::last_os_error(),
+                ));
+            }
+            if written == 0 {
+                return Err(terminal::Error::write_terminal(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "WriteFile made no progress on console output",
+                )));
+            }
+            offset += written as usize;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn take_leftover_carries_a_chunk_longer_than_the_buffer_across_two_reads() {
+            // A channel chunk larger than the caller buffer: `read` copies what fits and stashes
+            // the rest in the leftover buffer, so the next `read` returns it — no byte
+            // is lost across a short read, and the leftover is on-struct state a
+            // dropped future never strands.
+            let mut leftover = VecDeque::from(b"abcdef".to_vec());
+
+            let mut first = [0u8; 4];
+            assert_eq!(take_leftover(&mut leftover, &mut first), 4);
+            assert_eq!(&first, b"abcd");
+
+            let mut second = [0u8; 4];
+            assert_eq!(
+                take_leftover(&mut leftover, &mut second),
+                2,
+                "only the tail remains"
+            );
+            assert_eq!(&second[..2], b"ef");
+            assert!(leftover.is_empty(), "the leftover buffer drains fully");
+        }
+    }
 }

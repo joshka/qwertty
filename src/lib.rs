@@ -159,7 +159,7 @@ pub mod report;
 mod session;
 mod syntax;
 mod terminal;
-#[cfg(all(feature = "tokio", unix))]
+#[cfg(all(feature = "tokio", any(unix, windows)))]
 mod tokio_session;
 
 pub use caps::{
@@ -185,10 +185,18 @@ pub use syntax::{
     ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
     PasteSequence, StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
 };
+// The public return type of `TerminalDevice::as_console_handles` (the Windows async readiness
+// seam, the analogue of `as_fd`'s `BorrowedFd`); present only with the Tokio driver on
+// Windows.
+#[cfg(all(windows, feature = "tokio"))]
+pub use terminal::ConsoleHandles;
 pub use terminal::{DeviceMode, Error, PixelSize, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};
+#[cfg(all(feature = "tokio", any(unix, windows)))]
+pub use tokio_session::TokioTerminalSession;
+// The resize/signal streams and the acquisition observability are Unix job-control shaped:
+// Windows has no `SIGWINCH`/`SIGTSTP` and no three-branch controlling-terminal fallback (ADR
+// 0022 §7).
 #[cfg(all(feature = "tokio", unix))]
-pub use tokio_session::{
-    ResizeStream, SignalStream, TerminalAcquisition, TerminalSignal, TokioTerminalSession,
-};
+pub use tokio_session::{ResizeStream, SignalStream, TerminalAcquisition, TerminalSignal};

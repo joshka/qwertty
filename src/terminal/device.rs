@@ -91,4 +91,20 @@ pub trait TerminalDevice {
     fn as_fd(&self) -> Option<std::os::fd::BorrowedFd<'_>> {
         None
     }
+
+    /// Returns the console input and output handles behind this device, when it owns a console.
+    ///
+    /// This is the Windows analogue of [`as_fd`](TerminalDevice::as_fd): a console `HANDLE` is not
+    /// a pollable descriptor, so the async driver cannot register it with a reactor, but it *is* a
+    /// waitable object the readiness worker duplicates and waits on (ADR 0022 §4). The worker reads
+    /// input from the returned input handle and writes output to the returned output handle; a
+    /// device that owns no console returns `None` and is rejected the same way an fd-less device is
+    /// on Unix. The live [`Terminal`](crate::Terminal) returns `Some`; every other device defaults
+    /// to `None`.
+    ///
+    /// Present only with the `tokio` feature, whose async readiness worker is the sole consumer.
+    #[cfg(all(windows, feature = "tokio"))]
+    fn as_console_handles(&self) -> Option<crate::terminal::ConsoleHandles<'_>> {
+        None
+    }
 }

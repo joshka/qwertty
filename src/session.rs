@@ -528,10 +528,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// session) uses this to reach the device the session owns — for its pollable fd and its path —
     /// without taking it away from the session's mode ledger and restore paths.
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn device(&self) -> &D {
@@ -560,10 +560,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// run the query), so this records the entry for lifecycle replay without re-emitting; the
     /// `enter` replay path emits the apply bytes on a subsequent re-entry.
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_kitty_keyboard(&mut self, granted: KittyKeyboardFlags) {
@@ -814,10 +814,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// the ledger entry and refreshes the emergency blob without a second write, keeping the
     /// private [`ModeKind`] out of the driver.
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_mouse_enabled(&mut self, mode: MouseMode) {
@@ -832,10 +832,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
     /// Records an already-written focus-events enable in the ledger (Tokio driver path).
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_focus_events_enabled(&mut self) {
@@ -850,10 +850,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
     /// Records an already-written bracketed-paste enable in the ledger (Tokio driver path).
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_bracketed_paste_enabled(&mut self) {
@@ -868,10 +868,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
     /// Records an already-written in-band resize enable in the ledger (Tokio driver path).
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_in_band_resize_enabled(&mut self) {
@@ -891,10 +891,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// through its own readiness path; this records the ledger entry — apply is the enter-and-clear
     /// pair, undo is `CSI ? 1049 l` — and refreshes the emergency blob without a second write.
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_alternate_screen_entered(&mut self) {
@@ -914,10 +914,10 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// entry — apply hides, undo shows (FM-L3) — and refreshes the emergency blob without a second
     /// write.
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
+        not(all(feature = "tokio", any(unix, windows))),
         expect(
             dead_code,
-            reason = "tokio+unix async-driver helper; absent from other builds"
+            reason = "tokio async-driver helper (unix or windows); absent from other builds"
         )
     )]
     pub(crate) fn record_cursor_hidden(&mut self) {

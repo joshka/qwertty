@@ -42,14 +42,17 @@
 //!
 //! # What is NOT here (later milestones)
 //!
-//! No async readiness worker (MW-2), no panic-safe `RestoreHandle` or ctrl-handler signals (MW-3),
-//! no win32-input-mode toggle (MW-4b), no `ConPTY` (MW-5). [`read`](Terminal::read) blocks in
-//! `ReadConsoleInputW`; that is correct for the synchronous device and is what the readiness worker
-//! will wrap, not replace.
+//! No panic-safe `RestoreHandle` or ctrl-handler signals (MW-3), no win32-input-mode toggle
+//! (MW-4b), no `ConPTY` (MW-5). [`read`](Terminal::read) blocks in `ReadConsoleInputW`; that is
+//! correct for the synchronous device. The async readiness worker (MW-2) does **not** wrap this
+//! blocking read — it owns a *separate* [`ConsoleInputReader`](super::console_input) over a
+//! duplicated input handle and only reads after a cancellable wait reports records are pending
+//! (ADR 0022 §4).
 //!
 //! The console-free translation logic (UTF-16 → UTF-8 surrogate carry, record → VT synthesis,
 //! mode-bit arithmetic) lives in [`console_translate`](super::console_translate) so it is unit-
-//! tested on every platform, not only on the Windows CI host.
+//! tested on every platform, not only on the Windows CI host. The record-to-VT translator itself
+//! ([`ConsoleInputReader`](super::console_input)) is shared with the async worker.
 
 // SAFETY SCOPE: this module is the crate's only `unsafe`. Every `unsafe` block wraps a single
 // documented `windows-sys` FFI call (or a `std::mem::zeroed` for a plain out-param struct / a union
@@ -63,8 +66,9 @@
               extern \"system\" call with no safe wrapper in the dependency tree"
 )]
 
-use std::collections::VecDeque;
 use std::io;
+#[cfg(feature = "tokio")]
+use std::os::windows::io::AsHandle;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 
@@ -74,11 +78,13 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Console::{
     CONSOLE_SCREEN_BUFFER_INFO, GetConsoleMode, GetConsoleOutputCP, GetConsoleScreenBufferInfo,
-    INPUT_RECORD, KEY_EVENT, MOUSE_EVENT, ReadConsoleInputW, SetConsoleMode, SetConsoleOutputCP,
-    WINDOW_BUFFER_SIZE_EVENT,
+    INPUT_RECORD, SetConsoleMode, SetConsoleOutputCP,
 };
 
-use super::console_translate::{self as translate, ConsoleMouse, SurrogateCarry};
+#[cfg(feature = "tokio")]
+use super::console_input::ConsoleHandles;
+use super::console_input::{ConsoleInputReader, RECORD_BATCH, read_input_records};
+use super::console_translate::{self as translate};
 use crate::terminal::{DeviceMode, Error, Result, TerminalDevice, TerminalSize};
 
 /// The UTF-8 output codepage set on the console for the raw session's lifetime.
@@ -86,26 +92,6 @@ use crate::terminal::{DeviceMode, Error, Result, TerminalDevice, TerminalSize};
 /// With codepage 65001, [`write_all`](Terminal::write_all) hands UTF-8 straight to `WriteFile` with
 /// no transcoding; the captured original codepage is restored in cooked mode.
 const UTF8_CODEPAGE: u32 = 65001;
-
-/// The virtual-key code for the Alt/Menu key (`VK_MENU`).
-///
-/// Named here rather than pulled from `windows-sys` (which would need the `Win32_UI` feature) to
-/// keep the dependency surface minimal; it is only used to recognize conhost's Alt+numpad quirk.
-const VK_MENU: u16 = 0x12;
-
-/// The per-record cap on repeat-count expansion, bounding the memory one `KEY_EVENT` can produce.
-///
-/// A `KEY_EVENT_RECORD` can in principle claim a `wRepeatCount` of up to 65535; expanding that many
-/// UTF-16 units per record is unbounded pressure the caller never asked for, so the expansion is
-/// capped here. Interactive autorepeat never approaches this.
-const MAX_UNITS_PER_RECORD: usize = 1024;
-
-/// The number of `INPUT_RECORD`s drained from the console per `ReadConsoleInputW` call.
-///
-/// One `read` translates at most this many records, so the bytes a single read can buffer are
-/// bounded by `RECORD_BATCH * MAX_UNITS_PER_RECORD * 3` (worst-case UTF-8 width) — a compile-time
-/// constant, which is what keeps the pending buffer from growing without bound.
-const RECORD_BATCH: usize = 128;
 
 /// A live Windows console terminal device.
 ///
@@ -131,15 +117,11 @@ pub struct Terminal {
     original_output_codepage: u32,
     /// A synthetic device path, kept only so this type mirrors the Unix `Terminal::path` surface.
     path: PathBuf,
-    /// Translated bytes not yet handed to a caller's buffer, retained across [`read`](Self::read)
-    /// calls so no byte is lost when the caller's buffer is smaller than one record batch.
-    pending: VecDeque<u8>,
-    /// The persistent UTF-16 surrogate carry, so an astral character split across two reads pairs
-    /// up.
-    carry: SurrogateCarry,
-    /// The console mouse-button state from the previous `MOUSE_EVENT`, used to tell press from
-    /// release when synthesizing SGR reports.
-    previous_mouse_buttons: u32,
+    /// The shared record-to-VT translator: the surrogate carry, the pending byte buffer, and the
+    /// previous mouse-button state. The async readiness worker (MW-2) owns a *separate*
+    /// [`ConsoleInputReader`] over a duplicated input handle; this synchronous device owns its
+    /// own.
+    reader: ConsoleInputReader,
 }
 
 impl Terminal {
@@ -171,9 +153,7 @@ impl Terminal {
             original_output_mode,
             original_output_codepage,
             path: PathBuf::from("CONIN$"),
-            pending: VecDeque::new(),
-            carry: SurrogateCarry::default(),
-            previous_mouse_buttons: 0,
+            reader: ConsoleInputReader::new(),
         })
     }
 
@@ -378,8 +358,8 @@ impl Terminal {
             return Ok(0);
         }
         loop {
-            if !self.pending.is_empty() {
-                return Ok(self.drain_pending(buffer));
+            if !self.reader.is_pending_empty() {
+                return Ok(self.reader.drain_pending(buffer));
             }
 
             // SAFETY: a zeroed INPUT_RECORD array is a valid initial value; ReadConsoleInputW
@@ -389,104 +369,21 @@ impl Terminal {
             let count = read_input_records(&self.input, &mut records)?;
             if count == 0 {
                 // Broken console (EOF-equivalent): flush a dangling high surrogate once as U+FFFD
-                // so it is not lost, then report EOF on the next iteration's empty
-                // pending.
-                let mut tail = Vec::new();
-                self.carry.flush(&mut tail);
-                if tail.is_empty() {
+                // so it is not lost, then report EOF on the next iteration's empty pending.
+                self.reader.flush_carry();
+                if self.reader.is_pending_empty() {
                     return Ok(0);
                 }
-                self.pending.extend(tail);
                 continue;
             }
 
-            let mut out = Vec::new();
-            for record in &records[..count] {
-                self.translate_record(record, &mut out);
-            }
-            if out.is_empty() {
-                // The batch held only dropped records (key-up chatter, focus/menu events); keep
-                // blocking rather than returning a premature `Ok(0)` the session would read as EOF.
-                continue;
-            }
-            self.pending.extend(out);
+            // Translate the batch into the reader's pending buffer, then loop: the top-of-loop
+            // drain returns the bytes, or — when the batch held only dropped records (key-up
+            // chatter, focus/menu events) and produced nothing — reads again rather than returning
+            // a premature `Ok(0)` the session would read as EOF.
+            self.reader
+                .translate_records(&records[..count], &self.output);
         }
-    }
-
-    /// Copies as many pending bytes as fit into `buffer`, retaining the remainder.
-    fn drain_pending(&mut self, buffer: &mut [u8]) -> usize {
-        let count = buffer.len().min(self.pending.len());
-        for (slot, byte) in buffer.iter_mut().zip(self.pending.drain(..count)) {
-            *slot = byte;
-        }
-        count
-    }
-
-    /// Translates one input record into VT bytes, appending to `out`.
-    fn translate_record(&mut self, record: &INPUT_RECORD, out: &mut Vec<u8>) {
-        match u32::from(record.EventType) {
-            KEY_EVENT => self.translate_key(record, out),
-            MOUSE_EVENT => {
-                // SAFETY: EventType == MOUSE_EVENT, so `MouseEvent` is the active union variant.
-                let mouse = unsafe { record.Event.MouseEvent };
-                let input = ConsoleMouse {
-                    button_state: mouse.dwButtonState,
-                    event_flags: mouse.dwEventFlags,
-                    x: mouse.dwMousePosition.X,
-                    y: mouse.dwMousePosition.Y,
-                };
-                self.previous_mouse_buttons =
-                    translate::translate_mouse(input, self.previous_mouse_buttons, out);
-            }
-            WINDOW_BUFFER_SIZE_EVENT => self.synthesize_resize(out),
-            // FOCUS_EVENT and MENU_EVENT are documented internal-use; any other type is unknown.
-            // All are dropped silently.
-            _ => {}
-        }
-    }
-
-    /// Translates a `KEY_EVENT` record's character into UTF-8 bytes, appending to `out`.
-    fn translate_key(&mut self, record: &INPUT_RECORD, out: &mut Vec<u8>) {
-        // SAFETY: EventType == KEY_EVENT (checked by the caller), so `KeyEvent` is the active union
-        // variant.
-        let key = unsafe { record.Event.KeyEvent };
-        // SAFETY: KEY_EVENT_RECORD_0 read as its `UnicodeChar` (u16) member; every bit pattern is a
-        // valid u16, and the console fills the UTF-16 form under VT input.
-        let unit = unsafe { key.uChar.UnicodeChar };
-        if unit == 0 {
-            return; // Modifier/keypad chatter and key events that carry no character.
-        }
-
-        let key_down = key.bKeyDown != 0;
-        // conhost delivers an Alt+numpad composed character on the key-UP of VK_MENU; that one
-        // key-up carries a real character and must be translated. Every other key-up is dropped.
-        let alt_numpad_release = !key_down && key.wVirtualKeyCode == VK_MENU;
-        if !key_down && !alt_numpad_release {
-            return;
-        }
-
-        let repeat = usize::from(key.wRepeatCount).min(MAX_UNITS_PER_RECORD);
-        for _ in 0..repeat {
-            self.carry.push(unit, out);
-        }
-    }
-
-    /// Synthesizes an in-band resize report from the current window rectangle, appending to `out`.
-    fn synthesize_resize(&self, out: &mut Vec<u8>) {
-        // The record's dwSize is the scrollback buffer, not the visible window; query the live
-        // rect.
-        let Ok(info) = get_screen_buffer_info(&self.output) else {
-            return; // A transient failure during a resize burst is not worth failing the read for.
-        };
-        let window = info.srWindow;
-        let (columns, rows) =
-            translate::window_extent(window.Left, window.Top, window.Right, window.Bottom);
-        if translate::is_degenerate(columns, rows) {
-            return; // Skip a transient degenerate rectangle rather than report a 0x0 resize.
-        }
-        let reported_columns = u16::try_from(columns).unwrap_or(u16::MAX);
-        let reported_rows = u16::try_from(rows).unwrap_or(u16::MAX);
-        translate::format_resize_report(reported_rows, reported_columns, out);
     }
 
     /// Flushes buffered console output.
@@ -583,7 +480,10 @@ fn set_output_codepage(codepage: u32) -> Result<()> {
 }
 
 /// Reads console screen-buffer info via `GetConsoleScreenBufferInfo`.
-fn get_screen_buffer_info(handle: &OwnedHandle) -> Result<CONSOLE_SCREEN_BUFFER_INFO> {
+///
+/// Shared with [`console_input`](super::console_input), which measures the current window rectangle
+/// from an output handle when synthesizing a resize report.
+pub(super) fn get_screen_buffer_info(handle: &OwnedHandle) -> Result<CONSOLE_SCREEN_BUFFER_INFO> {
     // SAFETY: a zeroed CONSOLE_SCREEN_BUFFER_INFO is a valid initial value the call overwrites.
     let mut info: CONSOLE_SCREEN_BUFFER_INFO = unsafe { std::mem::zeroed() };
     // SAFETY: `raw` borrows a live owned handle; `info` is a live, fully-owned out-param sized
@@ -593,20 +493,6 @@ fn get_screen_buffer_info(handle: &OwnedHandle) -> Result<CONSOLE_SCREEN_BUFFER_
         return Err(Error::get_terminal_size(io::Error::last_os_error()));
     }
     Ok(info)
-}
-
-/// Reads a batch of input records via `ReadConsoleInputW`, returning the count filled.
-fn read_input_records(handle: &OwnedHandle, records: &mut [INPUT_RECORD]) -> Result<usize> {
-    let capacity = u32::try_from(records.len()).unwrap_or(u32::MAX);
-    let mut count: u32 = 0;
-    // SAFETY: `raw` borrows a live owned handle; `records` is writable for `capacity` entries;
-    // `count` is a live out-param.
-    let ok =
-        unsafe { ReadConsoleInputW(raw(handle), records.as_mut_ptr(), capacity, &raw mut count) };
-    if ok == 0 {
-        return Err(Error::read_terminal(io::Error::last_os_error()));
-    }
-    Ok(count as usize)
 }
 
 impl TerminalDevice for Terminal {
@@ -635,9 +521,19 @@ impl TerminalDevice for Terminal {
 
     // NOTE: no `as_fd` override. The trait's `as_fd` hook is `#[cfg(unix)]`, so a Windows device
     // never provides it — correct, because a console input HANDLE is not a pollable fd and could
-    // not be registered with `AsyncFd`. The readiness seam Windows needs (a cancellable wait on
-    // the input handle, ADR 0022 §4) is a later milestone (MW-2), not a `TerminalDevice`
-    // method.
+    // not be registered with `AsyncFd`. The Windows readiness seam is `as_console_handles` below
+    // (present only with the `tokio` feature, whose readiness worker is its sole consumer).
+
+    #[cfg(feature = "tokio")]
+    fn as_console_handles(&self) -> Option<ConsoleHandles<'_>> {
+        // The console-owning device exposes both handles so the async readiness worker can
+        // duplicate them: the input handle for its cancellable-wait reads, the output handle for
+        // its writes and resize measurements (ADR 0022 §4, MW-2).
+        Some(ConsoleHandles {
+            input: self.input.as_handle(),
+            output: self.output.as_handle(),
+        })
+    }
 }
 
 impl Drop for Terminal {

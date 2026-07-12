@@ -33,13 +33,16 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         Some("run") => cmd_run(&db_dir, &repo_root, &args[1..]),
         #[cfg(unix)]
+        Some("width-probe") => cmd_width_probe(&repo_root, &args[1..]),
+        #[cfg(unix)]
         Some("target-relay") => cmd_target_relay(&args[1..]),
         _ => {
             eprintln!(
                 "usage: qdb <validate | generate [--check] [reference] | \
                  capture --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] | \
                  run --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] \
-                 [--allow-modal] [--allow-destructive]>"
+                 [--allow-modal] [--allow-destructive] | \
+                 width-probe --target tmux|betamax|kitty|alacritty|wezterm>"
             );
             ExitCode::FAILURE
         }
@@ -177,6 +180,89 @@ fn cmd_run(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `qdb width-probe --target <name>`: measure the terminal's grapheme-cluster advances vs the
+/// static unicode-width baseline and write the db/-owned deviation table `db/width/<target>.toml`
+/// (design 09-width, hybrid mechanism). Observes mode 2027; never enables it.
+#[cfg(unix)]
+fn cmd_width_probe(repo_root: &Path, rest: &[String]) -> ExitCode {
+    use qdb::orchestrate::TargetKind;
+    use qdb::width;
+
+    let mut target = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--target" if i + 1 < rest.len() => {
+                target = TargetKind::parse(&rest[i + 1]);
+                if target.is_none() {
+                    eprintln!("qdb width-probe: unknown target {:?}", rest[i + 1]);
+                    return ExitCode::FAILURE;
+                }
+                i += 2;
+            }
+            other => {
+                eprintln!("qdb width-probe: unexpected argument {other:?}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(kind) = target else {
+        eprintln!("qdb width-probe: --target tmux|betamax|kitty|alacritty|wezterm is required");
+        return ExitCode::FAILURE;
+    };
+
+    let mut adapter = kind.make();
+    let identity = adapter.identity();
+    let timestamp = qdb::orchestrate::utc_timestamp();
+    let report = match width::probe(
+        adapter.as_mut(),
+        kind.slug(),
+        kind.adapter_kind().as_results_str(),
+        &identity.version_hint,
+        &timestamp,
+        120,
+        40,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("qdb width-probe {}: {e}", kind.slug());
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let path = repo_root
+        .join("db")
+        .join("width")
+        .join(format!("{}.toml", kind.slug()));
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("qdb width-probe: creating {}: {e}", parent.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Err(e) = fs::write(&path, width::render_table(&report)) {
+        eprintln!("qdb width-probe: writing {}: {e}", path.display());
+        return ExitCode::FAILURE;
+    }
+    let deviations = report
+        .measurements
+        .iter()
+        .filter(|m| m.advance != Some(m.uw))
+        .count();
+    println!(
+        "qdb width-probe {}: {} clusters, {deviations} deviate from unicode-width, 2027 {} (version {:?})",
+        report.target,
+        report.measurements.len(),
+        if report.supports_2027 {
+            "recognised"
+        } else {
+            "unrecognised"
+        },
+        report.version,
+    );
+    ExitCode::SUCCESS
 }
 
 /// `qdb target-relay --in <fifo> --out <fifo>`: internal — the in-terminal byte relay the

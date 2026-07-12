@@ -31,6 +31,7 @@ pub fn run(db: &Database, repo_root: &Path) -> Vec<String> {
         }
     }
     check_results(db, repo_root, &ids, &mut errors);
+    check_width(repo_root, &mut errors);
     errors.sort();
     errors
 }
@@ -302,6 +303,80 @@ fn check_results(db: &Database, repo_root: &Path, ids: &BTreeSet<&str>, errors: 
                     "results {name}: skipped_class on non-skipped verdict {v:?} for {id}"
                 )),
                 _ => {}
+            }
+        }
+    }
+}
+
+/// Rule: every `db/width/<target>.toml` deviation table (A4) parses, carries its run metadata, and
+/// every `[[cluster]]` names a known corpus id with a valid baseline and a measured advance (or an
+/// honest `no_cpr`). Machines write these; validation guards them like the results seeds do.
+fn check_width(repo_root: &Path, errors: &mut Vec<String>) {
+    let dir = repo_root.join("db").join("width");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return; // no width tables yet is not an error.
+    };
+    let corpus: BTreeSet<&str> = crate::width::CORPUS.iter().map(|c| c.id).collect();
+    let mut paths: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    paths.sort();
+    for path in paths {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        let Ok(text) = fs::read_to_string(&path) else {
+            errors.push(format!("width {name}: cannot read"));
+            continue;
+        };
+        let value: toml::Value = match toml::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(format!("width {name}: parse error: {e}"));
+                continue;
+            }
+        };
+        for field in [
+            "target",
+            "version",
+            "version_source",
+            "adapter",
+            "captured",
+            "runner",
+        ] {
+            if value.get(field).and_then(toml::Value::as_str).is_none() {
+                errors.push(format!("width {name}: missing metadata field {field:?}"));
+            }
+        }
+        if value
+            .get("supports_2027")
+            .and_then(toml::Value::as_bool)
+            .is_none()
+        {
+            errors.push(format!("width {name}: missing or non-bool supports_2027"));
+        }
+        let Some(clusters) = value.get("cluster").and_then(toml::Value::as_array) else {
+            errors.push(format!("width {name}: no [[cluster]] entries"));
+            continue;
+        };
+        for c in clusters {
+            let id = c.get("id").and_then(toml::Value::as_str).unwrap_or("");
+            if !corpus.contains(id) {
+                errors.push(format!("width {name}: unknown cluster id {id:?}"));
+            }
+            if c.get("unicode_width")
+                .and_then(toml::Value::as_integer)
+                .is_none()
+            {
+                errors.push(format!("width {name}: cluster {id} has no unicode_width"));
+            }
+            // Either a measured advance or an honest no_cpr — never a guessed number and a gap.
+            let has_advance = c.get("advance").and_then(toml::Value::as_integer).is_some();
+            let no_cpr = c.get("no_cpr").and_then(toml::Value::as_bool) == Some(true);
+            if has_advance == no_cpr {
+                errors.push(format!(
+                    "width {name}: cluster {id} needs exactly one of advance / no_cpr = true"
+                ));
             }
         }
     }

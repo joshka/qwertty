@@ -50,6 +50,14 @@ impl Fixture {
         self
     }
 
+    /// Writes a `db/width/<target>.toml` deviation table into this temp repo.
+    fn with_width(self, target: &str, body: &str) -> Self {
+        let dir = self.root.join("db").join("width");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{target}.toml")), body).unwrap();
+        self
+    }
+
     /// Writes an extra fixture at `fixtures/test/<name>.seq` (for capture-origin tests).
     fn with_fixture(self, name: &str, body: &str) -> Self {
         let dir = self.root.join("fixtures").join("test");
@@ -350,6 +358,51 @@ fn results_seed_rejects_skipped_without_class() {
         "{:?}",
         fx.errors()
     );
+}
+
+/// A width table header with every metadata field (uses a real corpus cluster id).
+const WIDTH_META: &str = "target = \"tmux\"\nversion = \"tmux 3.7b\"\nversion_source = \"xtversion\"\n\
+     adapter = \"pty-headless\"\ncaptured = \"2026-07-12T00:00:00Z\"\nrunner = \"qdb 0.0.0\"\n\
+     geometry = { cols = 120, rows = 40 }\nsupports_2027 = false\n";
+
+#[test]
+fn width_table_accepted_when_valid() {
+    let body = format!(
+        "{WIDTH_META}\n[[cluster]]\nid = \"ascii-a\"\ntext = \"A\"\nunicode_width = 1\nadvance = 1\n\
+         \n[[cluster]]\nid = \"emoji-zwj-family\"\ntext = \"x\"\nunicode_width = 8\nno_cpr = true\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_width("tmux", &body);
+    assert!(fx.errors().is_empty(), "{:?}", fx.errors());
+}
+
+#[test]
+fn width_table_rejects_unknown_cluster_and_missing_advance() {
+    // Unknown id, and a cluster with neither advance nor no_cpr.
+    let body = format!(
+        "{WIDTH_META}\n[[cluster]]\nid = \"not-a-cluster\"\ntext = \"?\"\nunicode_width = 1\nadvance = 1\n\
+         \n[[cluster]]\nid = \"ascii-a\"\ntext = \"A\"\nunicode_width = 1\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_width("tmux", &body);
+    let errs = fx.errors();
+    assert!(
+        errs.iter().any(|e| e.contains("unknown cluster id")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("exactly one of advance / no_cpr")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn width_table_rejects_missing_metadata() {
+    let body = "target = \"tmux\"\n\n[[cluster]]\nid = \"ascii-a\"\ntext = \"A\"\n\
+                unicode_width = 1\nadvance = 1\n";
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_width("tmux", body);
+    let errs = fx.errors();
+    assert!(errs.iter().any(|e| e.contains("supports_2027")), "{errs:?}");
+    assert!(errs.iter().any(|e| e.contains("version")), "{errs:?}");
 }
 
 /// The real database in the repo must validate clean.

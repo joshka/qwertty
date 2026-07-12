@@ -262,18 +262,63 @@ fn fixture_without_origin_header_rejected() {
     );
 }
 
+/// A results-file header carrying every schema-v2 metadata field, for the seed tests below.
+const RESULTS_META: &str = "target = \"tmux\"\nversion = \"3.7b\"\nversion_source = \"hint\"\n\
+     adapter = \"pty-headless\"\ncaptured = \"2026-07-07T00:00:00Z\"\nrunner = \"qdb 0.0.0\"\n\
+     geometry = { cols = 120, rows = 40 }\n";
+
 #[test]
 fn results_seed_accepted_when_valid() {
-    let body = "target = \"tmux\"\nversion = \"3.7b\"\ncaptured = \"2026-07-07T00:00:00Z\"\n\
-                \n[[result]]\nid = \"test.one\"\nreply_id = \"test.one\"\nstatus = \"answered\"\nreply_len = 6\n";
-    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    let body = format!(
+        "{RESULTS_META}\n[[result]]\nid = \"test.one\"\nreply_id = \"test.one\"\n\
+         verdict = \"supported\"\nreply_len = 6\n\n[[result]]\nid = \"test.one\"\n\
+         verdict = \"skipped\"\nskipped_class = \"modal\"\nreply_len = 0\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", &body);
     assert!(fx.errors().is_empty(), "{:?}", fx.errors());
 }
 
 #[test]
-fn results_seed_rejects_unknown_entry_id() {
-    let body = "\n[[result]]\nid = \"test.ghost\"\nstatus = \"answered\"\nreply_len = 0\n";
+fn results_seed_rejects_missing_metadata() {
+    // No adapter/version_source/runner/geometry: schema v2 requires the whole run-hosting block
+    // for the attended-cell honesty rule, and validate is the only guard (serde defaults keep a
+    // partial file loadable).
+    let body = "target = \"tmux\"\nversion = \"3.7b\"\ncaptured = \"2026-07-07T00:00:00Z\"\n\
+                \n[[result]]\nid = \"test.one\"\nverdict = \"supported\"\nreply_len = 6\n";
     let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    let errs = fx.errors();
+    for field in ["adapter", "version_source", "runner", "geometry"] {
+        assert!(
+            errs.iter().any(|e| e.contains(field)),
+            "expected a {field} error in {errs:?}"
+        );
+    }
+}
+
+#[test]
+fn results_seed_rejects_bad_version_source_and_geometry() {
+    let body = "target = \"tmux\"\nversion = \"3.7b\"\nversion_source = \"guess\"\n\
+                adapter = \"pty-headless\"\ncaptured = \"2026-07-07T00:00:00Z\"\nrunner = \"qdb 0.0.0\"\n\
+                geometry = { cols = \"wide\", rows = 40 }\n\
+                \n[[result]]\nid = \"test.one\"\nverdict = \"supported\"\nreply_len = 6\n";
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+    let errs = fx.errors();
+    assert!(
+        errs.iter().any(|e| e.contains("invalid version_source")),
+        "{errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("geometry must be")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn results_seed_rejects_unknown_entry_id() {
+    let body = format!(
+        "{RESULTS_META}\n[[result]]\nid = \"test.ghost\"\nverdict = \"supported\"\nreply_len = 0\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", &body);
     assert!(
         fx.errors().iter().any(|e| e.contains("unknown entry id")),
         "{:?}",
@@ -282,11 +327,26 @@ fn results_seed_rejects_unknown_entry_id() {
 }
 
 #[test]
-fn results_seed_rejects_invalid_status() {
-    let body = "\n[[result]]\nid = \"test.one\"\nstatus = \"maybe\"\nreply_len = 0\n";
-    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", body);
+fn results_seed_rejects_invalid_verdict() {
+    let body = format!(
+        "{RESULTS_META}\n[[result]]\nid = \"test.one\"\nverdict = \"maybe\"\nreply_len = 0\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", &body);
     assert!(
-        fx.errors().iter().any(|e| e.contains("invalid status")),
+        fx.errors().iter().any(|e| e.contains("invalid verdict")),
+        "{:?}",
+        fx.errors()
+    );
+}
+
+#[test]
+fn results_seed_rejects_skipped_without_class() {
+    let body = format!(
+        "{RESULTS_META}\n[[result]]\nid = \"test.one\"\nverdict = \"skipped\"\nreply_len = 0\n"
+    );
+    let fx = Fixture::new(&good_entry(), Some(GOOD_FIXTURE)).with_results("tmux", &body);
+    assert!(
+        fx.errors().iter().any(|e| e.contains("no skipped_class")),
         "{:?}",
         fx.errors()
     );

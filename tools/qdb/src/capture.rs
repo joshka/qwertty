@@ -115,17 +115,125 @@ pub struct ProbeSpec {
 pub struct Unprobeable {
     /// The query entry id.
     pub query_id: String,
+    /// The reply entry id (`responds` target).
+    pub reply_id: String,
     /// Why the entry is not probed.
     pub reason: String,
 }
 
-/// The runner's probe plan: what will be sent, and what is skipped with a reason.
+/// A query entry excluded from this run by its replay class (the DECSLPP incident rule): a real
+/// query the run chose not to send blind, recorded so results say "skipped, because modal" rather
+/// than omitting it (which the matrix would read as "no evidence").
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Skipped {
+    /// The query entry id.
+    pub query_id: String,
+    /// The reply entry id (`responds` target).
+    pub reply_id: String,
+    /// The replay class that excluded it.
+    pub class: ReplayClass,
+}
+
+/// The runner's probe plan: what will be sent, what is skipped unsafe, and what is skipped by
+/// replay class. Every eligible query entry lands in exactly one of the three lists, so a results
+/// file can account for all of them.
 #[derive(Clone, Debug, Default)]
 pub struct ProbePlan {
     /// Entries that will be probed.
     pub specs: Vec<ProbeSpec>,
-    /// Entries deliberately not probed, with reasons.
+    /// Entries deliberately not probed because sending them is unsafe or ill-defined.
     pub unprobeable: Vec<Unprobeable>,
+    /// Query entries excluded by their replay class under this run's opt-in gate.
+    pub skipped: Vec<Skipped>,
+}
+
+/// A per-entry support verdict (results schema v2). The runner produces the first four
+/// automatically; `Unsupported` is the one negative-evidence verdict it emits, for a reply that
+/// merely echoes the query (the terminal passing input through rather than answering).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Verdict {
+    /// The target answered with a genuine (non-echo) reply — it implements the query.
+    Supported,
+    /// Bytes came back but they are not a real reply (they echo the query) — evidence the query
+    /// is not implemented, distinct from pure silence.
+    Unsupported,
+    /// The target was silent before the deadline. Absence of a reply is data, not proof of
+    /// non-support — kept separate from `unsupported`.
+    NoReply,
+    /// A query the harness will not send blind (side-effecting or ill-defined).
+    Unprobeable,
+    /// A real query this run excluded by its replay class; carries the class.
+    Skipped(ReplayClass),
+}
+
+impl Verdict {
+    /// The `verdict` field spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Supported => "supported",
+            Self::Unsupported => "unsupported",
+            Self::NoReply => "no-reply",
+            Self::Unprobeable => "unprobeable",
+            Self::Skipped(_) => "skipped",
+        }
+    }
+
+    /// Every valid `verdict` field value, for validation.
+    pub const ALL_STRS: [&'static str; 5] = [
+        "supported",
+        "unsupported",
+        "no-reply",
+        "unprobeable",
+        "skipped",
+    ];
+}
+
+/// How the target's version string was obtained, recorded so a reader knows how much to trust it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VersionSource {
+    /// The terminal named itself via XTVERSION — authoritative.
+    XtVersion,
+    /// The adapter's out-of-band probe (`tmux -V`, `betamax --version`) — a fallback.
+    Hint,
+    /// Neither produced a version.
+    None,
+}
+
+impl VersionSource {
+    /// The `version_source` field spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::XtVersion => "xtversion",
+            Self::Hint => "hint",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Run metadata the results file records beside its rows: how the target is hosted, the geometry
+/// it ran under, the runner build, and how the version was resolved.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResultsMeta {
+    /// Adapter-kind spelling for the `adapter` field (`in-process`/`pty-headless`/`attended`).
+    pub adapter: String,
+    /// How `version` was obtained.
+    pub version_source: VersionSource,
+    /// Session columns.
+    pub cols: u16,
+    /// Session rows.
+    pub rows: u16,
+    /// The runner build, e.g. `qdb 0.0.0`.
+    pub runner: String,
+}
+
+impl ResultsMeta {
+    /// The current `qdb` build string for the `runner` field.
+    #[must_use]
+    pub fn runner_version() -> String {
+        format!("qdb {}", env!("CARGO_PKG_VERSION"))
+    }
 }
 
 /// Query entries that answer a `responds` reply but whose probe would be side-effecting or
@@ -169,18 +277,24 @@ impl ProbePlan {
             if !only.is_empty() && !only.iter().any(|id| id == &entry.id) {
                 continue;
             }
-            // Safety gate (the DECSLPP incident rule): excluded modal/destructive entries are
-            // not marked unprobeable, because the reason is the replay class, not the entry.
             // `qdb validate` guarantees the class parses; skip defensively if it ever doesn't.
             let Some(class) = ReplayClass::parse(&entry.replay) else {
                 continue;
             };
+            // Safety gate (the DECSLPP incident rule): a class the run did not opt into is
+            // recorded as skipped, not omitted, so results account for the whole query surface.
             if !allowed.allows(class) {
+                plan.skipped.push(Skipped {
+                    query_id: entry.id.clone(),
+                    reply_id: reply_id.clone(),
+                    class,
+                });
                 continue;
             }
             if let Some(reason) = reasons.get(entry.id.as_str()) {
                 plan.unprobeable.push(Unprobeable {
                     query_id: entry.id.clone(),
+                    reply_id: reply_id.clone(),
                     reason: (*reason).to_string(),
                 });
                 continue;
@@ -196,6 +310,7 @@ impl ProbePlan {
                 }),
                 Err(reason) => plan.unprobeable.push(Unprobeable {
                     query_id: entry.id.clone(),
+                    reply_id: reply_id.clone(),
                     reason,
                 }),
             }
@@ -452,20 +567,32 @@ impl ProbeReport {
     }
 }
 
-/// Renders the conformance results seed for one target: `db/results/<target>.toml`.
-///
-/// One `[[result]]` per probed entry with `status = answered|silent|timeout` and the reply length —
-/// the first caniuse datum. "Silent" and "timeout" are the same wire event (no bytes before the
-/// deadline); we record `timeout` uniformly and note the deadline, letting the renderer read it as
-/// "this target does not answer this query". `qdb validate` checks entries exist and status is
-/// valid.
+/// The support verdict a probed line earned: a genuine reply is `Supported`, an echo is
+/// `Unsupported` (bytes came, but they only mirror the query), silence is `NoReply`.
 #[must_use]
-pub fn render_results(report: &ProbeReport) -> String {
+pub fn verdict_of(line: &ProbeLine) -> Verdict {
+    match line.status {
+        ProbeStatus::Answered if line.echo_suspect => Verdict::Unsupported,
+        ProbeStatus::Answered => Verdict::Supported,
+        ProbeStatus::Timeout => Verdict::NoReply,
+    }
+}
+
+/// Renders the conformance results file (schema v2) for one target: `db/results/<target>.toml`.
+///
+/// Run metadata (adapter kind, geometry, runner build, how the version was obtained) heads the
+/// file; then one `[[result]]` per query entry carrying a support verdict — probed entries
+/// (`supported`/`unsupported`/`no-reply`), `unprobeable` entries, and replay-class-`skipped`
+/// entries. Nothing is omitted: a query the runner did not send is recorded with why, so the
+/// matrix distinguishes "we chose not to probe" from "no evidence at all". `qdb validate` checks
+/// every id exists and every verdict is valid. See `db/README.md`, "Results schema".
+#[must_use]
+pub fn render_results(report: &ProbeReport, plan: &ProbePlan, meta: &ResultsMeta) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "# Conformance results for {} — generated by `qdb capture`, do not hand-edit.",
+        "# Conformance results for {} — generated by qdb, do not hand-edit.",
         report.identity.target
     );
     let _ = writeln!(
@@ -474,18 +601,43 @@ pub fn render_results(report: &ProbeReport) -> String {
     );
     let _ = writeln!(out, "target = {:?}", report.identity.target);
     let _ = writeln!(out, "version = {:?}", report.identity.version);
+    let _ = writeln!(out, "version_source = {:?}", meta.version_source.as_str());
+    let _ = writeln!(out, "adapter = {:?}", meta.adapter);
     let _ = writeln!(out, "captured = {:?}", report.timestamp);
+    let _ = writeln!(out, "runner = {:?}", meta.runner);
+    let _ = writeln!(
+        out,
+        "geometry = {{ cols = {}, rows = {} }}",
+        meta.cols, meta.rows
+    );
+
+    // Probed entries: the verdict follows from the wire outcome.
     for line in &report.lines {
-        let status = match line.status {
-            ProbeStatus::Answered => "answered",
-            ProbeStatus::Timeout => "timeout",
-        };
         let _ = writeln!(out);
         let _ = writeln!(out, "[[result]]");
         let _ = writeln!(out, "id = {:?}", line.query_id);
         let _ = writeln!(out, "reply_id = {:?}", line.reply_id);
-        let _ = writeln!(out, "status = {status:?}");
+        let _ = writeln!(out, "verdict = {:?}", verdict_of(line).as_str());
         let _ = writeln!(out, "reply_len = {}", line.reply_len);
+    }
+    // Entries the harness refuses to send blind.
+    for u in &plan.unprobeable {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "[[result]]");
+        let _ = writeln!(out, "id = {:?}", u.query_id);
+        let _ = writeln!(out, "reply_id = {:?}", u.reply_id);
+        let _ = writeln!(out, "verdict = \"unprobeable\"");
+        let _ = writeln!(out, "reply_len = 0");
+    }
+    // Real queries this run excluded by replay class.
+    for s in &plan.skipped {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "[[result]]");
+        let _ = writeln!(out, "id = {:?}", s.query_id);
+        let _ = writeln!(out, "reply_id = {:?}", s.reply_id);
+        let _ = writeln!(out, "verdict = \"skipped\"");
+        let _ = writeln!(out, "skipped_class = {:?}", s.class.as_str());
+        let _ = writeln!(out, "reply_len = 0");
     }
     out
 }
@@ -760,24 +912,61 @@ mod tests {
         assert_eq!(capture_origin("betamax", ""), "betamax-unknown");
     }
 
+    fn meta() -> ResultsMeta {
+        ResultsMeta {
+            adapter: "pty-headless".to_string(),
+            version_source: VersionSource::XtVersion,
+            cols: 120,
+            rows: 40,
+            runner: "qdb 0.0.0".to_string(),
+        }
+    }
+
     #[test]
-    fn results_lists_every_probed_entry() {
+    fn results_v2_records_every_verdict_class() {
+        // One of each source: probed-answered, probed-echo, probed-silent, unprobeable, skipped.
         let r = report(
             "betamax",
             vec![
                 answered("csi.da.primary", "csi.da.primary_report", "\\e[?62;c"),
+                {
+                    let mut echo = answered("csi.dsr.status", "csi.dsr.ok", "\\e[5n");
+                    echo.echo_suspect = true;
+                    echo
+                },
                 timed_out("osc.52.clipboard_query", "osc.52.clipboard_report"),
             ],
         );
-        let toml = render_results(&r);
+        let plan = ProbePlan {
+            specs: Vec::new(),
+            unprobeable: vec![Unprobeable {
+                query_id: "iterm2.osc1337.request_upload".to_string(),
+                reply_id: "iterm2.osc1337.upload_reply".to_string(),
+                reason: "interactive".to_string(),
+            }],
+            skipped: vec![Skipped {
+                query_id: "dec.mode.origin.query".to_string(),
+                reply_id: "dec.mode.origin.report".to_string(),
+                class: ReplayClass::Modal,
+            }],
+        };
+        let toml = render_results(&r, &plan, &meta());
         assert!(toml.contains("target = \"betamax\""));
-        assert!(toml.contains("id = \"csi.da.primary\""));
-        assert!(toml.contains("status = \"answered\""));
-        assert!(toml.contains("id = \"osc.52.clipboard_query\""));
-        assert!(toml.contains("status = \"timeout\""));
-        // Parseable and shaped as we expect.
+        assert!(toml.contains("version_source = \"xtversion\""));
+        assert!(toml.contains("adapter = \"pty-headless\""));
+        assert!(toml.contains("runner = \"qdb 0.0.0\""));
+        assert!(toml.contains("geometry = { cols = 120, rows = 40 }"));
+        assert!(toml.contains("verdict = \"supported\""));
+        assert!(toml.contains("verdict = \"unsupported\"")); // the echo line
+        assert!(toml.contains("verdict = \"no-reply\""));
+        assert!(toml.contains("verdict = \"unprobeable\""));
+        assert!(toml.contains("verdict = \"skipped\""));
+        assert!(toml.contains("skipped_class = \"modal\""));
+
+        // Parseable and shaped as we expect: 3 probed + 1 unprobeable + 1 skipped = 5 rows.
         let parsed: toml::Value = toml::from_str(&toml).unwrap();
-        assert_eq!(parsed["result"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["result"].as_array().unwrap().len(), 5);
+        assert_eq!(parsed["geometry"]["cols"].as_integer(), Some(120));
     }
 
     #[test]

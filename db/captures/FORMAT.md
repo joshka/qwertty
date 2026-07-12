@@ -75,10 +75,15 @@ out-of-band hint (`tmux -V`, `betamax --version`).
 
 One capture run writes three artifact kinds in one pass (`qdb capture`):
 
-1. These sidecars — the per-entry evidence log, answered and silent alike.
+1. These sidecars — the per-entry evidence log, answered and silent alike. This is the **wire
+   record**: `status` (answered/timeout) and `echo_suspect` are what the terminal did.
 2. `origin=capture:` reply fixtures — minted only for clean answered lines (never for
    `echo_suspect` ones), payload byte-identical to `reply_escaped`.
-3. `db/results/<target>.toml` — the conformance seed the support matrix renders.
+3. `db/results/<target>.toml` — the conformance results (schema v2, see `db/README.md`). This is
+   the **interpretation**: the wire record becomes a support verdict (`answered` → `supported`,
+   `echo_suspect` → `unsupported`, `timeout` → `no-reply`), joined by the plan's `unprobeable`
+   and replay-class-`skipped` entries so every query is accounted for. The sidecar is the
+   evidence; the results row is the claim derived from it.
 
 `qdb run` (the conformance pass) is the same runner loop with recording off: it writes only the
 results seed. `qdb validate` cross-checks that every `origin=capture:` fixture has a sidecar

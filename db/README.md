@@ -9,13 +9,13 @@ This README is the ten-minute read. A new entry is writable from it alone.
 
 ## Layout
 
-| Path                       | What it is                                                        |
-|----------------------------|-------------------------------------------------------------------|
-| `db/<family>.toml`         | The `[[sequence]]` entries for one protocol family                |
-| `db/sources.toml`          | Doc keys mapped to full citations (title, url, retrieved)         |
-| `db/results/<target>.toml` | Live-capture conformance seed: answered/silent/timeout per id     |
-| `db/caniuse.md`            | Generated support matrix rendering the results above (see below)  |
-| `../fixtures/<family>/`    | The `.seq` fixture files an entry's `fixtures` array points at    |
+| Path                       | What it is                                                       |
+| -------------------------- | ---------------------------------------------------------------- |
+| `db/<family>.toml`         | The `[[sequence]]` entries for one protocol family               |
+| `db/sources.toml`          | Doc keys mapped to full citations (title, url, retrieved)        |
+| `db/results/<target>.toml` | Conformance results (schema v2): a support verdict per entry     |
+| `db/caniuse.md`            | Generated support matrix rendering the results above (see below) |
+| `../fixtures/<family>/`    | The `.seq` fixture files an entry's `fixtures` array points at   |
 
 Families partition the way sources and reviewers do: `conpty`, `dec`, `ecma48-csi`, `ecma48-syntax`,
 `iterm2`, `kitty-color`, `kitty-graphics`, `kitty-keyboard`, `kitty-misc`, `kitty-multicursor`,
@@ -91,8 +91,8 @@ every `refs` key resolves in `sources.toml`, every `fixtures` file exists and it
 `direction=` agrees with the entry, `replay` is present and a valid class, any `responds` or
 `superseded_by` target is an existing id, and `description` is non-empty. It also checks the
 capture artifacts below: an `origin=capture:` fixture is terminal-to-host and has a matching
-`db/captures/<target>/` log, and every `db/results/<target>.toml` row names an existing entry with
-a valid status.
+`db/captures/<target>/` log, and every `db/results/<target>.toml` carries its metadata and every
+row names an existing entry with a valid verdict (`skipped` rows carry a valid `skipped_class`).
 
 ## The conformance runner (`qdb run`, `qdb capture`)
 
@@ -127,23 +127,62 @@ reviewable ([`db/captures/FORMAT.md`](captures/FORMAT.md) documents the sidecar 
 | ------------------------------------------------------ | ----------------------------------------------------------------- |
 | `db/captures/<target>/<id>.json`                       | Per-entry sidecar: escaped raw reply, status, identity, timestamp |
 | `fixtures/<family>/<name>_report_capture_<target>.seq` | The minted reply fixture, `origin=capture:` header                |
-| `db/results/<target>.toml`                             | The conformance/caniuse seed: answered/silent/timeout per id      |
+| `db/results/<target>.toml`                             | The conformance/caniuse seed (results schema v2, below)           |
 
 `qdb run` writes only the results seed — the conformance pass mints no trust artifacts.
 
 A minted fixture's path is added to the reply entry's `fixtures` array (a scripted edit that
 preserves formatting). The entry's quarantined `syntax` is **not** touched — deriving syntax from
 captured bytes is review work a later slice does, citing the capture. **Silence is data**: a query
-the target does not answer is recorded as a `timeout` result, not dropped. Entries whose probe
-would be side-effecting or ill-defined to send blind (iTerm2 `RequestUpload`, `Button`) are skipped
-honestly as `unprobeable` with a reason in the runner code. A reply that merely echoes the query
-is recorded `echo_suspect` and never becomes a fixture — the fabrication guard.
+the target does not answer is recorded as `no-reply`, not dropped. Entries whose probe would be
+side-effecting or ill-defined to send blind (iTerm2 `RequestUpload`, `Button`) are recorded
+`unprobeable` with a reason in the runner code. A reply that merely echoes the query is recorded
+`echo_suspect` in its sidecar, never becomes a fixture (the fabrication guard), and earns the
+`unsupported` verdict.
 
 Live runs need the target tools installed and are deliberately **not** in the `check` chain
 (`just capture` skips cleanly when a tool is missing, like `just verify-emulators`). The pure
 logic — the runner loop against a scripted fake target, sidecar/fixture/results rendering, the
 TOML fixture-array edit — is unit-tested, so it is covered by `just check` without a live
 terminal.
+
+## Results schema (`db/results/<target>.toml`, v2)
+
+Each results file is one target's conformance run: metadata about how the run was hosted, then one
+`[[result]]` row per query entry carrying a support verdict. It is generated, never hand-edited
+(design 05: machines write support claims). `qdb validate` enforces the metadata and the verdict
+vocabulary.
+
+**Run metadata** (all top-level, before the first `[[result]]`):
+
+| Field            | Meaning                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| `target`         | Target slug, matching the file name (`tmux`, `betamax`, …)                 |
+| `version`        | The target's version string as captured                                    |
+| `version_source` | How `version` was obtained: `xtversion` (authoritative), `hint`, or `none` |
+| `adapter`        | How the target is hosted: `in-process`, `pty-headless`, or `attended`      |
+| `captured`       | UTC run timestamp, `YYYY-MM-DDTHH:MM:SSZ`                                  |
+| `runner`         | The runner build that produced the file, e.g. `qdb 0.0.0`                  |
+| `geometry`       | Session size, inline table `{ cols = N, rows = N }`                        |
+
+The `adapter` field is the attended-cell honesty rule's anchor: the matrix reads it to show the
+automation level behind each column, and a future policy marks attended cells stale past an age.
+
+**Per-entry verdict** — every query entry (a `responds` link) lands in exactly one row; nothing is
+omitted, so the matrix can tell "chose not to probe" from "no evidence at all":
+
+| Verdict       | Meaning                                                                           |
+| ------------- | --------------------------------------------------------------------------------- |
+| `supported`   | The target answered with a genuine (non-echo) reply — it implements the query     |
+| `unsupported` | Bytes came back but only echoed the query — evidence of non-support, not silence  |
+| `no-reply`    | The target was silent before the deadline (silence is data, not proof either way) |
+| `unprobeable` | A query the harness will not send blind (side-effecting or ill-defined)           |
+| `skipped`     | A real query this run excluded by replay class; carries `skipped_class`           |
+
+A `skipped` row also carries `skipped_class = "modal" | "destructive"`; no other verdict may.
+Every row carries `reply_len` (`0` when nothing genuine arrived). The `supported`/`unsupported`/
+`no-reply` split comes from the wire (see the sidecar `status`/`echo_suspect` in
+`db/captures/FORMAT.md`); `unprobeable`/`skipped` come from the plan, not a live probe.
 
 ## Support matrix (`qdb generate matrix`)
 
@@ -162,18 +201,18 @@ cargo run -p qdb -- generate                 # both docs and the matrix
 matrix in memory and diffs it against the committed file, the same drift-detection pattern
 `generate --check docs` uses for the reference pages.
 
-**Shape**: rows are the queryable sequences — entries with a `responds` link that a capture can
-actually probe (`replay = "safe"`, minus the harness's honestly-unprobeable set) — grouped by
-family in file order. Columns are capture targets, sorted by name, each headed with its captured
-version and timestamp. A cell reports what that target did when probed:
+**Shape**: rows are the queryable sequences — entries with a `responds` link and `replay = "safe"`
+— grouped by family in file order. Columns are capture targets, sorted by name, each headed with
+its captured version, adapter kind, and timestamp. A cell reports the target's support verdict
+(results schema v2, above):
 
-| Cell           | Meaning                                                             |
-|----------------|---------------------------------------------------------------------|
-| `answered (N)` | The target replied; `N` is the raw reply byte length.               |
-| `silent`       | The target ran the probe and produced no reply before the deadline. |
-| `timeout`      | Same wire event as `silent` (no bytes before the deadline).         |
-| `unprobeable`  | The entry is a query but the harness will not send it blind.        |
-| `—`            | No result: this target has not captured this entry.                 |
+| Cell            | Meaning                                                                    |
+|-----------------|----------------------------------------------------------------------------|
+| `supported (N)` | The target answered with a genuine reply; `N` is the raw reply byte length.|
+| `unsupported`   | Bytes came back but only echoed the query — not a real reply.              |
+| `no-reply`      | The target ran the probe and produced no reply before the deadline.        |
+| `unprobeable`   | The entry is a query but the harness will not send it blind.               |
+| `—`             | No result: this target has not recorded this entry.                        |
 
 **Honesty about what this is not**: every capture behind this matrix today is headless — tmux
 driven by `send-keys`, betamax (libghostty) driven by an on-the-fly tape — not an attended,

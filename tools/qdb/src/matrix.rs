@@ -1,12 +1,12 @@
 //! The caniuse support matrix: a rendering of `db/results/<target>.toml` (design 05, "Support
 //! status = conformance results, not registry fields").
 //!
-//! Rows are the queryable sequences — entries with a `responds` link that a capture can actually
-//! probe (`replay = "safe"`, not in the harness's honestly-unprobeable set) — grouped by family in
-//! file order. Columns are capture targets, sorted by name. A cell reports what that target did
-//! when probed: answered (with reply length), silent/timeout, or a dash when the target has no
-//! results file at all. The matrix claims nothing about targets it never captured: **evidence, not
-//! inference** (design 05's "machines write support claims" principle, made visual).
+//! Rows are the queryable sequences — entries with a `responds` link and `replay = "safe"` —
+//! grouped by family in file order. Columns are capture targets, sorted by name. A cell reports the
+//! support verdict that target recorded (results schema v2): supported (with reply length),
+//! unsupported, no-reply, unprobeable, or a dash when the target has no result for the entry. The
+//! matrix claims nothing about targets it never captured: **evidence, not inference** (design 05's
+//! "machines write support claims" principle, made visual).
 //!
 //! Output is deterministic — families and entries render in `Database` order (file order), targets
 //! sorted by name — so a golden test can pin it and `qdb generate --check` can detect drift.
@@ -97,28 +97,39 @@ fn render_header(out: &mut String, targets: &[&ResultsFile]) {
     let _ = writeln!(out, "Captured:");
     let _ = writeln!(out);
     for t in targets {
-        let _ = writeln!(out, "- **{}** ({}) — {}", t.target, t.version, t.captured);
+        // Adapter kind rides along so a reader sees the automation level behind each column
+        // (the attended-cell honesty rule) rather than inferring it.
+        let adapter = if t.adapter.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", t.adapter)
+        };
+        let _ = writeln!(
+            out,
+            "- **{}** ({}{adapter}) — {}",
+            t.target, t.version, t.captured
+        );
     }
     let _ = writeln!(out);
 }
 
-/// Renders the legend explaining cell glyphs.
+/// Renders the legend explaining cell verdicts.
 fn render_legend(out: &mut String) {
     let _ = writeln!(out, "## Legend");
     let _ = writeln!(out);
-    let _ = writeln!(out, "| Glyph | Meaning |");
-    let _ = writeln!(out, "| ----- | ------- |");
+    let _ = writeln!(out, "| Verdict | Meaning |");
+    let _ = writeln!(out, "| ------- | ------- |");
     let _ = writeln!(
         out,
-        "| answered (N) | The target replied; N is the raw reply byte length. |"
+        "| supported (N) | The target answered with a genuine reply; N is the raw reply byte length. |"
     );
     let _ = writeln!(
         out,
-        "| silent | The target ran the probe and produced no reply before the deadline. |"
+        "| unsupported | Bytes came back but only echoed the query — not a real reply; see `db/README.md`. |"
     );
     let _ = writeln!(
         out,
-        "| timeout | Same wire event as silent (no bytes before the deadline); see `db/README.md`. |"
+        "| no-reply | The target ran the probe and produced no reply before the deadline. |"
     );
     let _ = writeln!(
         out,
@@ -126,7 +137,7 @@ fn render_legend(out: &mut String) {
     );
     let _ = writeln!(
         out,
-        "| — | No result: this target has not captured this entry. |"
+        "| — | No result: this target has not recorded this entry. |"
     );
     let _ = writeln!(out);
 }
@@ -159,15 +170,19 @@ fn render_row(
     let _ = writeln!(out);
 }
 
-/// Renders one cell's glyph.
+/// Renders one cell's verdict.
 fn render_cell(cell: Cell<'_>) -> String {
     match cell {
         None => "—".to_string(),
-        Some(row) => match row.status.as_str() {
-            "answered" => format!("answered ({})", row.reply_len),
-            "silent" => "silent".to_string(),
-            "timeout" => "timeout".to_string(),
+        Some(row) => match row.verdict.as_str() {
+            "supported" => format!("supported ({})", row.reply_len),
+            "unsupported" => "unsupported".to_string(),
+            "no-reply" => "no-reply".to_string(),
             "unprobeable" => "unprobeable".to_string(),
+            "skipped" => match &row.skipped_class {
+                Some(class) => format!("skipped ({class})"),
+                None => "skipped".to_string(),
+            },
             other => format!("unknown ({other})"),
         },
     }
@@ -208,17 +223,25 @@ mod tests {
         ResultsFile {
             target: target.to_string(),
             version: version.to_string(),
+            version_source: "hint".to_string(),
+            adapter: "pty-headless".to_string(),
             captured: "2026-07-07T10:00:00Z".to_string(),
+            runner: "qdb 0.0.0".to_string(),
+            geometry: crate::model::Geometry {
+                cols: 120,
+                rows: 40,
+            },
             results: rows,
         }
     }
 
-    fn row(id: &str, status: &str, reply_len: usize) -> ResultRow {
+    fn row(id: &str, verdict: &str, reply_len: usize) -> ResultRow {
         ResultRow {
             id: id.to_string(),
             reply_id: format!("{id}.reply"),
-            status: status.to_string(),
+            verdict: verdict.to_string(),
             reply_len,
+            skipped_class: None,
         }
     }
 
@@ -254,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn cell_reports_answered_with_reply_length() {
+    fn cell_reports_supported_with_reply_length() {
         let db = db_with(vec![Family {
             name: "test".to_string(),
             entries: vec![entry(
@@ -264,13 +287,13 @@ mod tests {
                 "safe",
             )],
         }]);
-        let r = results("tmux", "tmux 3.7b", vec![row("test.query", "answered", 6)]);
+        let r = results("tmux", "tmux 3.7b", vec![row("test.query", "supported", 6)]);
         let out = render(&db, &[r]);
-        assert!(out.contains("answered (6)"));
+        assert!(out.contains("supported (6)"));
     }
 
     #[test]
-    fn cell_reports_timeout() {
+    fn cell_reports_no_reply() {
         let db = db_with(vec![Family {
             name: "test".to_string(),
             entries: vec![entry(
@@ -280,9 +303,27 @@ mod tests {
                 "safe",
             )],
         }]);
-        let r = results("tmux", "tmux 3.7b", vec![row("test.query", "timeout", 0)]);
+        let r = results("tmux", "tmux 3.7b", vec![row("test.query", "no-reply", 0)]);
         let out = render(&db, &[r]);
-        assert!(out.contains("| timeout |"));
+        assert!(out.contains("| no-reply |"));
+    }
+
+    #[test]
+    fn cell_reports_skipped_with_class() {
+        let db = db_with(vec![Family {
+            name: "test".to_string(),
+            entries: vec![entry(
+                "test.query",
+                "Test Query",
+                Some("test.reply"),
+                "safe",
+            )],
+        }]);
+        let mut skipped = row("test.query", "skipped", 0);
+        skipped.skipped_class = Some("modal".to_string());
+        let r = results("tmux", "tmux 3.7b", vec![skipped]);
+        let out = render(&db, &[r]);
+        assert!(out.contains("| skipped (modal) |"));
     }
 
     #[test]
@@ -316,9 +357,9 @@ mod tests {
         let betamax = results(
             "betamax",
             "libghostty",
-            vec![row("test.query", "answered", 5)],
+            vec![row("test.query", "supported", 5)],
         );
-        let tmux = results("tmux", "tmux 3.7b", vec![row("test.query", "answered", 6)]);
+        let tmux = results("tmux", "tmux 3.7b", vec![row("test.query", "supported", 6)]);
         // Pass betamax first; header and table columns must still read tmux before betamax... no,
         // alphabetically betamax < tmux, so betamax leads.
         let out = render(&db, &[tmux, betamax]);

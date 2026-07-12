@@ -10,14 +10,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::capture::{self, AllowedClasses, Artifact, ProbePlan, ProbeReport, ProbeStatus};
+use crate::capture::{
+    self, AllowedClasses, Artifact, ProbePlan, ProbeReport, ProbeStatus, ResultsMeta,
+};
 use crate::model::Database;
 use crate::runner::{self, IdentityCheck, RunnerOptions};
-use crate::targets::Target;
 use crate::targets::alacritty::AlacrittyTarget;
 use crate::targets::betamax::BetamaxTarget;
 use crate::targets::kitty::KittyTarget;
 use crate::targets::tmux::TmuxTarget;
+use crate::targets::{AdapterKind, Target};
 
 /// Which adapter the orchestrator drives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +69,16 @@ impl TargetKind {
             Self::Alacritty => Box::new(AlacrittyTarget::new()),
         }
     }
+
+    /// How this target is hosted, for the results `adapter` field. Every wired target is
+    /// PTY-hosted (relay-based); the value is per-adapter, not assumed, so a future in-process
+    /// adapter reports its own kind.
+    #[must_use]
+    pub const fn adapter_kind(self) -> AdapterKind {
+        match self {
+            Self::Tmux | Self::Betamax | Self::Kitty | Self::Alacritty => AdapterKind::PtyHosted,
+        }
+    }
 }
 
 /// Runs a full capture pass for one target and writes every artifact under `repo_root`:
@@ -82,8 +94,8 @@ pub fn capture(
     kind: TargetKind,
     only: &[String],
 ) -> Result<Summary, String> {
-    let (plan, report) = execute(db, repo_root, kind, only, AllowedClasses::SAFE_ONLY)?;
-    let artifacts = mint_all(db, repo_root, &plan, &report)?;
+    let (plan, report, meta) = execute(db, repo_root, kind, only, AllowedClasses::SAFE_ONLY)?;
+    let artifacts = mint_all(db, repo_root, &plan, &report, &meta)?;
     for artifact in &artifacts {
         write_artifact(repo_root, artifact)?;
     }
@@ -104,10 +116,10 @@ pub fn conformance(
     only: &[String],
     allowed: AllowedClasses,
 ) -> Result<Summary, String> {
-    let (plan, report) = execute(db, repo_root, kind, only, allowed)?;
+    let (plan, report, meta) = execute(db, repo_root, kind, only, allowed)?;
     let results = Artifact {
         path: format!("db/results/{}.toml", report.identity.target),
-        contents: capture::render_results(&report),
+        contents: capture::render_results(&report, &plan, &meta),
     };
     write_artifact(repo_root, &results)?;
     Ok(Summary::from_report(&report, &plan))
@@ -121,7 +133,7 @@ fn execute(
     kind: TargetKind,
     only: &[String],
     allowed: AllowedClasses,
-) -> Result<(ProbePlan, ProbeReport), String> {
+) -> Result<(ProbePlan, ProbeReport, ResultsMeta), String> {
     let mut plan = ProbePlan::build(db, only, allowed);
     plan.read_bytes(repo_root, db)?;
 
@@ -133,6 +145,14 @@ fn execute(
     let mut target = kind.make();
     let timestamp = utc_timestamp();
     let outcome = runner::run(target.as_mut(), &plan, &timestamp, &opts)?;
+
+    let meta = ResultsMeta {
+        adapter: kind.adapter_kind().as_results_str().to_string(),
+        version_source: outcome.version_source,
+        cols: opts.cols,
+        rows: opts.rows,
+        runner: ResultsMeta::runner_version(),
+    };
 
     match &outcome.identity_check {
         IdentityCheck::Verified { .. } => {}
@@ -158,7 +178,7 @@ fn execute(
     if let Some(e) = &outcome.teardown_error {
         eprintln!("qdb {}: teardown: {e}", kind.slug());
     }
-    Ok((plan, outcome.report))
+    Ok((plan, outcome.report, meta))
 }
 
 /// Mints every artifact for a capture run: sidecars, answered-reply fixtures, the fixture-array
@@ -170,6 +190,7 @@ fn mint_all(
     repo_root: &Path,
     plan: &ProbePlan,
     report: &ProbeReport,
+    meta: &ResultsMeta,
 ) -> Result<Vec<Artifact>, String> {
     let mut artifacts = capture::mint_sidecars(report);
 
@@ -228,7 +249,7 @@ fn mint_all(
 
     artifacts.push(Artifact {
         path: format!("db/results/{}.toml", report.identity.target),
-        contents: capture::render_results(report),
+        contents: capture::render_results(report, plan, meta),
     });
     Ok(artifacts)
 }

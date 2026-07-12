@@ -94,33 +94,69 @@ pub struct Family {
     pub entries: Vec<Sequence>,
 }
 
-/// One row of a `db/results/<target>.toml` conformance seed: one probed entry's outcome.
+/// One row of a `db/results/<target>.toml` conformance seed (schema v2): one entry's support
+/// verdict for this target.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResultRow {
-    /// The probed (query) entry id.
+    /// The query entry id.
     pub id: String,
-    /// The reply entry id (`responds` target) the row's outcome belongs to.
+    /// The reply entry id (`responds` target) the row's verdict belongs to.
     #[serde(default)]
     pub reply_id: String,
-    /// `answered`, `silent`, `timeout`, or `unprobeable`.
-    pub status: String,
-    /// Number of raw reply bytes captured; `0` when nothing arrived.
+    /// The support verdict: `supported`, `unsupported`, `no-reply`, `unprobeable`, or `skipped`
+    /// (with `skipped_class` set). See `db/README.md`, "Results schema".
+    pub verdict: String,
+    /// Number of raw reply bytes captured; `0` when nothing genuine arrived.
     #[serde(default)]
     pub reply_len: usize,
+    /// The replay class that caused a `skipped` verdict (`modal`/`destructive`); absent for every
+    /// other verdict.
+    #[serde(default)]
+    pub skipped_class: Option<String>,
 }
 
-/// One `db/results/<target>.toml` file: a target's identity plus its per-entry outcomes.
+/// Session geometry a results run captured under.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct Geometry {
+    /// Columns.
+    pub cols: u16,
+    /// Rows.
+    pub rows: u16,
+}
+
+/// One `db/results/<target>.toml` file (schema v2): a target's run metadata plus its per-entry
+/// verdicts.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResultsFile {
     /// The target's short name, e.g. `tmux` or `betamax`.
     pub target: String,
     /// The target's version string, as captured (e.g. `tmux 3.7b`, `libghostty`).
     pub version: String,
-    /// UTC timestamp the capture ran, RFC-3339-ish (`qdb capture`'s stamp).
+    /// How `version` was obtained: `xtversion` (the terminal named itself — authoritative),
+    /// `hint` (the adapter's out-of-band probe, e.g. `tmux -V`), or `none`.
+    #[serde(default)]
+    pub version_source: String,
+    /// How the target is hosted: `in-process`, `pty-headless`, or `attended`. The attended-cell
+    /// honesty rule keys off this (design `conformance-target-interface.md`).
+    #[serde(default)]
+    pub adapter: String,
+    /// UTC timestamp the run ran, RFC-3339-ish (`qdb`'s stamp).
     pub captured: String,
-    /// One row per probed entry.
+    /// The runner build that produced this file, e.g. `qdb 0.0.0`.
+    #[serde(default)]
+    pub runner: String,
+    /// Session geometry the run used.
+    #[serde(default = "default_geometry")]
+    pub geometry: Geometry,
+    /// One row per entry (probed, unprobeable, or skipped — never omitted).
     #[serde(default, rename = "result")]
     pub results: Vec<ResultRow>,
+}
+
+/// The geometry assumed for a results file that predates the field (none ship without it, but
+/// deserialization needs a fallback rather than a hard failure the loader can't localize).
+fn default_geometry() -> Geometry {
+    Geometry { cols: 0, rows: 0 }
 }
 
 /// The whole database: every family plus the shared source table.

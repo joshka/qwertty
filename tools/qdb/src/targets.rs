@@ -38,6 +38,18 @@ pub enum AdapterKind {
     AttendedGui,
 }
 
+impl AdapterKind {
+    /// The `adapter` field spelling for a results file (schema v2).
+    #[must_use]
+    pub const fn as_results_str(self) -> &'static str {
+        match self {
+            Self::InProcess => "in-process",
+            Self::PtyHosted => "pty-headless",
+            Self::AttendedGui => "attended",
+        }
+    }
+}
+
 /// Identity the results file is keyed by: who this target is and how we drive it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetIdentity {

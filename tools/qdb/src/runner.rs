@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use crate::capture::{Identity, ProbeLine, ProbePlan, ProbeReport, ProbeStatus};
+use crate::capture::{Identity, ProbeLine, ProbePlan, ProbeReport, ProbeStatus, VersionSource};
 use crate::escape;
 use crate::targets::Target;
 
@@ -90,6 +90,9 @@ pub struct RunOutcome {
     /// Reply bytes that arrived before any query was sent (escaped) — identity-probe
     /// stragglers. Recorded rather than dropped; never attributed to a query.
     pub strays: Vec<String>,
+    /// How the target's version was resolved (XTVERSION vs the adapter hint), for the results
+    /// metadata.
+    pub version_source: VersionSource,
     /// A teardown failure, if `end` failed. The captured data is kept either way.
     pub teardown_error: Option<String>,
 }
@@ -132,7 +135,7 @@ pub fn run(
     let da1 = drain_reply(target, opts)?;
     target.feed(XTVERSION)?;
     let xtversion = drain_reply(target, opts)?;
-    let version = resolve_version(&identity.version_hint, &xtversion);
+    let (version, version_source) = resolve_version(&identity.version_hint, &xtversion);
     let identity_check = cross_check(identity.expected_wire_name.as_deref(), &xtversion);
 
     let mut lines: Vec<ProbeLine> = Vec::new();
@@ -181,6 +184,7 @@ pub fn run(
         },
         identity_check,
         strays,
+        version_source,
         teardown_error,
     })
 }
@@ -218,15 +222,21 @@ fn attribute_residue(residue: &[u8], lines: &mut [ProbeLine], strays: &mut Vec<S
     }
 }
 
-/// Picks the terminal's identity version string. The XTVERSION reply is authoritative — it is
-/// the emulator naming *itself* (betamax hosts ghostty, so its XTVERSION is `libghostty`, not
-/// the betamax tool version) — so it wins over the adapter hint (`tmux -V` /
-/// `betamax --version`), which is only a fallback when the terminal answers no XTVERSION.
-fn resolve_version(hint: &str, xtversion: &[u8]) -> String {
+/// Picks the terminal's identity version string and reports how it was obtained. The XTVERSION
+/// reply is authoritative — it is the emulator naming *itself* (betamax hosts ghostty, so its
+/// XTVERSION is `libghostty`, not the betamax tool version) — so it wins over the adapter hint
+/// (`tmux -V` / `betamax --version`), which is only a fallback when the terminal answers no
+/// XTVERSION. An empty hint with no XTVERSION yields `("", None)`.
+fn resolve_version(hint: &str, xtversion: &[u8]) -> (String, VersionSource) {
     if let Some(name) = xtversion_name(xtversion) {
-        return name;
+        return (name, VersionSource::XtVersion);
     }
-    hint.trim().to_string()
+    let hint = hint.trim().to_string();
+    if hint.is_empty() {
+        (hint, VersionSource::None)
+    } else {
+        (hint, VersionSource::Hint)
+    }
 }
 
 /// Extracts the self-reported name from an XTVERSION reply: `ESC P > | <text> ESC \`.
@@ -398,6 +408,7 @@ mod tests {
         ProbePlan {
             specs,
             unprobeable: Vec::new(),
+            skipped: Vec::new(),
         }
     }
 
@@ -546,10 +557,22 @@ mod tests {
         // betamax hosts ghostty: its XTVERSION says `libghostty`, which must win over the
         // `betamax --version` hint so the origin header names the emulator, not the harness.
         let reply = b"\x1bP>|libghostty\x1b\\";
-        assert_eq!(resolve_version("betamax 0.1.15", reply), "libghostty");
-        assert_eq!(resolve_version("tmux 3.7b", b""), "tmux 3.7b");
-        assert_eq!(resolve_version("", b""), "");
-        assert_eq!(resolve_version("  ", b"garbage"), "");
+        assert_eq!(
+            resolve_version("betamax 0.1.15", reply),
+            ("libghostty".to_string(), VersionSource::XtVersion)
+        );
+        assert_eq!(
+            resolve_version("tmux 3.7b", b""),
+            ("tmux 3.7b".to_string(), VersionSource::Hint)
+        );
+        assert_eq!(
+            resolve_version("", b""),
+            (String::new(), VersionSource::None)
+        );
+        assert_eq!(
+            resolve_version("  ", b"garbage"),
+            (String::new(), VersionSource::None)
+        );
     }
 
     #[test]

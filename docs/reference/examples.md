@@ -26,6 +26,9 @@ point without scanning the repository tree.
   (`commands::graphics::kitty::transmit_and_display`, `place`, `delete_image`, `delete_all_images`)
   and print them escaped — encode-only, without opening a terminal, with capability and transmission
   policy documented as session-layer obligations above the encode helpers.
+- `iterm2_inline_image.rs`: build the iTerm2 inline-image command bytes
+  (`commands::graphics::iterm2::inline_image` and `inline_image_sized` with a `Dimension`) and print
+  them escaped — the OSC 1337 `File` inline form, encode-only, without opening a terminal.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore

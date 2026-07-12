@@ -7,12 +7,15 @@
 //! type would erase. See `work/phase2/design/11-graphics.md` for the full surface, capability, and
 //! policy design.
 //!
-//! Currently one protocol is implemented:
+//! Two protocols are implemented:
 //!
 //! - [`kitty`] — the [kitty graphics protocol]: the most capable and the only one that answers a
-//!   support query, so it is the first target.
+//!   support query, so it is the primary target.
+//! - [`iterm2`] — [iTerm2 inline images]: a simpler one-shot form (also spoken by `WezTerm`) with
+//!   no support query, so support is identity-keyed.
 //!
 //! [kitty graphics protocol]: https://sw.kovidgoyal.net/kitty/graphics-protocol/
+//! [iTerm2 inline images]: https://iterm2.com/documentation-images.html
 //!
 //! # These helpers do not gate anything
 //!
@@ -50,4 +53,5 @@
 //! );
 //! ```
 
+pub mod iterm2;
 pub mod kitty;

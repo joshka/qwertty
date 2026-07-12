@@ -241,6 +241,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn mode_undo_bytes_run_in_reverse_and_feed_the_emergency_blob() {
         // Raw first, then mouse, focus, paste — the production byte-based entries.
@@ -282,6 +283,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn re_recording_mouse_replaces_the_tracking_mode_in_place() {
         // Switching from button-event (1002) to any-event (1003) mouse must not leave 1002 enabled;

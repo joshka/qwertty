@@ -125,6 +125,11 @@ fn oneshot_recipe_leaves_no_mode_or_byte_residue() {
     // Orderly restoration. `leave` replays the mode ledger back to cooked mode.
     session.leave().expect("leave restores the terminal");
 
+    // Mode residue: capture the restored slave termios now, while the pty master is still open.
+    // Reading it after the emulator drops the master (below) races the close and can return EIO on
+    // fast or headless machines; after the run it must be byte-for-byte the pre-run cooked state.
+    let restored = tcgetattr(&slave).expect("read restored termios");
+
     // Byte residue (write side): the emulator saw exactly one probe and no extra bytes. Raw-mode
     // entry and the leave path change device *mode*, not bytes, so the only thing ever written to
     // the wire is the single `CSI 6 n`.
@@ -139,8 +144,6 @@ fn oneshot_recipe_leaves_no_mode_or_byte_residue() {
         "the emulator must see exactly one CSI 6 n probe and no residual bytes"
     );
 
-    // Mode residue: after the run the slave termios is byte-for-byte the pre-run cooked state.
-    let restored = tcgetattr(&slave).expect("read restored termios");
     assert_eq!(
         termios_without_pending_input(cooked),
         termios_without_pending_input(restored),

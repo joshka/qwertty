@@ -325,13 +325,13 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Fuzz reconstruction
-        run: cargo +nightly fuzz run syntax_reconstruction -- -max_total_time=30 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run syntax_reconstruction --target x86_64-unknown-linux-gnu -- -max_total_time=30 -rss_limit_mb=1024
       - name: Fuzz split-equivalence
-        run: cargo +nightly fuzz run syntax_split_equivalence -- -max_total_time=30 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run syntax_split_equivalence --target x86_64-unknown-linux-gnu -- -max_total_time=30 -rss_limit_mb=1024
       - name: Fuzz no-panic bounded
-        run: cargo +nightly fuzz run syntax_no_panic_bounded -- -max_total_time=30 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run syntax_no_panic_bounded --target x86_64-unknown-linux-gnu -- -max_total_time=30 -rss_limit_mb=1024
       - name: Fuzz correlator properties
-        run: cargo +nightly fuzz run correlator_properties -- -max_total_time=30 -rss_limit_mb=1024
+        run: cargo +nightly fuzz run correlator_properties --target x86_64-unknown-linux-gnu -- -max_total_time=30 -rss_limit_mb=1024
 
   # Runs the platform-neutral test suite (encode, decode, syntax, events, reports, database
   # consumers) on real Windows. The live-terminal session is Unix-only, so its tests are

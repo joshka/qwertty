@@ -60,6 +60,6 @@ explicit terminal ownership, ordered output, input handling, and policy-aware te
 - Checked-in examples and docs.rs reference pages (`qwertty::docs`) for the public workflows above.
 - Dual `MIT OR Apache-2.0` licensing.
 
-[Unreleased]: https://github.com/joshka/qwertty/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/joshka/qwertty/releases/tag/v0.1.1
-[0.1.0]: https://github.com/joshka/qwertty/releases/tag/v0.1.0
+[Unreleased]: https://github.com/joshka/qwertty/compare/qwertty-v0.1.1...HEAD
+[0.1.1]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.1
+[0.1.0]: https://crates.io/crates/qwertty/0.1.0

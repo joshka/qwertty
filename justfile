@@ -115,8 +115,14 @@ fuzz:
 # platform-neutral surface builds off Unix. Requires the targets (rustup target add
 # x86_64-pc-windows-msvc wasm32-unknown-unknown); kept out of the `check` chain because they are
 # not guaranteed locally. CI runs this plus the real windows-latest test job.
+#
+# The Windows check also compiles the test suite: the clippy library pass alone lets a
+# Unix-only API call in test code sail through locally and die in the windows-latest CI job.
+# No wasm `--tests` equivalent: the `generator` crate (via the loom dev-dependency) has no
+# wasm backend, so the test suite cannot compile for wasm32-unknown-unknown today.
 check-cross:
     cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+    cargo check -p qwertty --tests --target x86_64-pc-windows-msvc
     cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 
 # Supply-chain and dependency-hygiene recipes mirroring the new CI jobs. Each needs a cargo plugin

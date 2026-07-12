@@ -385,6 +385,12 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check Windows target
         run: cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+      # Mirrors `just check-cross`: the clippy library pass alone lets a Unix-only API call in
+      # test code slip through to the windows-latest job; compiling the tests here catches it in
+      # the same fast Linux job. No wasm equivalent — the `generator` crate (via the loom
+      # dev-dependency) has no wasm backend, so tests cannot compile for wasm32-unknown-unknown.
+      - name: Check Windows target (tests)
+        run: cargo check -p qwertty --tests --target x86_64-pc-windows-msvc
       - name: Check wasm target
         run: cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 

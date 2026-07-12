@@ -53,3 +53,21 @@ Fixture renders half-sized text in one cell.
 - Syntax: `OSC 66 ; n=num:d=den[:w=width] ; text ST`
 - References: [kitty Text Sizing Protocol](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/kitty/text_size_fractional.seq`](../../../fixtures/kitty/text_size_fractional.seq)
+
+## Kitty Graphics Delete All (`kitty.graphics.delete_all`)
+
+Deletes every image and placement the terminal is holding (action delete, no target).
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=d ; ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_delete_all.seq`](../../../fixtures/kitty/graphics_delete_all.seq)
+
+## Kitty Graphics Delete Image (`kitty.graphics.delete_image`)
+
+Deletes a single image by its client-assigned id (delete-by-image-id target).
+
+- Direction: host-to-terminal
+- Syntax: `APC G a=d,d=i,i=id ; ST`
+- References: [kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (retrieved 2026-07-06)
+- Fixtures: [`fixtures/kitty/graphics_delete_image.seq`](../../../fixtures/kitty/graphics_delete_image.seq)

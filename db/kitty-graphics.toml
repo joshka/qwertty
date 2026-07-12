@@ -60,3 +60,23 @@ syntax      = "OSC 66 ; n=num:d=den[:w=width] ; text ST"
 refs        = [{ doc = "kitty-text-sizing" }]
 fixtures    = ["fixtures/kitty/text_size_fractional.seq"]
 replay      = "safe"
+
+[[sequence]]
+id          = "kitty.graphics.delete_all"
+name        = "Kitty Graphics Delete All"
+description = "Deletes every image and placement the terminal is holding (action delete, no target)."
+direction   = "host-to-terminal"
+syntax      = "APC G a=d ; ST"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = ["fixtures/kitty/graphics_delete_all.seq"]
+replay      = "safe"
+
+[[sequence]]
+id          = "kitty.graphics.delete_image"
+name        = "Kitty Graphics Delete Image"
+description = "Deletes a single image by its client-assigned id (delete-by-image-id target)."
+direction   = "host-to-terminal"
+syntax      = "APC G a=d,d=i,i=id ; ST"
+refs        = [{ doc = "kitty-graphics" }]
+fixtures    = ["fixtures/kitty/graphics_delete_image.seq"]
+replay      = "safe"

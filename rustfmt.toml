@@ -21,3 +21,8 @@ group_imports = "StdExternalCrate"
 imports_granularity = "Module"
 
 format_macro_matchers = true
+
+# Skip files that carry an `@generated` marker in their first lines (e.g. `src/width_table.rs`,
+# emitted by `qdb width-table`). Their shape is pinned by the generator + a freshness check, so
+# rustfmt must not rewrite them out from under that check.
+format_generated_files = false

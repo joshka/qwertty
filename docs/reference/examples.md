@@ -48,6 +48,13 @@ point without scanning the repository tree.
 - `fake_device.rs`: drive the `TerminalDevice` trait headless with a `FakeDevice` pair, scripting
   input and asserting output without opening a terminal.
 
+## String Width
+
+- `measure_string_width.rs`: probe the terminal, then measure the column width of sample strings
+  with `width_of(&str, &Capabilities)` — the hybrid `unicode-width` baseline plus the per-terminal
+  deviation table for the clusters real terminals disagree on (ZWJ emoji, skin tone, flags, VS16),
+  keyed on identity and the observed mode-2027 state.
+
 ## Input Decoding And Reports
 
 - `parse_cursor_position_report.rs`: tokenize a reply through `SyntaxParser` and parse a

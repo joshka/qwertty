@@ -62,6 +62,14 @@ unsafe_code = "deny"
 all = "warn"
 pedantic = "warn"
 
+# Platform-neutral runtime deps. Width measurement (`width_of`) needs both: `unicode-width` for the
+# static column-width baseline, and `unicode-segmentation` to split a string into grapheme clusters
+# so the per-terminal deviation table (design 09-width) can override a whole cluster. Both are the
+# unicode-rs reference crates, dependency-free.
+[dependencies]
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
+
 [dev-dependencies]
 loom = "0.7"
 

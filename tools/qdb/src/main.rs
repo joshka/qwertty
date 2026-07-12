@@ -28,6 +28,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("validate") => cmd_validate(&db_dir, &repo_root),
         Some("generate") => cmd_generate(&db_dir, &repo_root, &args[1..]),
+        Some("width-table") => cmd_width_table(&repo_root, &args[1..]),
         #[cfg(unix)]
         Some("capture") => cmd_capture(&db_dir, &repo_root, &args[1..]),
         #[cfg(unix)]
@@ -385,6 +386,48 @@ fn cmd_generate(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
         cmd_generate_check(&out_dir, &pages)
     } else {
         cmd_generate_write(&out_dir, &pages)
+    }
+}
+
+/// `qdb width-table [--check]`: write or verify the embedded `src/width_table.rs`, generated from
+/// the `db/width/*.toml` deviation tables (the C2 embedding). `--check` fails on drift instead of
+/// writing — the freshness gate keeping the library's table in sync with the db/ source of truth.
+fn cmd_width_table(repo_root: &Path, rest: &[String]) -> ExitCode {
+    let check = rest.iter().any(|a| a == "--check");
+    if rest.iter().any(|a| a != "--check") {
+        eprintln!("usage: qdb width-table [--check]");
+        return ExitCode::FAILURE;
+    }
+    let generated = match qdb::width::render_rust_table(repo_root) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("qdb width-table: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let path = repo_root.join("src").join("width_table.rs");
+    if check {
+        match fs::read_to_string(&path) {
+            Ok(existing) if existing == generated => {
+                println!("qdb width-table --check: src/width_table.rs up to date");
+                ExitCode::SUCCESS
+            }
+            Ok(_) => {
+                eprintln!("qdb width-table --check: src/width_table.rs drifted from db/width/*");
+                eprintln!("qdb width-table --check: run `qdb width-table` to refresh");
+                ExitCode::FAILURE
+            }
+            Err(e) => {
+                eprintln!("qdb width-table --check: reading {}: {e}", path.display());
+                ExitCode::FAILURE
+            }
+        }
+    } else if let Err(e) = fs::write(&path, &generated) {
+        eprintln!("qdb width-table: writing {}: {e}", path.display());
+        ExitCode::FAILURE
+    } else {
+        println!("qdb width-table: wrote {}", path.display());
+        ExitCode::SUCCESS
     }
 }
 

@@ -65,6 +65,9 @@ opt-in and must be confirmed, never assumed:
 - **Probe, then adapt.** Use `request_kitty_keyboard` (and, on Windows, the win32-input policy) to
   learn what the current terminal supports, and offer richer bindings only where the terminal
   confirmed them.
+- **See it live.** The `input_event_viewer` example prints the decoded event for every key, so you
+  can check exactly which combinations a given terminal distinguishes before you bind them — run it
+  with `cargo run --example input_event_viewer --features tokio`.
 
 ## Related References
 

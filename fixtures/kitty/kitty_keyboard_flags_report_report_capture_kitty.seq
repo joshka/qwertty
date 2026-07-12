@@ -1,0 +1,2 @@
+#! direction=terminal-to-host origin=capture:kitty-0.39.1 date=2026-07-12
+\e[?0u

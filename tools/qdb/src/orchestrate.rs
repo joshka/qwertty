@@ -15,6 +15,7 @@ use crate::model::Database;
 use crate::runner::{self, IdentityCheck, RunnerOptions};
 use crate::targets::Target;
 use crate::targets::betamax::BetamaxTarget;
+use crate::targets::kitty::KittyTarget;
 use crate::targets::tmux::TmuxTarget;
 
 /// Which adapter the orchestrator drives.
@@ -24,6 +25,8 @@ pub enum TargetKind {
     Tmux,
     /// A betamax-hosted headless ghostty-vt hosting the byte relay via an on-the-fly tape.
     Betamax,
+    /// A minimized, task-hidden kitty OS window hosting the byte relay.
+    Kitty,
 }
 
 impl TargetKind {
@@ -33,6 +36,7 @@ impl TargetKind {
         match s {
             "tmux" => Some(Self::Tmux),
             "betamax" => Some(Self::Betamax),
+            "kitty" => Some(Self::Kitty),
             _ => None,
         }
     }
@@ -43,6 +47,7 @@ impl TargetKind {
         match self {
             Self::Tmux => "tmux",
             Self::Betamax => "betamax",
+            Self::Kitty => "kitty",
         }
     }
 
@@ -52,6 +57,7 @@ impl TargetKind {
         match self {
             Self::Tmux => Box::new(TmuxTarget::new()),
             Self::Betamax => Box::new(BetamaxTarget::new()),
+            Self::Kitty => Box::new(KittyTarget::new()),
         }
     }
 }

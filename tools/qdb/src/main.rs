@@ -36,8 +36,8 @@ fn main() -> ExitCode {
         _ => {
             eprintln!(
                 "usage: qdb <validate | generate [--check] [docs|matrix] | \
-                 capture --target tmux|betamax [--entry <id>...] | \
-                 run --target tmux|betamax [--entry <id>...] [--allow-modal] \
+                 capture --target tmux|betamax|kitty [--entry <id>...] | \
+                 run --target tmux|betamax|kitty [--entry <id>...] [--allow-modal] \
                  [--allow-destructive]>"
             );
             ExitCode::FAILURE
@@ -92,7 +92,8 @@ fn parse_drive_args(
             other => return Err(format!("qdb {cmd}: unexpected argument {other:?}")),
         }
     }
-    let target = target.ok_or_else(|| format!("qdb {cmd}: --target tmux|betamax is required"))?;
+    let target =
+        target.ok_or_else(|| format!("qdb {cmd}: --target tmux|betamax|kitty is required"))?;
     Ok(DriveArgs {
         target,
         only,
@@ -101,7 +102,8 @@ fn parse_drive_args(
     })
 }
 
-/// `qdb capture --target tmux|betamax [--entry <id>...]`: drive a real terminal and mint artifacts.
+/// `qdb capture --target tmux|betamax|kitty [--entry <id>...]`: drive a real terminal and mint
+/// artifacts.
 #[cfg(unix)]
 fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     use qdb::orchestrate;
@@ -135,7 +137,7 @@ fn cmd_capture(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     }
 }
 
-/// `qdb run --target tmux|betamax [--entry <id>...] [--allow-modal] [--allow-destructive]`:
+/// `qdb run --target tmux|betamax|kitty [--entry <id>...] [--allow-modal] [--allow-destructive]`:
 /// the conformance pass — same loop as capture, results seed only.
 #[cfg(unix)]
 fn cmd_run(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {

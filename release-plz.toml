@@ -8,7 +8,11 @@
 [workspace]
 # Only `qwertty` is publishable; `tools/qdb` sets `publish = false` in its own manifest.
 changelog_update = false
-release_always = false
+# `release_always = true` lets the release job publish whenever main's version is ahead of crates.io,
+# not only from a merged release-PR commit. The workflow's own `if` still restricts WHEN the release
+# job runs (a `workflow_dispatch` or a `chore: release` commit), so ordinary pushes never publish —
+# this just also enables a direct `workflow_dispatch` release. The release-PR flow is unaffected.
+release_always = true
 semver_check = true
 
 git_release_body = """

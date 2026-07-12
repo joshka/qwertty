@@ -76,6 +76,11 @@ point without scanning the repository tree.
   cursor-position queries, write ordered output, and leave explicitly.
 - `tokio_input_events.rs`: read decoded `Event` values through
   `TokioTerminalSession::next_event`.
+- `input_event_viewer.rs`: the one input example that runs on **both Unix and Windows** — a
+  continuous viewer that enables mouse/focus/paste, probes kitty keyboard, and prints every decoded
+  `Event` until Ctrl-C. It is the interactive driver for the
+  [Windows validation runbook](https://github.com/joshka/qwertty/blob/main/docs/development/windows-validation.md)
+  (eyeballing live keys, IME/CJK input, mouse, and resize across the terminal matrix).
 - `kitty_keyboard.rs`: request kitty keyboard progressive-enhancement flags with verify-after-push
   (`TokioTerminalSession::request_kitty_keyboard`), inspect the granted subset, and decode rich key
   events including releases and modifiers; the session pops the granted flags on `leave`.

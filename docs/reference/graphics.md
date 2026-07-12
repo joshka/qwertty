@@ -6,10 +6,14 @@ the bytes for these protocols with typed, encode-only helpers under
 protocols differ in ways (placement, deletion, whether the terminal answers a support query) that a
 single "draw an image" abstraction would hide.
 
-Today one protocol is implemented: the
-[kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), in
-[`commands::graphics::kitty`](crate::commands::graphics::kitty). It is the first target because it
-is the most capable and the only one that can be *probed* for support.
+Two protocols are implemented:
+
+- the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), in
+  [`commands::graphics::kitty`](crate::commands::graphics::kitty) — the most capable, and the only
+  one that can be *probed* for support;
+- [iTerm2 inline images](https://iterm2.com/documentation-images.html), in
+  [`commands::graphics::iterm2`](crate::commands::graphics::iterm2) — a simpler one-shot form (also
+  spoken by `WezTerm`) with no support query.
 
 ## What these helpers do and do not do
 
@@ -58,9 +62,27 @@ let show = CommandBuffer::new()
 assert_eq!(show, b"\x1b_Ga=T,f=100;AAAA\x1b\\");
 ```
 
+## iTerm2 inline images at a glance
+
+iTerm2 (and `WezTerm`) display an image with an OSC 1337 `File` command:
+
+```text
+ESC ] 1337 ; File=<key=value>;… : <base64-payload> ESC \
+```
+
+Only the inline form (`inline=1`, the caller's own bytes) is built — the escape names no file, so
+it opens no resource. The helpers cover:
+
+- `inline_image` → `ESC ]1337;File=inline=1:<b64> ESC \` — show an image at its natural size.
+- `inline_image_sized` → adds `;width=<w>;height=<h>` — constrain to a `Dimension` (cells, pixels,
+  percent, or auto).
+
+Unlike kitty, the protocol has no support query, so a session gates emission on a terminal-identity
+finding rather than a probe.
+
 ## Not yet built
 
-The support probe and capability finding, the policy-gated file/temp/shared-memory transmission
-forms, image-id-carrying transmission, and the second protocol (iTerm2 inline images) are planned
-follow-ups. The full surface, capability, and policy design is in
+The support probe and capability findings (kitty's readback query and iTerm2's identity keying), the
+policy-gated file/temp/shared-memory transmission forms, and image-id-carrying kitty transmission are
+planned follow-ups. The full surface, capability, and policy design is in
 `work/phase2/design/11-graphics.md`.

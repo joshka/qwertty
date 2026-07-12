@@ -11,6 +11,14 @@ entries.
 
 ## [Unreleased]
 
+### Added
+
+- iTerm2 inline-image command encoders under `commands::graphics::iterm2`: `inline_image` and
+  `inline_image_sized` (with a `Dimension` of cells, pixels, percent, or auto) build the OSC 1337
+  `File` inline form (also spoken by WezTerm). Encode-only and inline-bytes-only, like the kitty
+  encoders — no file path, no capability check, no policy; iTerm2 support is identity-keyed at the
+  session layer, a later slice.
+
 ## [0.1.3] - 2026-07-12
 
 ### Added

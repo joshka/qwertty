@@ -11,6 +11,18 @@ entries.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-12
+
+Maintenance release — internal CI, test, and packaging fixes only. No library code or public API
+changes since 0.1.1.
+
+### Fixed
+
+- Corrected the CHANGELOG version links to point at the real `qwertty-v*` release tags.
+- Restored CI to green across all platforms: gated two Unix-only `ModeLedger` unit tests so the
+  Windows build compiles, pinned the fuzz job to the host target, fixed a pty-teardown race in the
+  one-shot residue integration test, and skipped the Unix-only doctests on the Windows job.
+
 ## [0.1.1] - 2026-07-10
 
 Documentation-only patch release; no library code or public API changes.
@@ -60,6 +72,7 @@ explicit terminal ownership, ordered output, input handling, and policy-aware te
 - Checked-in examples and docs.rs reference pages (`qwertty::docs`) for the public workflows above.
 - Dual `MIT OR Apache-2.0` licensing.
 
-[Unreleased]: https://github.com/joshka/qwertty/compare/qwertty-v0.1.1...HEAD
+[Unreleased]: https://github.com/joshka/qwertty/compare/qwertty-v0.1.2...HEAD
+[0.1.2]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.2
 [0.1.1]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.1
 [0.1.0]: https://crates.io/crates/qwertty/0.1.0

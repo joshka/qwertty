@@ -6,12 +6,12 @@
 //!
 //! Every reversible state change a session makes is recorded in an internal mode ledger with the
 //! actions that apply and undo it. All lifecycle paths replay that one ledger:
-//! [`TerminalSession::enter`] applies it, and orderly [`TerminalSession::leave`], drop, and (on
-//! Unix) the panic-safe [`RestoreHandle`] undo it in reverse enablement order.
+//! [`TerminalSession::enter`] applies it, and orderly [`TerminalSession::leave`], drop, and the
+//! panic-safe [`RestoreHandle`] undo it in reverse enablement order.
 
 mod kitty;
 mod ledger;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod restore;
 
 #[cfg(unix)]
@@ -20,7 +20,9 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub use kitty::{KittyKeyboardFlags, KittyKeyboardGrant};
-#[cfg(unix)]
+#[cfg(windows)]
+use restore::ConsoleModeRestore;
+#[cfg(any(unix, windows))]
 pub use restore::RestoreHandle;
 
 use crate::commands::terminal::MouseMode;
@@ -98,7 +100,7 @@ pub struct TerminalSession<D: TerminalDevice = Terminal> {
     ledger: ModeLedger,
     entered: bool,
     policy: Policy,
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     restore: Option<RestoreHandle>,
     /// The sans-io query state driven by the synchronous query helpers (design 04, review-02 §2).
     ///
@@ -191,13 +193,18 @@ impl TerminalSession<Terminal> {
             emergency_device(&terminal)?,
             terminal.cooked_mode(),
         ));
+        #[cfg(windows)]
+        let restore = {
+            let (output, input, modes) = emergency_console(&terminal)?;
+            Some(RestoreHandle::new(output, input, modes))
+        };
 
         let mut session = Self {
             device: terminal,
             ledger: ModeLedger::new(),
             entered: false,
             policy: Policy::default(),
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             restore,
             #[cfg(unix)]
             query: QueryState::new(),
@@ -212,7 +219,7 @@ impl TerminalSession<Terminal> {
     /// The handle stays valid without borrowing the session, so it can live inside a panic hook
     /// installed once for the whole program. See [`RestoreHandle`] for the hook pattern and what
     /// the emergency path covers.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -241,7 +248,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
             ledger: ModeLedger::new(),
             entered: false,
             policy: Policy::default(),
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             restore: None,
             #[cfg(unix)]
             query: QueryState::new(),
@@ -280,7 +287,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
         }
         self.entered = true;
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(restore) = &self.restore {
             restore.publish_blob(&self.ledger.protocol_undo_bytes());
             restore.arm();
@@ -316,7 +323,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
         }
         self.entered = false;
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(restore) = &self.restore
             && !restore.disarm()
         {
@@ -582,7 +589,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
         // Refresh the emergency blob so a panic between now and the next `enter` still resets the
         // keyboard flags (the ledger's emergency form is the stronger pop-all).
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(restore) = &self.restore {
             restore.publish_blob(&self.ledger.protocol_undo_bytes());
         }
@@ -802,7 +809,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
         // Refresh the emergency blob so a panic between now and the next `enter` still resets this
         // mode from the ledger's byte-based undo.
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if let Some(restore) = &self.restore {
             restore.publish_blob(&self.ledger.protocol_undo_bytes());
         }
@@ -1375,6 +1382,35 @@ fn emergency_device(terminal: &Terminal) -> terminal::Result<std::fs::File> {
         Ok(device) => Ok(device),
         Err(_) => terminal.try_clone_device(),
     }
+}
+
+/// Duplicates the console handles and captures the modes for the emergency restore path (Windows).
+///
+/// The panic-safe [`RestoreHandle`] needs its own handles so it can write the teardown blob and
+/// reset the console modes without borrowing the session's device: an output dup to `WriteFile`
+/// the blob and an input dup whose mode it resets. The captured input mode, output mode, and output
+/// codepage are the same values the device's cooked-mode restore puts back — the emergency path
+/// restores exactly what was live at open, never synthesized defaults.
+///
+/// # Errors
+///
+/// Returns an error when either console handle cannot be duplicated.
+#[cfg(windows)]
+fn emergency_console(
+    terminal: &Terminal,
+) -> terminal::Result<(
+    std::os::windows::io::OwnedHandle,
+    std::os::windows::io::OwnedHandle,
+    ConsoleModeRestore,
+)> {
+    let output = terminal.try_clone_output_handle()?;
+    let input = terminal.try_clone_input_handle()?;
+    let modes = ConsoleModeRestore::new(
+        terminal.original_input_mode(),
+        terminal.original_output_mode(),
+        terminal.original_output_codepage(),
+    );
+    Ok((output, input, modes))
 }
 
 #[cfg(all(test, unix))]

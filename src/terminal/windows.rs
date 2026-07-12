@@ -42,8 +42,10 @@
 //!
 //! # What is NOT here (later milestones)
 //!
-//! No panic-safe `RestoreHandle` or ctrl-handler signals (MW-3), no win32-input-mode toggle
-//! (MW-4b), no `ConPTY` (MW-5). [`read`](Terminal::read) blocks in `ReadConsoleInputW`; that is
+//! No win32-input-mode toggle (MW-4b), no `ConPTY` (MW-5). The panic-safe restore handle (MW-3)
+//! lives in the session layer; this device only exposes the handle dups and captured modes that
+//! handle needs (`try_clone_output_handle` and friends).
+//! [`read`](Terminal::read) blocks in `ReadConsoleInputW`; that is
 //! correct for the synchronous device. The async readiness worker (MW-2) does **not** wrap this
 //! blocking read — it owns a *separate* [`ConsoleInputReader`](super::console_input) over a
 //! duplicated input handle and only reads after a cancellable wait reports records are pending
@@ -72,7 +74,10 @@ use std::os::windows::io::AsHandle;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    DUPLICATE_SAME_ACCESS, DuplicateHandle, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, WriteFile,
 };
@@ -80,6 +85,7 @@ use windows_sys::Win32::System::Console::{
     CONSOLE_SCREEN_BUFFER_INFO, GetConsoleMode, GetConsoleOutputCP, GetConsoleScreenBufferInfo,
     INPUT_RECORD, SetConsoleMode, SetConsoleOutputCP,
 };
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 #[cfg(feature = "tokio")]
 use super::console_input::ConsoleHandles;
@@ -177,6 +183,45 @@ impl Terminal {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Duplicates the console output handle for the emergency restore path (MW-3).
+    ///
+    /// The panic-safe restore handle writes the teardown blob through its own output dup, so its
+    /// best-effort write never contends with the session's own console I/O.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OpenTerminal`] when the handle cannot be duplicated.
+    pub(crate) fn try_clone_output_handle(&self) -> Result<OwnedHandle> {
+        duplicate_handle(&self.output)
+    }
+
+    /// Duplicates the console input handle for the emergency restore path (MW-3).
+    ///
+    /// The restore handle resets the console input mode through its own input dup, mirroring the
+    /// device's cooked-mode restore without borrowing the session's device.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OpenTerminal`] when the handle cannot be duplicated.
+    pub(crate) fn try_clone_input_handle(&self) -> Result<OwnedHandle> {
+        duplicate_handle(&self.input)
+    }
+
+    /// Returns the console input mode captured at open, restored as cooked mode on teardown.
+    pub(crate) fn original_input_mode(&self) -> u32 {
+        self.original_input_mode
+    }
+
+    /// Returns the console output mode captured at open, restored on teardown.
+    pub(crate) fn original_output_mode(&self) -> u32 {
+        self.original_output_mode
+    }
+
+    /// Returns the console output codepage captured at open, restored on teardown.
+    pub(crate) fn original_output_codepage(&self) -> u32 {
+        self.original_output_codepage
     }
 
     /// Returns the current console window size in character cells.
@@ -406,6 +451,34 @@ impl Terminal {
 /// will still close the handle.
 fn raw(handle: &OwnedHandle) -> HANDLE {
     handle.as_raw_handle()
+}
+
+/// Duplicates a console handle into an independently-owned one with the same access rights.
+///
+/// The emergency restore path (MW-3) owns its own input/output handles so it can reset the console
+/// without borrowing the session's device; each is a `DuplicateHandle` of the device's handle.
+fn duplicate_handle(source: &OwnedHandle) -> Result<OwnedHandle> {
+    let mut out: HANDLE = std::ptr::null_mut();
+    // SAFETY: the current-process pseudo-handle is always valid; `source` is a live owned handle;
+    // `out` is a live out-param; DUPLICATE_SAME_ACCESS copies the source's rights and the null
+    // options/inherit pair is permitted.
+    let ok = unsafe {
+        DuplicateHandle(
+            GetCurrentProcess(),
+            raw(source),
+            GetCurrentProcess(),
+            &raw mut out,
+            0,
+            0,
+            DUPLICATE_SAME_ACCESS,
+        )
+    };
+    if ok == 0 {
+        return Err(Error::open_terminal(io::Error::last_os_error()));
+    }
+    // SAFETY: DuplicateHandle produced a valid owned handle; adopting it transfers sole ownership
+    // so it is closed exactly once when the OwnedHandle drops.
+    Ok(unsafe { OwnedHandle::from_raw_handle(out) })
 }
 
 /// Opens one console device by name (`CONIN$` or `CONOUT$`) via `CreateFileW`.

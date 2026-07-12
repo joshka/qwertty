@@ -327,6 +327,7 @@ mod windows_transport {
     use std::collections::VecDeque;
     use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
     use std::ptr;
+    use std::sync::Arc;
     use std::thread::JoinHandle;
 
     use tokio::sync::mpsc;
@@ -336,7 +337,7 @@ mod windows_transport {
     use windows_sys::Win32::Storage::FileSystem::WriteFile;
     use windows_sys::Win32::System::Console::INPUT_RECORD;
     use windows_sys::Win32::System::Threading::{
-        CreateEventW, GetCurrentProcess, INFINITE, SetEvent, WaitForMultipleObjects,
+        CreateEventW, GetCurrentProcess, INFINITE, ResetEvent, SetEvent, WaitForMultipleObjects,
     };
 
     use crate::terminal::{
@@ -381,12 +382,28 @@ mod windows_transport {
     /// never hang shutdown.
     #[derive(Debug)]
     pub(in crate::tokio_session) struct ConsoleReadiness {
-        /// The manual-reset waker event. Teardown [`SetEvent`]s it to free a worker parked in the
-        /// wait; a duplicate of the same underlying event object is what the worker waits on.
+        /// The manual-reset waker event. Teardown and [`pause`](Self::pause) [`SetEvent`] it to
+        /// free a worker parked in the wait; [`resume`](Self::resume) [`ResetEvent`]s it
+        /// before respawn. A duplicate of the same underlying event object
+        /// ([`worker_waker`](Self::worker_waker)) is what the worker waits on.
         waker: OwnedHandle,
-        /// The receiver end of the worker→session byte channel. Dropped on teardown so a worker
-        /// parked in `blocking_send` unblocks. `Option` only so it can be dropped *before* the
-        /// join inside [`Drop`].
+        /// The worker's console input dup, shared with the spawned worker through an [`Arc`] so
+        /// [`resume`](Self::resume) can respawn a fresh worker over the *same* input handle. The
+        /// worker holds its own [`Arc`] clone for the duration of its loop; the transport's clone
+        /// keeps the handle alive across a [`pause`](Self::pause).
+        worker_input: Arc<OwnedHandle>,
+        /// The worker's console output dup (for resize measurement), shared with the worker
+        /// through an [`Arc`] for the same respawn reason as
+        /// [`worker_input`](Self::worker_input).
+        worker_output: Arc<OwnedHandle>,
+        /// The worker's waker dup — a duplicate of the same event object as
+        /// [`waker`](Self::waker) — shared through an [`Arc`] so a respawned worker waits on the
+        /// same event the transport signals.
+        worker_waker: Arc<OwnedHandle>,
+        /// The receiver end of the worker→session byte channel. Dropped on teardown (and on
+        /// [`pause`](Self::pause)) so a worker parked in `blocking_send` unblocks;
+        /// [`resume`](Self::resume) replaces it with the receiver of a fresh channel. `Option` so
+        /// it can be dropped *before* the join inside [`Drop`] and [`pause`](Self::pause).
         receiver: Option<mpsc::Receiver<Vec<u8>>>,
         /// A duplicate of the console output handle, written by [`write_all`](Self::write_all).
         output: OwnedHandle,
@@ -394,7 +411,9 @@ mod windows_transport {
         /// before the next `recv`. This is the on-struct state that makes `read` cancel-safe
         /// across a buffer smaller than one channel chunk.
         leftover: VecDeque<u8>,
-        /// The worker thread's join handle, joined on teardown. `Option` so [`Drop`] can take it.
+        /// The worker thread's join handle, joined on teardown and on [`pause`](Self::pause).
+        /// `Option` so [`Drop`] and [`pause`](Self::pause) can take it, and so a paused (or
+        /// failed-resume) transport has no live worker to double-join.
         worker: Option<JoinHandle<()>>,
     }
 
@@ -413,27 +432,79 @@ mod windows_transport {
         /// Returns [`terminal::Error::OpenTerminal`] when a handle or the waker event cannot be
         /// duplicated or created.
         pub(in crate::tokio_session) fn new(handles: ConsoleHandles<'_>) -> terminal::Result<Self> {
-            let worker_input = duplicate_handle(handles.input)?;
-            let worker_output = duplicate_handle(handles.output)?;
+            let worker_input = Arc::new(duplicate_handle(handles.input)?);
+            let worker_output = Arc::new(duplicate_handle(handles.output)?);
             let write_output = duplicate_handle(handles.output)?;
 
             let waker = create_manual_reset_event()?;
-            let worker_waker = duplicate_handle(waker.as_handle())?;
+            let worker_waker = Arc::new(duplicate_handle(waker.as_handle())?);
 
-            let (sender, receiver) = mpsc::channel::<Vec<u8>>(CHANNEL_CAPACITY);
-
-            let worker = std::thread::Builder::new()
-                .name("qwertty-console-reader".to_owned())
-                .spawn(move || worker_loop(&worker_input, &worker_output, &worker_waker, &sender))
-                .map_err(terminal::Error::open_terminal)?;
+            let (worker, receiver) = spawn_worker(&worker_input, &worker_output, &worker_waker)?;
 
             Ok(Self {
                 waker,
+                worker_input,
+                worker_output,
+                worker_waker,
                 receiver: Some(receiver),
                 output: write_output,
                 leftover: VecDeque::new(),
                 worker: Some(worker),
             })
+        }
+
+        /// Pauses the reader worker for a `run_detached` console handoff, keeping the transport.
+        ///
+        /// While a synchronous child owns the console, the worker must **not** be calling
+        /// `ReadConsoleInputW` on the same input, or the child and the worker would steal each
+        /// other's keystrokes. This signals the waker to free the worker from its wait, drops the
+        /// channel receiver so a worker parked in `blocking_send` also unblocks (the same two-way
+        /// unblock as [`Drop`]), and joins the worker — so after `pause` returns there is no live
+        /// worker reading the console. The console handles and the waker event survive on the
+        /// struct for [`resume`](Self::resume).
+        ///
+        /// Buffered input is **discarded**: any channel chunks the worker had already sent, and any
+        /// [`leftover`](Self::leftover) tail, are dropped. Stale pre-child bytes are surprising
+        /// after a child consumed the console, so post-child reads start clean (ADR 0022
+        /// §7).
+        pub(in crate::tokio_session) fn pause(&mut self) {
+            // Free a worker parked in the wait, then close the channel so a worker parked in
+            // `blocking_send` unblocks too; either path breaks within one bounded step. Only then
+            // join — the worker can never wedge (it never parks uncancellably inside a read).
+            set_event(&self.waker);
+            drop(self.receiver.take());
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+            // Discard any bytes buffered before the child ran so post-child reads start clean.
+            self.leftover.clear();
+        }
+
+        /// Resumes the reader worker after a `run_detached` handoff, over the same console handles.
+        ///
+        /// Re-arms the waker (`ResetEvent`, so the fresh worker's wait is not immediately freed by
+        /// the pause signal), then respawns the worker over the same input/output/waker handles
+        /// with a **fresh** channel, whose receiver replaces the one [`pause`](Self::pause)
+        /// dropped. On success the transport again has one live worker feeding the channel.
+        ///
+        /// On failure — the waker cannot be reset or the reader thread cannot be spawned — the
+        /// transport is left with **no** live worker and no receiver (both `None`), so a subsequent
+        /// [`Drop`] does not double-join and the failed-resume state is well-defined: the caller's
+        /// `run_detached` surfaces the error rather than wedging the session.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`terminal::Error::SetTerminalMode`] when the waker cannot be reset, or
+        /// [`terminal::Error::OpenTerminal`] when the reader thread cannot be spawned.
+        pub(in crate::tokio_session) fn resume(&mut self) -> terminal::Result<()> {
+            // Re-arm the waker before respawning so the fresh worker does not observe the pause
+            // signal still set and break out of its very first wait.
+            reset_event(&self.waker)?;
+            let (worker, receiver) =
+                spawn_worker(&self.worker_input, &self.worker_output, &self.worker_waker)?;
+            self.receiver = Some(receiver);
+            self.worker = Some(worker);
+            Ok(())
         }
 
         /// Drains the leftover buffer first; otherwise awaits the next channel chunk and returns as
@@ -499,6 +570,32 @@ mod windows_transport {
                 let _ = worker.join();
             }
         }
+    }
+
+    /// Spawns a reader worker over `Arc`-shared handles and returns it with the channel receiver.
+    ///
+    /// Shared by [`ConsoleReadiness::new`] and [`ConsoleReadiness::resume`]: it builds a fresh
+    /// channel, clones the three shared handles into the worker thread, and spawns the
+    /// [`worker_loop`]. The receiver is returned to the transport; the sender lives in the worker
+    /// and is dropped when the loop exits, so the transport's `recv` sees the channel close as EOF.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::OpenTerminal`] when the reader thread cannot be spawned.
+    fn spawn_worker(
+        input: &Arc<OwnedHandle>,
+        output: &Arc<OwnedHandle>,
+        waker: &Arc<OwnedHandle>,
+    ) -> terminal::Result<(JoinHandle<()>, mpsc::Receiver<Vec<u8>>)> {
+        let (sender, receiver) = mpsc::channel::<Vec<u8>>(CHANNEL_CAPACITY);
+        let input = Arc::clone(input);
+        let output = Arc::clone(output);
+        let waker = Arc::clone(waker);
+        let worker = std::thread::Builder::new()
+            .name("qwertty-console-reader".to_owned())
+            .spawn(move || worker_loop(&input, &output, &waker, &sender))
+            .map_err(terminal::Error::open_terminal)?;
+        Ok((worker, receiver))
     }
 
     /// The cancellable-wait worker loop: wait, read only when input is ready, translate, send.
@@ -613,6 +710,23 @@ mod windows_transport {
     fn set_event(event: &OwnedHandle) {
         // SAFETY: `event` is a live owned event handle.
         let _ = unsafe { SetEvent(event.as_raw_handle() as HANDLE) };
+    }
+
+    /// Resets the manual-reset waker event via `ResetEvent`, so a respawned worker's first wait is
+    /// not immediately freed by an earlier pause signal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::SetTerminalMode`] when `ResetEvent` fails.
+    fn reset_event(event: &OwnedHandle) -> terminal::Result<()> {
+        // SAFETY: `event` is a live owned event handle.
+        let ok = unsafe { ResetEvent(event.as_raw_handle() as HANDLE) };
+        if ok == 0 {
+            return Err(terminal::Error::set_terminal_mode(
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(())
     }
 
     /// Writes all of `bytes` to the console output handle via `WriteFile`, looping over partial

@@ -115,12 +115,15 @@ windows-sys = { version = "0.59", features = [
 ] }
 # The Tokio session runs on Windows through the worker-thread readiness transport (MW-2): the worker
 # feeds a `tokio::sync::mpsc` channel the async session `recv`s. Windows needs no reactor
-# registration (`net`) and no Unix signals (`signal`); it needs the channel (`sync`), the deadline
-# clock (`time`), a current-thread runtime for the driver, and the test macros. The floor matches
-# the Unix `tokio` floor so the workspace resolves a single version (see the `cfg(unix)` note above).
+# registration (`net`); it needs the channel (`sync`), the deadline clock (`time`), a current-thread
+# runtime for the driver, the test macros, and — for `signals()` (MW-3) — the `signal` feature that
+# carries `tokio::signal::windows` console control listeners (Ctrl+C/Ctrl+Break/close). The floor
+# matches the Unix `tokio` floor so the workspace resolves a single version (see the `cfg(unix)`
+# note above).
 tokio = { version = "1.37", optional = true, default-features = false, features = [
     "macros",
     "rt",
+    "signal",
     "sync",
     "time",
 ] }

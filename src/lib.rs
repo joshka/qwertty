@@ -178,7 +178,7 @@ pub use report::{
     CursorPositionReport, DecPrivateModeReport, DecPrivateModeState, OscColorKind, OscColorReport,
     TerminalStatus, TerminalStatusReport, XtVersionReport,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub use session::RestoreHandle;
 pub use session::{KittyKeyboardFlags, KittyKeyboardGrant, TerminalSession};
 pub use syntax::{
@@ -193,10 +193,14 @@ pub use terminal::ConsoleHandles;
 pub use terminal::{DeviceMode, Error, PixelSize, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};
+#[cfg(all(feature = "tokio", unix))]
+pub use tokio_session::TerminalAcquisition;
 #[cfg(all(feature = "tokio", any(unix, windows)))]
 pub use tokio_session::TokioTerminalSession;
-// The resize/signal streams and the acquisition observability are Unix job-control shaped:
-// Windows has no `SIGWINCH`/`SIGTSTP` and no three-branch controlling-terminal fallback (ADR
-// 0022 §7).
-#[cfg(all(feature = "tokio", unix))]
-pub use tokio_session::{ResizeStream, SignalStream, TerminalAcquisition, TerminalSignal};
+// The resize/signal stream types and the typed signal enum exist on both platforms:
+// `signals()` reports console control events on Windows, and `resize_stream()` keeps its
+// cross-platform signature (returning `Unsupported` on Windows, where resize is in band). The
+// acquisition observability stays Unix-only — Windows has no three-branch controlling-terminal
+// fallback to record (ADR 0022 §7).
+#[cfg(all(feature = "tokio", any(unix, windows)))]
+pub use tokio_session::{ResizeStream, SignalStream, TerminalSignal};

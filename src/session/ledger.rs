@@ -8,7 +8,7 @@
 use crate::DeviceMode;
 
 /// The kitty keyboard full-reset (pop-all) sequence `CSI < u`, used in the emergency blob.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) const KITTY_KEYBOARD_EMERGENCY_RESET: &[u8] = b"\x1b[<u";
 
 /// One terminal state action a ledger entry can apply or undo.
@@ -128,14 +128,15 @@ impl ModeLedger {
     /// Returns the protocol bytes that undo every byte-based entry, in reverse enablement order.
     ///
     /// Device-mode entries are skipped: the emergency path restores the terminal mode directly
-    /// from the captured termios instead of replaying mode actions.
+    /// from the captured mode (the termios on Unix, the console modes and codepage on Windows)
+    /// instead of replaying mode actions.
     ///
     /// The kitty keyboard entry is the one place the emergency form is **stronger than the ordinary
     /// pop** (design 01, FM-L2, codex practice): where the orderly `leave` undo pops the single
     /// pushed entry (`CSI < 1 u`), the emergency blob emits the full pop-all reset `CSI < u` so a
     /// panic teardown clears the terminal's whole keyboard-flags stack regardless of how deep it
     /// grew, rather than trusting the stack depth mid-panic.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn protocol_undo_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         for entry in self.entries.iter().rev() {

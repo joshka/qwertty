@@ -25,6 +25,8 @@ pub mod relay;
 pub mod tmux;
 #[cfg(unix)]
 pub(crate) mod util;
+#[cfg(unix)]
+pub mod wezterm;
 
 /// How a target is hosted — recorded with results so the matrix never implies an automation
 /// level the adapter doesn't have (the attended-cells honesty rule).

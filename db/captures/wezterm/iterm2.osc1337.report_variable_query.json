@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?65;4;6;18;22c",
+    "target": "wezterm",
+    "version": "WezTerm 20240203-110809-5046fc22",
+    "xtversion_escaped": "\\eP>|WezTerm 20240203-110809-5046fc22\\e\\\\"
+  },
+  "query_id": "iterm2.osc1337.report_variable_query",
+  "reply_escaped": "",
+  "reply_id": "iterm2.osc1337.report_variable_report",
+  "reply_len": 0,
+  "status": "timeout",
+  "target": "wezterm",
+  "timestamp": "2026-07-12T12:58:04Z"
+}

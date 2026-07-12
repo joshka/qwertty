@@ -50,6 +50,6 @@ name        = "XTGETTCAP Report"
 description = "Payload stays hex encoded until a termcap-specific helper decodes it."
 direction   = "terminal-to-host"
 refs        = [{ doc = "xterm-ctlseqs" }]
-fixtures    = ["fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq"]
+fixtures    = ["fixtures/xterm/xterm_xtgettcap_report_report_capture_kitty.seq", "fixtures/xterm/xterm_xtgettcap_report_report_capture_wezterm.seq"]
 replay      = "safe"
 notes       = "reply syntax pending live capture"

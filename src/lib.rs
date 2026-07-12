@@ -165,8 +165,8 @@ mod width;
 mod width_table;
 
 pub use caps::{
-    Capabilities, DeviceAttributes, Evidence, Finding, Multiplexer, Rgb, TerminalIdentity,
-    TerminalProgram,
+    Capabilities, DeviceAttributes, Evidence, Finding, Multiplexer, ProbeSkip, Rgb,
+    TerminalIdentity, TerminalProgram,
 };
 pub use command::{Command, CommandBuffer, ProtocolPosition};
 pub use commands::terminal::MouseMode;

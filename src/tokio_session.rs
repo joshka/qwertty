@@ -54,8 +54,9 @@ use self::readiness::FdReadiness;
 #[cfg(any(unix, windows))]
 use crate::ResizeEvent;
 use crate::caps::{
-    Capabilities, ProbeBundle, identity_from_env, infer_hyperlinks, infer_truecolor,
-    probe_bundle_commands, std_env_source, store_bundle_reply,
+    Capabilities, EnvSource, ProbeBundle, identity_from_env, infer_hyperlinks, infer_truecolor,
+    probe_bundle_commands, probe_skip_from_env, skipped_capabilities, std_env_source,
+    store_bundle_reply,
 };
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
@@ -1059,6 +1060,18 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// `Resolution::Cancelled` before the next query registers (the same cancel-sweep the single
     /// query helpers use, generalized to the bundle).
     ///
+    /// # Dumb terminals are never probed (R-QRY-5)
+    ///
+    /// A dumb terminal echoes probe bytes as garbage output instead of answering them (FM-C5), so
+    /// when the environment declares one — `TERM=dumb`, or the Linux console's `TERM=linux` — this
+    /// writes nothing at all and returns immediately: every probe-backed finding is
+    /// [`Evidence::Unknown`](crate::Evidence::Unknown) (nothing was asked, so nothing is a
+    /// no-reply), the env-inferred findings and identity are still populated (they never touch the
+    /// terminal), and the reason is recorded on [`Capabilities::probe_skip`] so a caller can tell
+    /// a skipped probe from a silent terminal. See [`crate::caps::probe_skip_from_env`]. The skip
+    /// snapshot is stored on the session like any probe result, so emit-gating degrades on it the
+    /// same way it degrades on unknown.
+    ///
     /// # Errors
     ///
     /// Returns an error only when writing or flushing the bundle fails, or a non-EOF read error
@@ -1068,7 +1081,27 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         &mut self,
         timeout: Duration,
     ) -> terminal::Result<Capabilities> {
-        let capabilities = self.probe_capabilities_inner(timeout).await?;
+        self.probe_capabilities_from_env(timeout, std_env_source)
+            .await
+    }
+
+    /// [`probe_capabilities`](Self::probe_capabilities) with an injected [`EnvSource`] for the
+    /// dumb-terminal guard, so tests exercise the skip path without mutating the process
+    /// environment (which is unsound from parallel tests). The guard and its skip snapshot use
+    /// `env`; the probing path's own env-inferred population keeps using the real environment via
+    /// the shared bundle machinery.
+    async fn probe_capabilities_from_env(
+        &mut self,
+        timeout: Duration,
+        env: impl EnvSource,
+    ) -> terminal::Result<Capabilities> {
+        // The dumb-terminal guard (R-QRY-5, FM-C5): a dumb terminal (`TERM=dumb`, Linux console)
+        // is never written to — the skip snapshot records why on `probe_skip`, with every
+        // probe-backed finding honestly Unknown (nothing was asked, so nothing is a no-reply).
+        let capabilities = match probe_skip_from_env(&env) {
+            Some(skip) => skipped_capabilities(skip, &env),
+            None => self.probe_capabilities_inner(timeout).await?,
+        };
         // Store the snapshot on the session (FM-C8: per-attachment, session-owned). Emit-gating
         // (`synchronized`) reads it after the probe. A caller that never probes leaves this `None`,
         // which the gate treats as unknown and degrades on (FM-V4). The returned value is a clone
@@ -2877,6 +2910,34 @@ mod tests {
                 Ok(())
             });
         (session, peer, calls)
+    }
+
+    #[tokio::test]
+    async fn tokio_probe_skips_a_dumb_terminal_without_writing_a_byte() {
+        // R-QRY-5/FM-C5: mirrors the sync driver's skip test. The env is injected (not
+        // process-global) so this test is safe to run in parallel; the public
+        // `probe_capabilities` passes the real environment.
+        let (mut session, mut peer, _calls) = fake_session_with_stub();
+
+        let env = |key: &str| (key == "TERM").then(|| "dumb".to_owned());
+        let caps = session
+            .probe_capabilities_from_env(Duration::from_secs(30), env)
+            .await
+            .expect("a skipped probe is not an error");
+
+        assert_eq!(
+            peer.output().expect("output"),
+            Vec::<u8>::new(),
+            "a skipped probe must write nothing"
+        );
+        assert_eq!(caps.probe_skip, Some(crate::ProbeSkip::TermDumb));
+        assert!(caps.is_all_unknown(), "nothing was asked: {caps:?}");
+        // The skip snapshot is stored on the session like any probe result, so emit-gating
+        // (`synchronized`) degrades on it the same way it degrades on unknown.
+        assert_eq!(
+            session.capabilities().and_then(|caps| caps.probe_skip),
+            Some(crate::ProbeSkip::TermDumb)
+        );
     }
 
     #[tokio::test]

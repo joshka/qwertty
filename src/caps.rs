@@ -47,12 +47,14 @@
 //!
 //! # Detection posture: dumb terminals
 //!
-//! A `TERM=dumb` terminal is not sent the probe bundle by well-behaved callers — probing has side
-//! effects even when unanswered (FM-C7) — so a caller that detects `TERM=dumb` should skip
-//! `probe_capabilities` entirely and treat every finding as [`Evidence::Unknown`]. This module
-//! does not enforce that guard itself (it has no opinion on when a caller chooses to probe);
-//! [`identity_from_env`] still runs safely over a `TERM=dumb` environment because it only reads
-//! env vars and never writes to the terminal.
+//! A dumb terminal is never sent the probe bundle — probing has side effects even when unanswered
+//! (FM-C7), and a terminal that does not parse escape sequences echoes them as garbage (FM-C5).
+//! Both probe drivers enforce this themselves (R-QRY-5): [`probe_skip_from_env`] detects
+//! `TERM=dumb` and the Linux console (`TERM=linux`) before any byte is written, and a skipped
+//! probe returns a `Capabilities` whose probe-backed findings are all [`Evidence::Unknown`] with
+//! the reason recorded on [`Capabilities::probe_skip`] — an inspectable value, not a silent
+//! fallback. [`identity_from_env`] and the env-heuristic findings still run on a skipped probe
+//! because they only read env vars and never write to the terminal.
 
 use std::fmt;
 
@@ -608,14 +610,62 @@ pub fn infer_truecolor(env: impl EnvSource) -> Finding<bool> {
     Finding::unknown()
 }
 
+/// Why a capability probe was skipped without writing a single byte (R-QRY-5, FM-C5).
+///
+/// Both probe drivers (`TerminalSession::probe_capabilities` and
+/// `TokioTerminalSession::probe_capabilities`) consult [`probe_skip_from_env`] before writing the
+/// bundle: a terminal that does not parse escape sequences echoes probe bytes as garbage output
+/// (FM-C5, notcurses#1828 on the Linux console), so the honest move is to never send them. A
+/// skipped probe is recorded on the snapshot as [`Capabilities::probe_skip`] — visible provenance,
+/// not a silent fallback — with every probe-backed finding left [`Evidence::Unknown`]: nothing was
+/// asked, so nothing is reported as a no-reply.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum ProbeSkip {
+    /// `TERM=dumb`: the environment declares a terminal that parses nothing.
+    TermDumb,
+    /// `TERM=linux`: the Linux virtual console, which leaves rogue output from queries it does
+    /// not understand (FM-C5).
+    ///
+    /// Detected from `TERM` rather than the `KDGKBTYPE`-style console ioctl notcurses uses
+    /// (notcurses#1828): this crate forbids `unsafe`, and the env signal is what a console login
+    /// sets by default. `TERM` is caller-controlled and can lie (FM-C1/C2); a caller that knows
+    /// better simply probes a different way or fixes its environment.
+    LinuxConsole,
+}
+
+impl fmt::Display for ProbeSkip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TermDumb => f.write_str("TERM=dumb"),
+            Self::LinuxConsole => f.write_str("Linux console (TERM=linux)"),
+        }
+    }
+}
+
+/// Detects a terminal the capability probe must not be written to (R-QRY-5, FM-C5).
+///
+/// Returns `Some` for `TERM=dumb` and for the Linux console (`TERM=linux`); `None` otherwise —
+/// including when `TERM` is unset, which is merely *unknown* and no reason to withhold an
+/// explicitly requested probe. Both probe drivers call this before writing the bundle; it is
+/// public so a caller composing its own query flow can apply the identical guard.
+#[must_use]
+pub fn probe_skip_from_env(env: impl EnvSource) -> Option<ProbeSkip> {
+    match env("TERM").as_deref() {
+        Some("dumb") => Some(ProbeSkip::TermDumb),
+        Some("linux") => Some(ProbeSkip::LinuxConsole),
+        _ => None,
+    }
+}
+
 /// The typed result of the capability probe bundle plus environment inference (design 03/06).
 ///
 /// Every DECRQM/query-backed field is a [`Finding`] whose `value` is `Option<T>` where **`None`
 /// means unknown, not unsupported** (FM-C4), and whose [`Evidence`] records how the value was
-/// obtained. Build one only through `TokioTerminalSession::probe_capabilities` (available with the
-/// optional `tokio` feature on Unix); this type offers no public constructor because a hand-built
-/// `Capabilities` would carry no evidence of how it was obtained, which is the whole point of this
-/// layer.
+/// obtained. Build one only through `TerminalSession::probe_capabilities` (blocking, Unix) or
+/// `TokioTerminalSession::probe_capabilities` (with the optional `tokio` feature); this type offers
+/// no public constructor because a hand-built `Capabilities` would carry no evidence of how it was
+/// obtained, which is the whole point of this layer.
 ///
 /// # The four DECRQM booleans
 ///
@@ -667,6 +717,16 @@ pub struct Capabilities {
     pub truecolor: Finding<bool>,
     /// The terminal's derived identity: program, version, and multiplexer stack (R-CAP-5).
     pub identity: TerminalIdentity,
+    /// `Some` when the probe driver detected a dumb terminal and never wrote the bundle
+    /// (R-QRY-5, FM-C5); `None` when the probe actually ran.
+    ///
+    /// A skipped probe leaves every probe-backed finding [`Evidence::Unknown`] — indistinguishable
+    /// by value from a fully silent terminal — so this field is the inspectable difference between
+    /// "we asked and nothing answered" and "we refused to ask" (see [`ProbeSkip`]). The
+    /// env-inferred fields ([`hyperlinks`](Self::hyperlinks), [`truecolor`](Self::truecolor),
+    /// [`identity`](Self::identity)) are still populated on a skipped probe: they only read
+    /// environment variables and never write to the terminal.
+    pub probe_skip: Option<ProbeSkip>,
 }
 
 impl Capabilities {
@@ -727,11 +787,31 @@ impl fmt::Display for TerminalProgram {
 // gate a default-feature Windows cross-compile has neither consumer, and every item here is
 // legitimately dead code — `just check-cross` catches exactly that class of hole.
 #[cfg(any(unix, all(feature = "tokio", windows)))]
-pub(crate) use bundle::{ProbeBundle, probe_bundle_commands, store_bundle_reply};
+pub(crate) use bundle::{
+    ProbeBundle, probe_bundle_commands, skipped_capabilities, store_bundle_reply,
+};
 
 #[cfg(any(unix, all(feature = "tokio", windows)))]
 mod bundle {
-    use super::{Capabilities, Finding, identity_from_env, std_env_source};
+    use super::{Capabilities, EnvSource, Finding, ProbeSkip, identity_from_env, std_env_source};
+
+    /// The snapshot a probe driver returns when [`super::probe_skip_from_env`] said not to write
+    /// the bundle (R-QRY-5, FM-C5).
+    ///
+    /// Shared between the sync and Tokio drivers like the rest of this module, so the two skip
+    /// paths can never drift: env-inferred findings and env-only identity populated (they never
+    /// touch the terminal), every probe-backed finding honestly [`super::Evidence::Unknown`] —
+    /// nothing was asked, so nothing is a no-reply — and the skip recorded as visible provenance
+    /// on [`Capabilities::probe_skip`].
+    pub(crate) fn skipped_capabilities(skip: ProbeSkip, env: impl EnvSource) -> Capabilities {
+        Capabilities {
+            hyperlinks: super::infer_hyperlinks(&env),
+            truecolor: super::infer_truecolor(&env),
+            identity: identity_from_env(None, &env),
+            probe_skip: Some(skip),
+            ..Capabilities::default()
+        }
+    }
 
     /// The DEC private modes the capability probe bundle queries, and the [`Capabilities`] field
     /// each answer sets. Kept as one table so the write side, the register side, and the
@@ -1364,6 +1444,32 @@ mod tests {
         let env = env_map(&[("COLORTERM", "gnome-terminal")]);
         let finding = infer_truecolor(env);
         assert_eq!(finding.value(), None);
+    }
+
+    // --- Dumb-terminal probe skip (R-QRY-5, FM-C5) -----------------------------------------------
+
+    #[test]
+    fn probe_skip_detects_term_dumb() {
+        let env = env_map(&[("TERM", "dumb")]);
+        assert_eq!(probe_skip_from_env(env), Some(ProbeSkip::TermDumb));
+    }
+
+    #[test]
+    fn probe_skip_detects_linux_console() {
+        let env = env_map(&[("TERM", "linux")]);
+        assert_eq!(probe_skip_from_env(env), Some(ProbeSkip::LinuxConsole));
+    }
+
+    #[test]
+    fn probe_skip_none_for_a_capable_terminal() {
+        let env = env_map(&[("TERM", "xterm-256color")]);
+        assert_eq!(probe_skip_from_env(env), None);
+    }
+
+    #[test]
+    fn probe_skip_none_when_term_is_unset() {
+        // Unset TERM is unknown, not dumb: an explicitly requested probe still runs.
+        assert_eq!(probe_skip_from_env(no_env), None);
     }
 
     // --- Display -------------------------------------------------------------------------------

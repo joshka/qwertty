@@ -2,10 +2,11 @@
 
 The project grows in reviewable slices.
 
-> **Current state and handoff:** see [`work/STATUS.md`](../work/STATUS.md). In short — 0.1.0 is staged
-> and gate-green in local jj, but nothing is pushed yet, so the `## Status` list below reflects the
-> published `main` branch, which is far behind the local work tracked in
-> [Forward Look](#forward-look-unpublished-work-in-progress).
+> **Current state and handoff:** see `work/STATUS.md` (maintainer checkout). In short — 0.1.x is
+> published on crates.io with releases automated via release-plz, `main` is current and CI-green,
+> and Phase 5 (conformance, Windows, breadth) is executing as parallel lanes planned in
+> `work/phase5/`. The `## Status` list below is the historical early-slice log; the
+> [Forward Look](#forward-look-unpublished-work-in-progress) table is the milestone view.
 
 ## Status
 
@@ -54,8 +55,8 @@ The project grows in reviewable slices.
 - Terminal query routing boundary decision is on `main`.
 - Internal Tokio query routing state is on `main`.
 
-The local work has advanced well past this published list; the [Forward Look](#forward-look-unpublished-work-in-progress)
-below is the current milestone view, and [`work/STATUS.md`](../work/STATUS.md) is the live entry point.
+This early slice log is historical; the [Forward Look](#forward-look-unpublished-work-in-progress)
+below is the current milestone view.
 
 ## Slices
 
@@ -75,10 +76,9 @@ documentation in the right layer.
 
 ## Forward Look (Unpublished Work In Progress)
 
-> The sections above reflect only published `main`-branch state. This section tracks the larger
-> in-progress rebuild happening in reviewed jj workspaces ahead of `main` — milestones M0 through
-> M9 — so the plan stays visible even where `main` has not caught up yet. Update this table as
-> milestones seal; it is deliberately concise, not a slice-by-slice log.
+> This table tracks the milestone-level rebuild, M0 through M9. Everything marked complete is on
+> `main` and in the published 0.1.x releases. Update this table as milestones land; it is
+> deliberately concise, not a slice-by-slice log.
 
 | Milestone | Scope                                      | Status                               |
 | --------- | ------------------------------------------ | ------------------------------------ |
@@ -92,8 +92,8 @@ documentation in the right layer.
 | M7        | Sequence database and capture              | Complete                             |
 | —         | Release engineering and publish prep       | Complete                             |
 | —         | Docs pass and reference restructure        | Complete                             |
-| M8        | 0.1.0 publication gate                     | Staged; publish pending (maintainer) |
-| M9        | Conformance runner and generated reference | Not started                          |
+| M8        | 0.1.0 publication gate                     | Complete (0.1.2 on crates.io)        |
+| M9        | Conformance runner and generated reference | In progress (Phase 5 lanes)          |
 
 Milestone detail:
 
@@ -107,11 +107,10 @@ Milestone detail:
 - **M5** — SGR/style, alt-screen/cursor, OSC, synchronized output, scroll regions.
 - **M6** — complete: suspend/resume (`SIGTSTP`/`SIGCONT`), the `run_detached` `$EDITOR` handoff, and
   the optional `signals`/resize streams all landed.
-- **M8** — 0.1.0 publication gate: semver review, docs pass, release-checklist rerun, version bump,
-  and `publish = false` removal are all done, and the release-engineering standard is in place. The
-  version is **staged** and gate-green in local jj; the remaining `git push`, first `cargo publish`,
-  and trusted-publisher setup are the maintainer's own manual act. See
-  [`work/STATUS.md`](../work/STATUS.md) for the publish sequence.
+- **M8** — complete: 0.1.0 published manually, the repository registered as a crates.io trusted
+  publisher, and 0.1.1/0.1.2 released through release-plz via OIDC. Releases are the maintainer's
+  act (merging the release-plz PR or dispatching the workflow); the process is documented in
+  [`docs/development/release-engineering.md`](development/release-engineering.md).
 - **M9** — generalizes the M7 capture harness into a full conformance runner (target-trait shape),
   produces a results-driven support matrix and a generated docs.rs reference, and adds
   width-behavior probes.

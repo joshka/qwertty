@@ -22,6 +22,7 @@
 //! ```
 
 pub mod cursor;
+pub mod graphics;
 pub mod osc;
 pub mod screen;
 pub mod style;

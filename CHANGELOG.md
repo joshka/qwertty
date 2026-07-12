@@ -11,6 +11,15 @@ entries.
 
 ## [Unreleased]
 
+### Added
+
+- Kitty graphics protocol command encoders under `commands::graphics::kitty`: `transmit_and_display`
+  (send an image and show it), `place` (show a transmitted image by id), `delete_image`, and
+  `delete_all_images`, plus a `Format` (`Rgb`/`Rgba`/`Png`) for the pixel format. Like every
+  `commands::` helper these build raw bytes only — the inline transmission form, with no capability
+  check and no policy; support gating and the file/temp/shared-memory transmission policy are
+  session-layer concerns for a later slice. See the new graphics reference page.
+
 ## [0.1.3] - 2026-07-12
 
 ### Added

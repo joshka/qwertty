@@ -24,6 +24,11 @@ entries.
   table measured from live conformance and keyed on the terminal's identity and observed mode-2027
   state — never enabling 2027, only observing it. Unknown terminals fall back to the baseline. Adds
   the `unicode-width` and `unicode-segmentation` dependencies. See the new string-width reference page.
+- `TerminalSession::probe_capabilities`: the DA1-fenced capability probe bundle (XTVERSION, kitty
+  keyboard flags, OSC 10/11, and the DEC private mode queries for synchronized output/grapheme
+  clustering/in-band resize/bracketed paste), blocking with no async runtime. The synchronous
+  mirror of `TokioTerminalSession::probe_capabilities`, sharing its bundle contents and
+  reply-to-field mapping so the two drivers can never drift apart.
 
 ## [0.1.3] - 2026-07-12
 

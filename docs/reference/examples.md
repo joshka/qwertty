@@ -83,6 +83,14 @@ point without scanning the repository tree.
   terminal answered survives for the next `read_input`. This drives the *same* correlator the async
   session uses, with no Tokio required for the synchronous path. Reach for `oneshot_background.rs`
   when you want the raw loop; reach for this when you want the typed helper.
+- `sync_capability_probe.rs`: the DA1-fenced capability *bundle* — `TerminalSession::probe_capabilities`
+  — instead of a single query. One write asks XTVERSION, the kitty keyboard flags, OSC 10/11, and
+  four DEC private modes, with DA1 last as a fence: the probe returns as soon as the fence
+  completes, not after the whole timeout, on a terminal that replies fast. Demonstrates the
+  flagship one-shot CLI use case (OQ-1): reading `Capabilities::background_color` to pick a dark or
+  light colour scheme, with every unanswered field `None` (unknown, never unsupported, FM-C4).
+  This is the synchronous mirror of the Tokio driver's `probe_capabilities`, sharing its bundle
+  contents and reply-to-field mapping via `caps::` so the two can never drift apart.
 
 ## Tokio Session Basics
 
@@ -173,6 +181,8 @@ point without scanning the repository tree.
   default features.
 - Start with `oneshot_background.rs` when you want the same no-runtime query but hand-rolled — the
   raw `poll`/`read_input`/parse loop spelled out, for when you need to shape the loop yourself.
+- Start with `sync_capability_probe.rs` when you want *several* answers in one round trip — colour,
+  kitty keyboard, and mode support — with no async runtime; this is the one-shot CLI shape (OQ-1).
 - Start with `tokio_terminal_queries.rs` when you want the smallest end-to-end Tokio ownership
   example.
 - Start with `tokio_input_events.rs` when you need decoded event delivery.

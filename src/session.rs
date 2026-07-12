@@ -25,6 +25,8 @@ use restore::ConsoleModeRestore;
 #[cfg(any(unix, windows))]
 pub use restore::RestoreHandle;
 
+#[cfg(unix)]
+use crate::caps::{Capabilities, ProbeBundle, store_bundle_reply};
 use crate::commands::terminal::MouseMode;
 #[cfg(unix)]
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
@@ -1093,6 +1095,133 @@ impl<D: TerminalDevice> TerminalSession<D> {
         }
     }
 
+    /// Probes terminal capabilities with the DA1-fenced bundle, blocking without an async runtime.
+    ///
+    /// This is the synchronous mirror of `TokioTerminalSession::probe_capabilities` (design 03):
+    /// one write of XTVERSION, the kitty keyboard flags query, OSC 10/11, and the DEC private
+    /// mode queries (synchronized output 2026, grapheme clustering 2027, in-band resize 2048,
+    /// bracketed paste 2004), with Primary Device Attributes (DA1) last as the fence — a terminal
+    /// that answers DA1 has finished answering everything it is going to answer, so the fence
+    /// firing ends the probe without waiting out the full timeout on a terminal that replied fast.
+    /// A terminal that never answers DA1 is bounded by `timeout` instead (FM-C6: one timeout for
+    /// the whole bundle, not one per query). It shares its bundle contents, reply-to-field
+    /// mapping, and env-inferred fallbacks (hyperlinks, truecolor, identity) with the Tokio
+    /// driver via `crate::caps` — the two can never drift silently out of sync with each other.
+    ///
+    /// Every unanswered field is `None`, meaning *unknown*, never unsupported (FM-C4): a DECRQM
+    /// "mode not recognized" answer is `None` too, and a fully silent terminal yields an
+    /// all-unknown [`Capabilities`] rather than an error. Input that is not a bundle reply —
+    /// typeahead, keystrokes, unrelated reports — is preserved byte-exact for the next
+    /// [`read_input`](Self::read_input) in arrival order (FM-Q1), the same guarantee
+    /// [`request_cursor_position`](Self::request_cursor_position) makes for a single query.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use qwertty::TerminalSession;
+    ///
+    /// # fn main() -> qwertty::Result<()> {
+    /// let mut session = TerminalSession::open()?;
+    /// let capabilities = session.probe_capabilities(Duration::from_millis(150))?;
+    /// match capabilities.background_color.value() {
+    ///     Some(rgb) => println!("background color: {rgb:?}"),
+    ///     None => println!("unknown (unanswered or not yet supported)"),
+    /// }
+    /// session.leave()
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when writing, flushing, or reading terminal I/O fails, or when the device
+    /// has no pollable descriptor to wait on. A silent or partially silent terminal is not an
+    /// error: it is `Ok(Capabilities)` with the unanswered fields `None`.
+    pub fn probe_capabilities(&mut self, timeout: Duration) -> terminal::Result<Capabilities> {
+        // Step 1: sweep a leftover single-query expectation (defensive; mirrors `run_query`), then
+        // register the bundle. DA1 is registered last so it is the fence.
+        self.sweep_active_query();
+        let bundle = ProbeBundle::register(&mut self.query.correlator);
+        let ids = bundle.ids();
+
+        // Step 2: write the whole bundle in one buffer, DA1 last, then flush. Shared with the
+        // Tokio driver (`caps::probe_bundle_commands`) so the two request sets can never diverge.
+        self.bytes(crate::caps::probe_bundle_commands().into_bytes())?
+            .flush()?;
+
+        // The env-inferred findings and the env-only identity fallback never come from a terminal
+        // reply (FM-C12: no query exists for hyperlinks/truecolor), so they are populated once, up
+        // front, from the environment alone. An XTVERSION reply later overwrites `identity` with
+        // the wire-informed cross-check via `store_bundle_reply`.
+        let mut capabilities = Capabilities {
+            hyperlinks: crate::caps::infer_hyperlinks(crate::caps::std_env_source),
+            truecolor: crate::caps::infer_truecolor(crate::caps::std_env_source),
+            identity: crate::caps::identity_from_env(None, crate::caps::std_env_source),
+            ..Capabilities::default()
+        };
+
+        // Step 3: deadline loop over the whole probe, one total timeout (FM-C6).
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the sync query driver owns its deadline outside the sans-io core (design 04)"
+        )]
+        let deadline = Instant::now() + timeout;
+        loop {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the sync query driver owns its deadline outside the sans-io core (design \
+                          04)"
+            )]
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                bundle.resolve_all(&mut self.query.correlator, Resolution::NoReply);
+                return Ok(capabilities);
+            }
+
+            let Some(fd) = self.device.as_fd() else {
+                bundle.resolve_all(&mut self.query.correlator, Resolution::Cancelled);
+                return Err(terminal::Error::unsupported(
+                    "synchronous terminal query",
+                    "device without a fd",
+                ));
+            };
+            if !poll_readable(fd, remaining)? {
+                bundle.resolve_all(&mut self.query.correlator, Resolution::NoReply);
+                return Ok(capabilities);
+            }
+
+            // Readable: one OS read, decoded and matched against every outstanding bundle
+            // expectation (several can complete within one read). Feed the whole read before
+            // acting on a fence completion (FM-Q7): a DA1 reply and a slower reply arriving in
+            // the same read must both land before the fence ends the probe.
+            let replies = match self.read_and_match(&ids) {
+                Ok(replies) => replies,
+                Err(err) => {
+                    // EOF ends the probe with what was gathered — unknown, not an error, the same
+                    // FM-C4 treatment a timeout gets. `read_and_match` already resolved every id
+                    // as EOF; a non-EOF read error is still fatal and propagates.
+                    return if is_eof_error(&err) {
+                        Ok(capabilities)
+                    } else {
+                        Err(err)
+                    };
+                }
+            };
+            let mut fenced = false;
+            for (id, reply) in replies {
+                store_bundle_reply(&bundle, id, reply, &mut capabilities);
+                if Some(id) == bundle.fence() {
+                    fenced = true;
+                }
+            }
+            if fenced {
+                bundle.resolve_all(&mut self.query.correlator, Resolution::NoReply);
+                return Ok(capabilities);
+            }
+        }
+    }
+
     /// Runs one typed query end to end against the correlator, synchronously.
     ///
     /// The steps mirror the Tokio driver's `run_query`, minus the reactor and cancellation sweep
@@ -1164,7 +1293,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
             // Readable: one OS read, decoded and matched. A read that does not complete the query
             // is buffered raw for a later `read_input` (typeahead survival, FM-Q1).
-            if let Some(reply) = self.read_and_match(id)? {
+            if let Some((_, reply)) = self.read_and_match(&[id])?.into_iter().next() {
                 self.query.active_query = None;
                 return Ok(Some(reply));
             }
@@ -1185,12 +1314,15 @@ impl<D: TerminalDevice> TerminalSession<D> {
 
     /// Performs one OS read, decodes it, and feeds the events through the correlator.
     ///
-    /// Returns the taken reply when this read completes the query, otherwise `None`. Typeahead is
-    /// kept byte-accurate by decoding the read a byte at a time and tracking the raw byte span each
-    /// completed event occupied: a non-reply event's span is buffered as typeahead for a later
-    /// [`read_input`](Self::read_input), while the reply's own span is dropped (those bytes were
-    /// the answer, consumed by the correlator). This holds even when the reply and unrelated
-    /// input arrive in the **same** read — nothing the query saw is lost or misattributed
+    /// Returns every `(id, reply)` among `ids` that completes in this read, in completion order —
+    /// usually zero or one for a single query, but a probe bundle's several outstanding
+    /// expectations can complete together within one read (their replies arriving close enough to
+    /// land in the same OS read), so every completion is collected rather than stopping at the
+    /// first. Typeahead is kept byte-accurate by decoding the read a byte at a time and tracking
+    /// the raw byte span each completed event occupied: a non-reply event's span is buffered as
+    /// typeahead for a later [`read_input`](Self::read_input), while a reply's own span is dropped
+    /// (those bytes were the answer, consumed by the correlator). This holds even when a reply and
+    /// unrelated input arrive in the **same** read — nothing the query saw is lost or misattributed
     /// (FM-Q1).
     ///
     /// Feeding byte by byte also settles the syntax layer's parked trailing text: a lone
@@ -1201,13 +1333,21 @@ impl<D: TerminalDevice> TerminalSession<D> {
     /// # Errors
     ///
     /// Returns an error when the device read fails or the terminal closed (a zero-length read).
-    fn read_and_match(&mut self, id: ExpectationId) -> terminal::Result<Option<Reply>> {
+    /// On EOF every id in `ids` is resolved `Resolution::Eof` before the error is returned, so a
+    /// bundle's whole expectation set is cleared, not just the first.
+    fn read_and_match(
+        &mut self,
+        ids: &[ExpectationId],
+    ) -> terminal::Result<Vec<(ExpectationId, Reply)>> {
         let mut buffer = [0u8; QUERY_READ_BUFFER_LEN];
         let len = self.device.read(&mut buffer)?;
         if len == 0 {
-            // The terminal closed before answering. Resolve the expectation as EOF and surface the
-            // close as a read error, matching the device layer's own end-of-input contract.
-            self.query.correlator.resolve(id, Resolution::Eof);
+            // The terminal closed before answering. Resolve every outstanding expectation as EOF
+            // and surface the close as a read error, matching the device layer's own
+            // end-of-input contract.
+            for &id in ids {
+                self.query.correlator.resolve(id, Resolution::Eof);
+            }
             self.query.active_query = None;
             return Err(terminal::Error::read_terminal(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -1220,8 +1360,8 @@ impl<D: TerminalDevice> TerminalSession<D> {
         // spans reads: the decoder holds bytes across read boundaries (a parked text run, a
         // half-finished sequence), so its own carry from a prior read is prepended before this
         // read's bytes. When an event completes, that whole run is the event's bytes; it is
-        // buffered as typeahead unless the event is the reply.
-        let mut reply = None;
+        // buffered as typeahead unless the event is a reply.
+        let mut replies = Vec::new();
         let mut unattributed = std::mem::take(&mut self.query.decoder_carry);
         for &byte in chunk {
             unattributed.push(byte);
@@ -1237,7 +1377,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
             let pending_len = self.query.decoder.pending_bytes().len();
             let span_len = unattributed.len().saturating_sub(pending_len);
             let span: Vec<u8> = unattributed.drain(..span_len).collect();
-            self.attribute_span(id, span, &events, &mut reply);
+            self.attribute_span(ids, span, &events, &mut replies);
         }
 
         // Drained-OS-buffer boundary: release a complete parked trailing text run so a lone
@@ -1248,36 +1388,39 @@ impl<D: TerminalDevice> TerminalSession<D> {
             let pending_len = self.query.decoder.pending_bytes().len();
             let span_len = unattributed.len().saturating_sub(pending_len);
             let span: Vec<u8> = unattributed.drain(..span_len).collect();
-            self.attribute_span(id, span, &events, &mut reply);
+            self.attribute_span(ids, span, &events, &mut replies);
         }
 
         // Whatever is still unattributed is a partial sequence the decoder is holding for the next
         // read; carry its raw bytes so its eventual completion is attributed correctly.
         self.query.decoder_carry = unattributed;
-        Ok(reply)
+        Ok(replies)
     }
 
     /// Feeds one span's decoded events through the correlator and attributes the span's raw bytes.
     ///
-    /// The span is the exact raw bytes that produced `events`. If one of the events is the reply,
-    /// the reply is taken into `reply` and the span is dropped (consumed as the answer). Otherwise
-    /// every byte of the span is unrelated input, buffered as typeahead in arrival order (FM-Q1).
+    /// The span is the exact raw bytes that produced `events`. Every completion among `ids` found
+    /// in `events` is appended to `replies`; the span is buffered as typeahead only when none of
+    /// its events completed one of `ids` — a span that completes even one tracked expectation is
+    /// fully consumed as an answer, never partially replayed as input.
     fn attribute_span(
         &mut self,
-        id: ExpectationId,
+        ids: &[ExpectationId],
         span: Vec<u8>,
         events: &[Event],
-        reply: &mut Option<Reply>,
+        replies: &mut Vec<(ExpectationId, Reply)>,
     ) {
         let mut span_is_reply = false;
         for event in events {
             match self.query.correlator.feed(event.clone()) {
-                Feed::Completed { id: completed, .. } if completed == id => {
-                    *reply = self.query.correlator.take_reply(id);
+                Feed::Completed { id: completed, .. } if ids.contains(&completed) => {
+                    if let Some(reply) = self.query.correlator.take_reply(completed) {
+                        replies.push((completed, reply));
+                    }
                     span_is_reply = true;
                 }
-                // With a single in-flight query only `id` can complete; a stray completion has no
-                // waiter and is dropped. Passthroughs are unrelated input.
+                // A stray completion outside `ids` has no waiter and is dropped. Passthroughs are
+                // unrelated input.
                 Feed::Completed { .. } | Feed::Passthrough(_) => {}
             }
         }
@@ -1324,6 +1467,19 @@ fn poll_readable(fd: std::os::fd::BorrowedFd<'_>, budget: Duration) -> terminal:
     let ready = poll(&mut fds, Some(&timeout))
         .map_err(|errno| terminal::Error::read_terminal(std::io::Error::from(errno)))?;
     Ok(ready > 0)
+}
+
+/// Returns whether `error` is the "terminal closed before answering" case
+/// [`read_and_match`](TerminalSession::read_and_match) raises on a zero-length read.
+///
+/// [`probe_capabilities`](TerminalSession::probe_capabilities) treats this the same as a timeout
+/// (FM-C4: unknown, not an error) — every other read error still propagates.
+#[cfg(unix)]
+fn is_eof_error(error: &terminal::Error) -> bool {
+    matches!(
+        error,
+        terminal::Error::ReadTerminal { source } if source.kind() == std::io::ErrorKind::UnexpectedEof
+    )
 }
 
 /// Builds the error for the impossible "wrong reply type completed a typed query" case.
@@ -1680,6 +1836,161 @@ mod tests {
             input.as_bytes(),
             b"ab",
             "typeahead around the reply must survive with the reply removed",
+        );
+    }
+
+    // --- Synchronous capability probe bundle (H, OQ-1 revisit) ----------------------------------
+    //
+    // Mirrors the Tokio driver's `tokio_probe_*` tests in tests/tokio_session.rs exactly: same
+    // scripted replies, same assertions. No peer task is needed here — the fake device's queued
+    // bytes are already readable the moment the blocking probe polls, same as the single-query
+    // tests above.
+
+    use crate::caps::{Evidence, Rgb};
+
+    #[test]
+    fn sync_probe_answers_a_subset_and_da1_fence_resolves_the_rest_fast() {
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // Answer only: mode 2026 set, OSC 11 background, and DA1 (the fence). Everything else
+        // silent. A deliberately generous budget: the DA1 fence, not the clock, must end the
+        // probe.
+        terminal
+            .feed_input(b"\x1b[?2026;1$y\x1b]11;rgb:1a1a/2b2b/3c3c\x1b\\\x1b[?1;2c")
+            .expect("feed subset answers + DA1 fence");
+
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the test measures wall-clock elapsed time, not a driver deadline"
+        )]
+        let started = std::time::Instant::now();
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .expect("probe returns capabilities");
+        let elapsed = started.elapsed();
+
+        // The whole bundle went out in one write, DA1 last as the fence.
+        let bundle = terminal.output().expect("request bytes");
+        assert!(
+            bundle.ends_with(b"\x1b[c"),
+            "DA1 is written last as the fence, got {bundle:?}"
+        );
+        assert!(
+            bundle.windows(4).any(|w| w == b"\x1b[>q"),
+            "XTVERSION queried"
+        );
+        assert!(
+            bundle.windows(9).any(|w| w == b"\x1b[?2026$p"),
+            "mode 2026 queried"
+        );
+
+        assert_eq!(
+            caps.synchronized_output.value_copied(),
+            Some(true),
+            "mode 2026 reported set"
+        );
+        assert_eq!(
+            caps.synchronized_output.evidence(),
+            &Evidence::Probed { via: "DECRQM 2026" },
+            "mode 2026 finding is Probed"
+        );
+        assert_eq!(
+            caps.background_color.value_copied(),
+            Some(Rgb::new(0x1a, 0x2b, 0x3c)),
+            "OSC 11 background parsed"
+        );
+        assert_eq!(
+            caps.background_color.evidence(),
+            &Evidence::Probed { via: "OSC 11" },
+            "OSC 11 finding is Probed"
+        );
+        assert!(
+            caps.primary_device_attributes.is_some(),
+            "DA1 fence arrived"
+        );
+        // Every unanswered field is None (unknown, not unsupported) with Unknown evidence.
+        assert_eq!(caps.grapheme_clustering.value_copied(), None);
+        assert_eq!(caps.grapheme_clustering.evidence(), &Evidence::Unknown);
+        assert_eq!(caps.in_band_resize.value_copied(), None);
+        assert_eq!(caps.bracketed_paste.value_copied(), None);
+        assert_eq!(caps.kitty_keyboard.value(), None);
+        assert_eq!(caps.identity.version, None);
+        assert_eq!(caps.foreground_color.value_copied(), None);
+
+        // The DA1 fence, not the timeout, ended the probe.
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "the DA1 fence must end the probe fast, took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn sync_probe_silent_terminal_returns_all_unknown_and_typeahead_survives() {
+        // A fully silent terminal, but typeahead queued alongside. The probe must return an
+        // all-unknown Capabilities after one timeout (no hang), and the typeahead must survive to
+        // a later `read_input` — a probe never eats typeahead (FM-Q1).
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        terminal.feed_input(b"hi").expect("feed typeahead");
+
+        let caps = session
+            .probe_capabilities(Duration::from_millis(150))
+            .expect("silent terminal is not an error");
+
+        assert!(
+            caps.is_all_unknown(),
+            "a silent terminal answers nothing: every field is None, got {caps:?}"
+        );
+        assert_eq!(caps.synchronized_output.evidence(), &Evidence::Unknown);
+        assert_eq!(caps.kitty_keyboard.evidence(), &Evidence::Unknown);
+        assert_eq!(caps.foreground_color.evidence(), &Evidence::Unknown);
+        assert_eq!(caps.background_color.evidence(), &Evidence::Unknown);
+
+        // The typeahead queued during the probe survives to a later read, in order.
+        let mut buffer = [0u8; 16];
+        let input = session
+            .read_input(&mut buffer)
+            .expect("read buffered typeahead");
+        assert_eq!(input.as_bytes(), b"hi", "typeahead must survive the probe");
+    }
+
+    #[test]
+    fn sync_probe_two_decrqm_modes_do_not_cross_complete() {
+        // FM-Q10: the bundle carries concurrent DECRQM expectations for 2026 and 2027. Answer BOTH
+        // with their correct modes (2026 set, 2027 reset). Each field must be set from its own
+        // answer with no cross-completion.
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        terminal
+            .feed_input(b"\x1b[?2026;1$y\x1b[?2027;2$y\x1b[?1;2c")
+            .expect("feed both DECRQM answers + fence");
+
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .expect("probe returns capabilities");
+
+        assert_eq!(
+            caps.synchronized_output.value_copied(),
+            Some(true),
+            "mode 2026 answered SET -> Some(true)"
+        );
+        assert_eq!(
+            caps.synchronized_output.evidence(),
+            &Evidence::Probed { via: "DECRQM 2026" },
+            "mode 2026 finding names its own query, not 2027's"
+        );
+        assert_eq!(
+            caps.grapheme_clustering.value_copied(),
+            Some(false),
+            "mode 2027 answered RESET -> Some(false), not cross-completed with 2026's answer"
+        );
+        assert_eq!(
+            caps.grapheme_clustering.evidence(),
+            &Evidence::Probed { via: "DECRQM 2027" },
+            "mode 2027 finding names its own query, not 2026's"
         );
     }
 }

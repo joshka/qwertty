@@ -98,6 +98,18 @@ on the session and returned by the next `read_input`, in arrival order. The raw
 seams stay reachable underneath — `command`, `read_input`, and `as_fd` are unchanged — so the typed
 helper is a convenience over them, not a replacement. See the `sync_cursor_query.rs` example.
 
+`probe_capabilities(timeout)` is the bundle form: one write asking XTVERSION, the kitty keyboard
+flags, OSC 10/11 default colours, and four DEC private modes (synchronized output, grapheme
+clustering, in-band resize, bracketed paste), with Primary Device Attributes (DA1) last as a
+fence — a terminal that answers DA1 has finished answering everything it is going to answer, so
+the probe returns as soon as the fence fires rather than waiting out the whole timeout. Every
+unanswered field is `None` (unknown, never unsupported — the same FM-C4 rule as a single query).
+It is the synchronous mirror of `TokioTerminalSession::probe_capabilities`: the two share the
+bundle's contents and reply-to-field mapping (`caps::` internals) so they can never drift apart,
+and this method drives the identical correlator the single-query helpers and the async session
+use. See the `sync_capability_probe.rs` example, which uses the returned `Capabilities` to pick a
+dark or light colour scheme — the flagship one-shot CLI use case (OQ-1).
+
 ## Flush And Leave
 
 `TerminalSession::flush` reports output flushing errors. Call it when prior writes must be visible

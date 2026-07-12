@@ -23,8 +23,8 @@ Before the first release, qwertty should keep these user-facing artifacts cohere
   (sync and Tokio), with the `0.1.0` release-blocking subset identified explicitly.
 - policy ADRs should record the current support, compatibility, package-boundary, and dependency
   rules that shape the release surface.
-- the sequence database (`db/`) should validate cleanly and its generated conformance matrix
-  (`db/caniuse.md`) should be up to date with the checked-in capture results.
+- the sequence database (`db/`) should validate cleanly and its generated conformance reference
+  (`docs/reference/generated/`) should be up to date with the checked-in capture results.
 
 Release work should treat missing or contradictory docs as a blocker, not as cleanup for later.
 
@@ -81,8 +81,8 @@ The first release should keep the current validation gate green:
 - `markdownlint-cli2 "**/*.md"`;
 - `cargo run -p qdb -- validate` (sequence database: id format, unique ids, ref resolution, fixture
   existence, replay class, reply linkage);
-- `cargo run -p qdb -- generate --check matrix` (checked-in `db/caniuse.md` matches the database and
-  capture results);
+- `cargo run -p qdb -- generate --check reference` (the committed `docs/reference/generated/` tree
+  matches the database and capture results);
 - PTY-backed integration tests for live terminal behavior and query routing.
 
 If a release depends on behavior not covered by those gates, the missing validation should land

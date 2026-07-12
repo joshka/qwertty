@@ -66,11 +66,11 @@ typos:
 qdb-validate:
     cargo run -p qdb -- validate
 
-# Verify the checked-in caniuse support matrix (db/caniuse.md) is a byte-for-byte rendering of
-# db/results/*.toml + the database entries — no live terminal needed, so it joins the `check`
-# chain. Regenerate with `cargo run -p qdb -- generate matrix` when it legitimately drifts.
+# Verify the committed conformance reference (docs/reference/generated/) is a byte-for-byte
+# rendering of db/results/*.toml + the database entries — no live terminal needed, so it joins the
+# `check` chain. Regenerate with `cargo run -p qdb -- generate reference` when it legitimately drifts.
 qdb-generate-check:
-    cargo run -p qdb -- generate --check matrix
+    cargo run -p qdb -- generate --check reference
 
 # Verify the live query path against real terminal implementations, headless. Uses tmux and
 # betamax (headless ghostty) when installed, skipping cleanly otherwise; both type into the

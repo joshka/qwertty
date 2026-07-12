@@ -18,9 +18,10 @@ ignores:
   - "target"
   - "spikes"
   - "work"
-  # Generated qdb reference pages (long citation URLs); their shape is pinned by a golden test.
-  - "tools/qdb/tests/golden"
-  # Generated caniuse support matrix (db/caniuse.md): a wide data table (per-target status cells)
-  # that cannot satisfy aligned table-column-style without fragile hand-rolled padding logic; its
-  # shape is pinned by a golden test and `qdb generate --check` catches drift instead.
-  - "db/caniuse.md"
+  # The generated qdb conformance reference (`qdb generate reference`): the per-family pages carry
+  # unbreakable long citation URLs and per-target conformance lines, and the matrix/summary are
+  # wide data tables (per-target cells) that cannot satisfy aligned table-column-style without
+  # fragile hand-rolled padding. This is machine-emitted, not hand-authored, so it is exempt from
+  # the hand-authoring style rules; its exact shape is instead pinned by the golden test and
+  # `qdb generate --check reference` (run in `just check` and CI), which catch any drift.
+  - "docs/reference/generated"

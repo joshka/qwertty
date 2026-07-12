@@ -71,10 +71,11 @@ The public surface also includes:
   [Input Modes](docs/reference/terminal-session.md#input-modes) and the
   [terminal control reference](docs/reference/terminal-control.md).
 - **Sequence database** — `db/` is a hand-curated, machine-validated database of terminal control
-  sequences (375 entries across 16 families: ECMA-48, DEC, xterm, kitty, iTerm2, OSC, and vendor
-  DCS), each with citations and byte-exact fixtures. The `qdb` tool validates the database and
-  renders a live-capture conformance matrix (`db/caniuse.md`) from headless tmux and betamax
-  (libghostty) captures. See [db/README.md](db/README.md).
+  sequences, each with citations and byte-exact fixtures. The `qdb` tool validates the database and
+  renders the generated conformance reference under
+  [docs/reference/generated/](docs/reference/generated/README.md) — a support matrix plus a page
+  per family with the per-target verdicts — from live captures of tmux, betamax (libghostty),
+  kitty, alacritty, and wezterm. See [db/README.md](db/README.md).
 
 ## Small Example
 

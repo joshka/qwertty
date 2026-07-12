@@ -2,10 +2,11 @@
 //!
 //! Commands:
 //! - `validate` — check the database against every design-05 grokkability rule.
-//! - `generate [--check] [docs|matrix]` — with no positional target, generates both; `docs` writes
-//!   the ephemeral markdown reference to `target/qdb-docs/`; `matrix` writes the checked-in caniuse
-//!   support table to `db/caniuse.md`. `--check` regenerates to a buffer and fails on drift from
-//!   the committed/existing output instead of writing.
+//! - `generate [--check] [reference]` — writes the committed conformance reference tree under
+//!   `docs/reference/generated/` (support matrix, compact summary, one page per family). `--check`
+//!   regenerates in memory and fails on any drift — content, a missing page, or a stale extra file
+//!   — instead of writing. docs.rs cannot run qdb, so the output is committed and CI-freshness-
+//!   checked (playbook §9).
 //! - `capture --target <name>` — drive a real terminal through the conformance runner with
 //!   recording on: mint sidecars, `origin=capture:` fixtures, and the results seed.
 //! - `run --target <name>` — the conformance pass: same loop, results seed only. `--allow-modal` /
@@ -35,7 +36,7 @@ fn main() -> ExitCode {
         Some("target-relay") => cmd_target_relay(&args[1..]),
         _ => {
             eprintln!(
-                "usage: qdb <validate | generate [--check] [docs|matrix] | \
+                "usage: qdb <validate | generate [--check] [reference] | \
                  capture --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] | \
                  run --target tmux|betamax|kitty|alacritty|wezterm [--entry <id>...] \
                  [--allow-modal] [--allow-destructive]>"
@@ -253,12 +254,13 @@ fn cmd_validate(db_dir: &Path, repo_root: &Path) -> ExitCode {
     }
 }
 
-/// `qdb generate [--check] [docs|matrix]`: write or verify generated artifacts.
+/// `qdb generate [--check] [reference]`: write or verify the committed reference tree under
+/// `docs/reference/generated/`.
 ///
-/// With no positional target, generates both `docs` and `matrix`. `docs` pages are ephemeral
-/// build output (`target/qdb-docs/`, not checked in); `matrix` is the checked-in caniuse support
-/// table (`db/caniuse.md`) — `--check` regenerates it to a temp buffer and diffs against the
-/// committed file, the same drift-detection pattern `docs` already used.
+/// `reference` is the only target (and the default). `--check` renders every page in memory and
+/// fails on any drift — a changed page, a missing one, or a stale extra `.md` left in the
+/// directory — the freshness gate CI runs. Without `--check`, it writes the tree, pruning any
+/// stale `.md` files so the committed directory is exactly the generated set.
 fn cmd_generate(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
     let check = rest.iter().any(|a| a == "--check");
     let targets: Vec<&str> = rest
@@ -266,15 +268,14 @@ fn cmd_generate(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
         .map(String::as_str)
         .filter(|a| *a != "--check")
         .collect();
-    let (wants_docs, wants_matrix) = match targets.as_slice() {
-        [] => (true, true),
-        [t] if *t == "docs" => (true, false),
-        [t] if *t == "matrix" => (false, true),
+    match targets.as_slice() {
+        [] => {}
+        [t] if *t == "reference" => {}
         _ => {
-            eprintln!("usage: qdb generate [--check] [docs|matrix]");
+            eprintln!("usage: qdb generate [--check] [reference]");
             return ExitCode::FAILURE;
         }
-    };
+    }
 
     let db = match Database::load(db_dir) {
         Ok(db) => db,
@@ -283,106 +284,107 @@ fn cmd_generate(db_dir: &Path, repo_root: &Path, rest: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let results = match Database::load_results(repo_root) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("qdb generate: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
-    let mut ok = true;
-    if wants_docs {
-        ok &= cmd_generate_docs(&db, repo_root, check);
+    let pages = generate::reference(&db, &results);
+    let out_dir = repo_root.join(generate::OUTPUT_DIR);
+
+    if check {
+        cmd_generate_check(&out_dir, &pages)
+    } else {
+        cmd_generate_write(&out_dir, &pages)
     }
-    if wants_matrix {
-        ok &= cmd_generate_matrix(&db, repo_root, check);
+}
+
+/// Whether a directory entry is a Markdown page (used to scope stale-extra detection to `.md`
+/// files, leaving any non-generated file kinds alone).
+fn is_markdown(path: &Path) -> bool {
+    path.extension().and_then(|x| x.to_str()) == Some("md")
+}
+
+/// Verifies the committed tree matches the generated pages exactly — content, presence, and no
+/// stale extras. Returns SUCCESS only when the directory is byte-for-byte the generated set.
+fn cmd_generate_check(out_dir: &Path, pages: &[(String, String)]) -> ExitCode {
+    let mut drift = Vec::new();
+    for (name, contents) in pages {
+        match fs::read_to_string(out_dir.join(name)) {
+            Ok(existing) if &existing == contents => {}
+            Ok(_) => drift.push(format!("{name} (content differs)")),
+            Err(_) => drift.push(format!("{name} (missing)")),
+        }
     }
-    if ok {
+    // Stale extras: a committed `.md` the generator no longer emits (e.g. a removed family).
+    let expected: std::collections::BTreeSet<&str> =
+        pages.iter().map(|(n, _)| n.as_str()).collect();
+    if let Ok(entries) = fs::read_dir(out_dir) {
+        for e in entries.filter_map(Result::ok) {
+            if !is_markdown(&e.path()) {
+                continue;
+            }
+            if let Some(name) = e.file_name().to_str() {
+                if !expected.contains(name) {
+                    drift.push(format!("{name} (stale extra)"));
+                }
+            }
+        }
+    }
+    if drift.is_empty() {
+        println!(
+            "qdb generate --check reference: {} page(s) up to date",
+            pages.len()
+        );
         ExitCode::SUCCESS
     } else {
+        drift.sort();
+        for d in &drift {
+            eprintln!("qdb generate --check reference: drift in {d}");
+        }
+        eprintln!("qdb generate --check reference: run `qdb generate reference` to refresh");
         ExitCode::FAILURE
     }
 }
 
-/// Writes or verifies the ephemeral markdown reference pages under `target/qdb-docs/`.
-fn cmd_generate_docs(db: &Database, repo_root: &Path, check: bool) -> bool {
-    let out_dir = repo_root.join("target").join("qdb-docs");
-    let pages = generate::pages(db);
-
-    if check {
-        let mut drift = Vec::new();
-        for (name, contents) in &pages {
-            let path = out_dir.join(name);
-            match fs::read_to_string(&path) {
-                Ok(existing) if &existing == contents => {}
-                _ => drift.push(name.clone()),
-            }
-        }
-        if drift.is_empty() {
-            println!(
-                "qdb generate --check docs: {} page(s) up to date",
-                pages.len()
-            );
-            true
-        } else {
-            for d in &drift {
-                eprintln!("qdb generate --check docs: drift in {d}");
-            }
-            eprintln!("qdb generate --check docs: run `qdb generate docs` to refresh");
-            false
-        }
-    } else {
-        if let Err(e) = fs::create_dir_all(&out_dir) {
-            eprintln!("qdb generate: creating {}: {e}", out_dir.display());
-            return false;
-        }
-        for (name, contents) in &pages {
-            let path = out_dir.join(name);
-            if let Err(e) = fs::write(&path, contents) {
-                eprintln!("qdb generate: writing {}: {e}", path.display());
-                return false;
-            }
-        }
-        println!(
-            "qdb generate docs: wrote {} page(s) to {}",
-            pages.len(),
-            out_dir.display()
-        );
-        true
+/// Writes the reference tree, pruning any stale `.md` files so the directory is exactly the
+/// generated set.
+fn cmd_generate_write(out_dir: &Path, pages: &[(String, String)]) -> ExitCode {
+    if let Err(e) = fs::create_dir_all(out_dir) {
+        eprintln!("qdb generate: creating {}: {e}", out_dir.display());
+        return ExitCode::FAILURE;
     }
-}
-
-/// Writes or verifies the checked-in caniuse support matrix at `db/caniuse.md`.
-fn cmd_generate_matrix(db: &Database, repo_root: &Path, check: bool) -> bool {
-    let results = match Database::load_results(repo_root) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("qdb generate matrix: {e}");
-            return false;
-        }
-    };
-    let contents = qdb::matrix::render(db, &results);
-    let path = repo_root.join("db").join("caniuse.md");
-
-    if check {
-        match fs::read_to_string(&path) {
-            Ok(existing) if existing == contents => {
-                println!("qdb generate --check matrix: db/caniuse.md up to date");
-                true
+    let expected: std::collections::BTreeSet<&str> =
+        pages.iter().map(|(n, _)| n.as_str()).collect();
+    if let Ok(entries) = fs::read_dir(out_dir) {
+        for e in entries.filter_map(Result::ok) {
+            if !is_markdown(&e.path()) {
+                continue;
             }
-            Ok(_) => {
-                eprintln!("qdb generate --check matrix: drift in db/caniuse.md");
-                eprintln!("qdb generate --check matrix: run `qdb generate matrix` to refresh");
-                false
-            }
-            Err(e) => {
-                eprintln!(
-                    "qdb generate --check matrix: reading {}: {e}",
-                    path.display()
-                );
-                false
+            if let Some(name) = e.file_name().to_str() {
+                if !expected.contains(name) {
+                    if let Err(err) = fs::remove_file(e.path()) {
+                        eprintln!("qdb generate: pruning {name}: {err}");
+                        return ExitCode::FAILURE;
+                    }
+                }
             }
         }
-    } else {
-        if let Err(e) = fs::write(&path, &contents) {
-            eprintln!("qdb generate matrix: writing {}: {e}", path.display());
-            return false;
-        }
-        println!("qdb generate matrix: wrote {}", path.display());
-        true
     }
+    for (name, contents) in pages {
+        let path = out_dir.join(name);
+        if let Err(e) = fs::write(&path, contents) {
+            eprintln!("qdb generate: writing {}: {e}", path.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    println!(
+        "qdb generate reference: wrote {} page(s) to {}",
+        pages.len(),
+        out_dir.display()
+    );
+    ExitCode::SUCCESS
 }

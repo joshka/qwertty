@@ -9,13 +9,13 @@ This README is the ten-minute read. A new entry is writable from it alone.
 
 ## Layout
 
-| Path                       | What it is                                                       |
-| -------------------------- | ---------------------------------------------------------------- |
-| `db/<family>.toml`         | The `[[sequence]]` entries for one protocol family               |
-| `db/sources.toml`          | Doc keys mapped to full citations (title, url, retrieved)        |
-| `db/results/<target>.toml` | Conformance results (schema v2): a support verdict per entry     |
-| `db/caniuse.md`            | Generated support matrix rendering the results above (see below) |
-| `../fixtures/<family>/`    | The `.seq` fixture files an entry's `fixtures` array points at   |
+| Path                           | What it is                                                     |
+| ------------------------------ | -------------------------------------------------------------- |
+| `db/<family>.toml`             | The `[[sequence]]` entries for one protocol family             |
+| `db/sources.toml`              | Doc keys mapped to full citations (title, url, retrieved)      |
+| `db/results/<target>.toml`     | Conformance results (schema v2): a support verdict per entry   |
+| `../docs/reference/generated/` | Generated reference: support matrix + per-family pages (below) |
+| `../fixtures/<family>/`        | The `.seq` fixture files an entry's `fixtures` array points at |
 
 Families partition the way sources and reviewers do: `conpty`, `dec`, `ecma48-csi`, `ecma48-syntax`,
 `iterm2`, `kitty-color`, `kitty-graphics`, `kitty-keyboard`, `kitty-misc`, `kitty-multicursor`,
@@ -78,12 +78,9 @@ nothing that changes state, so it is `safe`; the DECSLPP class (which resizes a 
 `qdb` is the unpublished workspace tool (`tools/qdb`) that operates on this directory.
 
 ```sh
-just qdb-validate                            # or: cargo run -p qdb -- validate
-cargo run -p qdb -- generate docs            # write markdown reference to target/qdb-docs/
-cargo run -p qdb -- generate --check docs    # fail if the generated docs would drift
-cargo run -p qdb -- generate matrix          # write the caniuse support matrix to db/caniuse.md
-cargo run -p qdb -- generate --check matrix  # fail if db/caniuse.md would drift
-cargo run -p qdb -- generate                 # both docs and matrix (also generate --check)
+just qdb-validate                               # or: cargo run -p qdb -- validate
+cargo run -p qdb -- generate reference          # write docs/reference/generated/ (matrix + pages)
+cargo run -p qdb -- generate --check reference  # fail if the committed reference would drift
 ```
 
 `qdb validate` enforces, per entry: id format (`family.mnemonic`, lowercase), globally unique ids,
@@ -184,22 +181,23 @@ Every row carries `reply_len` (`0` when nothing genuine arrived). The `supported
 `no-reply` split comes from the wire (see the sidecar `status`/`echo_suspect` in
 `db/captures/FORMAT.md`); `unprobeable`/`skipped` come from the plan, not a live probe.
 
-## Support matrix (`qdb generate matrix`)
+## Generated reference (`qdb generate reference`)
 
-`db/caniuse.md` is the "caniuse for terminals" view: a checked-in Markdown table rendering
-`db/results/<target>.toml` against the database entries. It is generated, not hand-maintained —
-**machines write support claims; humans write entries and citations** (design 05). Regenerate it
-whenever the results files change:
+The committed tree under `docs/reference/generated/` is the "caniuse + MDN for terminals" view: a
+support matrix (`matrix.md`), a compact summary (`summary.md`, the docs.rs-facing page), and one
+page per family (`<family>.md`) rendering each entry with its citations, fixtures, and per-target
+conformance verdicts. It is generated, not hand-maintained — **machines write support claims;
+humans write entries and citations** (design 05). docs.rs cannot run `qdb`, so the output is
+committed and freshness-checked in CI. Regenerate it whenever the entries or results change:
 
 ```sh
-cargo run -p qdb -- generate matrix          # write db/caniuse.md
-cargo run -p qdb -- generate --check matrix  # fail if db/caniuse.md would drift
-cargo run -p qdb -- generate                 # both docs and the matrix
+cargo run -p qdb -- generate reference          # write docs/reference/generated/
+cargo run -p qdb -- generate --check reference  # fail if the committed tree would drift
 ```
 
-`just qdb-generate-check` (part of `just check` and CI) runs the `--check` form: it regenerates the
-matrix in memory and diffs it against the committed file, the same drift-detection pattern
-`generate --check docs` uses for the reference pages.
+`just qdb-generate-check` (part of `just check` and CI) runs the `--check` form: it renders the
+whole tree in memory and diffs it against the committed files, failing on a changed page, a missing
+one, or a stale extra `.md` (e.g. a removed family).
 
 **Shape**: rows are the queryable sequences — entries with a `responds` link and `replay = "safe"`
 — grouped by family in file order. Columns are capture targets, sorted by name, each headed with

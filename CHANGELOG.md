@@ -25,6 +25,11 @@ entries.
   positional modifiers, and surrogate pairs. Enabling the mode stays a policy-gated opt-in.
 - A keybinding-portability reference page documenting the legacy key collisions and the
   kitty/win32-input enhancement ladder.
+- A generated conformance reference (the "caniuse + MDN for terminals" view): a compact support
+  summary is now part of the crate docs (the `docs::conformance` page), backed by a committed tree
+  under `docs/reference/generated/` — the full support matrix plus a page per sequence family with
+  citations, fixtures, and the per-target conformance verdicts. It is rendered by
+  `qdb generate reference` from the live-capture results and CI-freshness-checked.
 
 ### Changed
 

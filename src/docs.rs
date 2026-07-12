@@ -24,6 +24,8 @@
 )]
 //! - [Capabilities](capabilities) — the `Finding`/`Evidence` model, terminal identity, and
 //!   environment-heuristic inference behind capability probing.
+//! - [String width](string_width) — `width_of`, the terminal-aware column-width function: a
+//!   `unicode-width` baseline plus a measured per-terminal deviation table for the hard clusters.
 //! - [Platform support](platform) — the Unix and Windows terminal backends, where they differ, and
 //!   the `Error::Unsupported` boundary on other targets.
 //! - [Conformance](conformance) — the live-capture support summary: which control sequences real
@@ -84,6 +86,9 @@ pub mod async_model {}
 
 #[doc = include_str!("../docs/reference/capability-model.md")]
 pub mod capabilities {}
+
+#[doc = include_str!("../docs/reference/string-width.md")]
+pub mod string_width {}
 
 #[doc = include_str!("../docs/reference/platform-support.md")]
 pub mod platform {}

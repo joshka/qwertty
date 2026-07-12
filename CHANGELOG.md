@@ -18,6 +18,12 @@ entries.
   `File` inline form (also spoken by WezTerm). Encode-only and inline-bytes-only, like the kitty
   encoders — no file path, no capability check, no policy; iTerm2 support is identity-keyed at the
   session layer, a later slice.
+- `width_of(&str, &Capabilities) -> usize`, terminal-aware string column-width measurement. Sums a
+  static `unicode-width` baseline per grapheme cluster, overriding the clusters real terminals render
+  off-baseline (ZWJ emoji, skin-tone modifiers, regional flags, VS16) from a per-terminal deviation
+  table measured from live conformance and keyed on the terminal's identity and observed mode-2027
+  state — never enabling 2027, only observing it. Unknown terminals fall back to the baseline. Adds
+  the `unicode-width` and `unicode-segmentation` dependencies. See the new string-width reference page.
 
 ## [0.1.3] - 2026-07-12
 

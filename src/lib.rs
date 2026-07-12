@@ -161,6 +161,8 @@ mod syntax;
 mod terminal;
 #[cfg(all(feature = "tokio", any(unix, windows)))]
 mod tokio_session;
+mod width;
+mod width_table;
 
 pub use caps::{
     Capabilities, DeviceAttributes, Evidence, Finding, Multiplexer, Rgb, TerminalIdentity,
@@ -204,3 +206,4 @@ pub use tokio_session::TokioTerminalSession;
 // fallback to record (ADR 0022 §7).
 #[cfg(all(feature = "tokio", any(unix, windows)))]
 pub use tokio_session::{ResizeStream, SignalStream, TerminalSignal};
+pub use width::width_of;

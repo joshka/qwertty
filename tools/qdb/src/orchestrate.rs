@@ -1,29 +1,32 @@
-//! The capture orchestrator: `qdb capture --target tmux|betamax`.
+//! The conformance orchestrator: `qdb capture` and `qdb run` over the Target adapters.
 //!
-//! The outer half of the harness. It spawns the target terminal, runs `qdb capture-probe` *inside*
-//! it (tmux `send-keys`, or a betamax tape generated on the fly), reads back the probe's JSON
-//! report, and mints every artifact: per-entry sidecars, `origin=capture:` reply fixtures, the
-//! `db/results/<target>.toml` seed, and the scripted fixture-array edits on the report entries.
-//!
-//! The probe does the live terminal I/O (`probe.rs`); this module owns process spawning and the
-//! filesystem writes. Both sit behind `qdb capture` / `qdb capture-probe` in `main.rs`.
+//! The thin layer between the CLI and the runner: it builds the probe plan from the database,
+//! constructs the requested adapter, executes the runner loop, and writes artifacts. Capture
+//! mode is the same loop with recording on — it mints sidecars, `origin=capture:` fixtures, the
+//! fixture-array edits, and the results seed; run mode writes the results seed alone (the
+//! conformance pass — no trust artifacts minted). All minting logic stays pure in
+//! `crate::capture`, unit-tested without a terminal.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::capture::{self, Artifact, ProbePlan, ProbeReport, ProbeStatus};
+use crate::capture::{self, AllowedClasses, Artifact, ProbePlan, ProbeReport, ProbeStatus};
 use crate::model::Database;
+use crate::runner::{self, IdentityCheck, RunnerOptions};
+use crate::targets::Target;
+use crate::targets::betamax::BetamaxTarget;
+use crate::targets::tmux::TmuxTarget;
 
-/// Which real terminal the orchestrator drives.
+/// Which adapter the orchestrator drives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Target {
-    /// A tmux pane driven with `send-keys` / `capture-pane`.
+pub enum TargetKind {
+    /// A detached tmux session hosting the byte relay.
     Tmux,
-    /// A betamax-hosted headless ghostty-vt, driven with an on-the-fly tape.
+    /// A betamax-hosted headless ghostty-vt hosting the byte relay via an on-the-fly tape.
     Betamax,
 }
 
-impl Target {
+impl TargetKind {
     /// Parses the `--target` value.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
@@ -42,39 +45,31 @@ impl Target {
             Self::Betamax => "betamax",
         }
     }
+
+    /// Constructs the adapter (nothing launches until the runner starts it).
+    #[must_use]
+    pub fn make(self) -> Box<dyn Target> {
+        match self {
+            Self::Tmux => Box::new(TmuxTarget::new()),
+            Self::Betamax => Box::new(BetamaxTarget::new()),
+        }
+    }
 }
 
-/// Runs a full capture pass for one target and writes every artifact under `repo_root`.
+/// Runs a full capture pass for one target and writes every artifact under `repo_root`:
+/// sidecars, answered-reply fixtures, fixture-array edits, and the results seed.
 ///
 /// # Errors
 ///
-/// Returns an error if the target tool is missing, the in-terminal probe cannot be run, its report
-/// cannot be read, or an artifact cannot be written.
-pub fn run(
+/// Returns an error if the target tool is missing, the session cannot be established, the
+/// transport dies mid-run, or an artifact cannot be written.
+pub fn capture(
     db: &Database,
     repo_root: &Path,
-    target: Target,
+    kind: TargetKind,
     only: &[String],
 ) -> Result<Summary, String> {
-    let timestamp = utc_timestamp();
-    let out_path = std::env::temp_dir().join(format!("qdb-capture-{}.json", target.slug()));
-    let _ = std::fs::remove_file(&out_path);
-
-    match target {
-        Target::Tmux => run_tmux(repo_root, only, &timestamp, &out_path)?,
-        Target::Betamax => run_betamax(repo_root, only, &timestamp, &out_path)?,
-    }
-
-    let json = std::fs::read_to_string(&out_path).map_err(|e| {
-        format!(
-            "reading probe report {}: {e} (did the probe run?)",
-            out_path.display()
-        )
-    })?;
-    let report: ProbeReport =
-        serde_json::from_str(json.trim()).map_err(|e| format!("parsing probe report: {e}"))?;
-
-    let plan = ProbePlan::build(db, only);
+    let (plan, report) = execute(db, repo_root, kind, only, AllowedClasses::SAFE_ONLY)?;
     let artifacts = mint_all(db, repo_root, &plan, &report)?;
     for artifact in &artifacts {
         write_artifact(repo_root, artifact)?;
@@ -82,10 +77,81 @@ pub fn run(
     Ok(Summary::from_report(&report, &plan))
 }
 
-/// Mints every artifact for a run: sidecars, answered-reply fixtures, the fixture-array edits on
-/// the report entries, and the results seed. Pure given the report — the live-terminal split is
-/// upstream — so the whole minting pass is unit-tested in `capture.rs` and integration-checked
-/// here.
+/// Runs the conformance pass for one target: the same loop as capture, recording off — only
+/// the `db/results/<target>.toml` seed is written, no fixtures or sidecars minted.
+///
+/// # Errors
+///
+/// Returns an error if the target tool is missing, the session cannot be established, the
+/// transport dies mid-run, or the results file cannot be written.
+pub fn conformance(
+    db: &Database,
+    repo_root: &Path,
+    kind: TargetKind,
+    only: &[String],
+    allowed: AllowedClasses,
+) -> Result<Summary, String> {
+    let (plan, report) = execute(db, repo_root, kind, only, allowed)?;
+    let results = Artifact {
+        path: format!("db/results/{}.toml", report.identity.target),
+        contents: capture::render_results(&report),
+    };
+    write_artifact(repo_root, &results)?;
+    Ok(Summary::from_report(&report, &plan))
+}
+
+/// Builds the plan, runs the loop against the adapter, and surfaces run anomalies on stderr
+/// (identity mismatch, strays, teardown failure) so they are visible even when artifacts land.
+fn execute(
+    db: &Database,
+    repo_root: &Path,
+    kind: TargetKind,
+    only: &[String],
+    allowed: AllowedClasses,
+) -> Result<(ProbePlan, ProbeReport), String> {
+    let mut plan = ProbePlan::build(db, only, allowed);
+    plan.read_bytes(repo_root, db)?;
+
+    let opts = RunnerOptions {
+        allow_modal: allowed.modal,
+        allow_destructive: allowed.destructive,
+        ..RunnerOptions::default()
+    };
+    let mut target = kind.make();
+    let timestamp = utc_timestamp();
+    let outcome = runner::run(target.as_mut(), &plan, &timestamp, &opts)?;
+
+    match &outcome.identity_check {
+        IdentityCheck::Verified { .. } => {}
+        IdentityCheck::Unverifiable { reason } => {
+            eprintln!("qdb {}: identity unverifiable: {reason}", kind.slug());
+        }
+        IdentityCheck::Mismatch {
+            expected,
+            wire_name,
+        } => {
+            return Err(format!(
+                "identity mismatch: adapter expected {expected:?} on the wire but the terminal \
+                 reported {wire_name:?} — refusing to write results keyed to the wrong terminal"
+            ));
+        }
+    }
+    for stray in &outcome.strays {
+        eprintln!(
+            "qdb {}: stray bytes before first query (recorded nowhere): {stray}",
+            kind.slug()
+        );
+    }
+    if let Some(e) = &outcome.teardown_error {
+        eprintln!("qdb {}: teardown: {e}", kind.slug());
+    }
+    Ok((plan, outcome.report))
+}
+
+/// Mints every artifact for a capture run: sidecars, answered-reply fixtures, the fixture-array
+/// edits on the report entries, and the results seed. Pure given the report — the live-terminal
+/// split is upstream — so the whole minting pass is unit-tested in `capture.rs` and
+/// integration-checked here.
 fn mint_all(
     db: &Database,
     repo_root: &Path,
@@ -107,15 +173,13 @@ fn mint_all(
         std::collections::BTreeMap::new();
 
     for line in &report.lines {
-        if line.status != ProbeStatus::Answered {
-            continue;
-        }
         let Some(spec) = specs.get(line.query_id.as_str()) else {
             continue;
         };
-        if let Some(fixture) = capture::mint_fixture(spec, line, report) {
-            artifacts.push(fixture);
-        }
+        let Some(fixture) = capture::mint_fixture(spec, line, report) else {
+            continue; // timeout or echo-suspect: no trust artifact
+        };
+        artifacts.push(fixture);
         // Add the minted fixture path to the reply entry's `fixtures` array.
         let fixture_rel = capture::fixture_path(spec, report.identity.target.as_str());
         let family_file = family_file_of(db, &spec.reply_id)
@@ -173,194 +237,6 @@ fn write_artifact(repo_root: &Path, artifact: &Artifact) -> Result<(), String> {
     }
     std::fs::write(&path, &artifact.contents)
         .map_err(|e| format!("writing {}: {e}", path.display()))
-}
-
-/// Runs the probe inside a fresh tmux pane. Reuses `scripts/verify_emulators.sh`'s pattern:
-/// detached session, `send-keys` the command, wait, then tear down. The probe writes JSON to
-/// `out_path`, which is on the same filesystem tmux's shell sees.
-fn run_tmux(
-    repo_root: &Path,
-    only: &[String],
-    timestamp: &str,
-    out_path: &Path,
-) -> Result<(), String> {
-    require_tool("tmux")?;
-    // `tmux -V` prints "tmux 3.7b" — a fallback identity if the pane answers no XTVERSION. The
-    // redundant `tmux ` prefix is deduped when the origin slug is built (`capture_origin`).
-    let version = tool_version(&["tmux", "-V"]);
-    let bin = build_probe(repo_root)?;
-    let session = "qdb-capture";
-    let _ = Command::new("tmux")
-        .args(["kill-session", "-t", session])
-        .output();
-    run_ok(Command::new("tmux").args([
-        "new-session",
-        "-d",
-        "-s",
-        session,
-        "-x",
-        "120",
-        "-y",
-        "40",
-    ]))?;
-
-    let script = write_probe_script(&bin, repo_root, only, "tmux", &version, timestamp, out_path)?;
-    // Run the script by path: send-keys word-splits, so a single unquoted path is robust where an
-    // inline multi-arg command is not (the `tail: unrecognized option --out` failure mode).
-    run_ok(Command::new("tmux").args([
-        "send-keys",
-        "-t",
-        session,
-        &format!("bash {}", shell_quote(&script.to_string_lossy())),
-        "Enter",
-    ]))?;
-
-    // Poll for the report file to appear, up to a generous ceiling.
-    wait_for_file(out_path, std::time::Duration::from_secs(60));
-    let _ = Command::new("tmux")
-        .args(["kill-session", "-t", session])
-        .output();
-    Ok(())
-}
-
-/// Runs the probe inside a betamax-hosted ghostty-vt via an on-the-fly tape. betamax's shell starts
-/// in `$HOME` (a known gotcha), so the generated script `cd`s to the repo first; children have a
-/// controlling terminal, so the probe opens `/dev/tty` normally.
-fn run_betamax(
-    repo_root: &Path,
-    only: &[String],
-    timestamp: &str,
-    out_path: &Path,
-) -> Result<(), String> {
-    require_tool("betamax")?;
-    let version = tool_version(&["betamax", "--version"]);
-    let bin = build_probe(repo_root)?;
-    let script = write_probe_script(
-        &bin, repo_root, only, "betamax", &version, timestamp, out_path,
-    )?;
-
-    // The tape types one word (the script path) and waits for its completion marker — no fragile
-    // multi-arg Type line to word-split.
-    let tape = format!(
-        "Output {out}.gif\nSet Shell \"bash\"\nSet Width 1000\nSet Height 700\n\
-         Type \"bash {script}\"\nEnter\nWait+Screen@60s \"QDB_PROBE_DONE\"\n",
-        out = out_path.display(),
-        script = script.display(),
-    );
-    let tape_path = std::env::temp_dir().join("qdb-capture-betamax.tape");
-    std::fs::write(&tape_path, &tape)
-        .map_err(|e| format!("writing tape {}: {e}", tape_path.display()))?;
-    run_ok(Command::new("betamax").arg("run").arg(&tape_path))?;
-    wait_for_file(out_path, std::time::Duration::from_secs(5));
-    Ok(())
-}
-
-/// Writes a small shell script that runs `qdb capture-probe` inside the target and echoes a
-/// completion marker the driver waits on. Returns the script path. Writing a script rather than an
-/// inline command keeps quoting out of tmux's `send-keys` and betamax's `Type`, both of which
-/// word-split their argument.
-fn write_probe_script(
-    bin: &Path,
-    repo_root: &Path,
-    only: &[String],
-    target: &str,
-    version: &str,
-    timestamp: &str,
-    out_path: &Path,
-) -> Result<PathBuf, String> {
-    let mut cmd = format!(
-        "cd {root} && QDB_ROOT={root} {bin} capture-probe --target {target} \
-         --version {version} --timestamp {timestamp} --out {out}",
-        root = shell_quote(&repo_root.to_string_lossy()),
-        bin = shell_quote(&bin.to_string_lossy()),
-        version = shell_quote(version),
-        timestamp = shell_quote(timestamp),
-        out = shell_quote(&out_path.to_string_lossy()),
-    );
-    for id in only {
-        cmd.push_str(" --entry ");
-        cmd.push_str(&shell_quote(id));
-    }
-    let body = format!("#!/bin/bash\n{cmd}\necho QDB_PROBE_DONE\n");
-    let path = std::env::temp_dir().join(format!("qdb-probe-{target}.sh"));
-    std::fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))?;
-    Ok(path)
-}
-
-/// Single-quotes a string for the shell, escaping embedded single quotes.
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-/// Builds the `qdb` binary (release-free debug is fine) and returns its path, so the in-terminal
-/// probe runs the just-built code rather than whatever is on `$PATH`.
-fn build_probe(repo_root: &Path) -> Result<PathBuf, String> {
-    run_ok(
-        Command::new("cargo")
-            .current_dir(repo_root)
-            .args(["build", "--quiet", "-p", "qdb", "--bin", "qdb"]),
-    )?;
-    Ok(repo_root.join("target/debug/qdb"))
-}
-
-/// Runs a command and errors on non-zero exit, surfacing stderr.
-fn run_ok(cmd: &mut Command) -> Result<(), String> {
-    let output = cmd.output().map_err(|e| format!("spawning {cmd:?}: {e}"))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{cmd:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    }
-}
-
-/// Returns the trimmed stdout of a version command, or empty on failure.
-fn tool_version(argv: &[&str]) -> String {
-    Command::new(argv[0])
-        .args(&argv[1..])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-/// Errors if `tool` is not on `$PATH`.
-fn require_tool(tool: &str) -> Result<(), String> {
-    which(tool)
-        .map(|_| ())
-        .ok_or_else(|| format!("{tool} is not installed"))
-}
-
-/// Resolves a tool on `$PATH`.
-fn which(tool: &str) -> Option<PathBuf> {
-    Command::new("sh")
-        .args(["-c", &format!("command -v {tool}")])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-        .filter(|p| !p.as_os_str().is_empty())
-}
-
-/// Waits up to `timeout` for `path` to exist, polling.
-///
-/// This is a live-terminal driver, not the sans-io core, so it owns a real wall-clock deadline —
-/// exactly the case `clippy.toml` carves out for an explicit `#[allow]` at the call site.
-fn wait_for_file(path: &Path, timeout: std::time::Duration) {
-    #[allow(clippy::disallowed_methods)]
-    let deadline = std::time::Instant::now() + timeout;
-    #[allow(clippy::disallowed_methods)]
-    while std::time::Instant::now() < deadline {
-        if path.exists() {
-            // Give the writer a beat to finish flushing.
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(150));
-    }
 }
 
 /// A UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) via `date -u`, falling back to a date-only stamp.

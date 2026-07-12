@@ -1,16 +1,15 @@
-//! The live-capture harness core (design 05, "The live-capture harness").
+//! The capture/recording core (design 05, "The live-capture harness").
 //!
-//! `qdb capture` drives one target terminal with the query entries, records raw reply bytes and an
-//! identity probe, and mints report-direction fixtures with `origin=capture:` headers — the
-//! quarantine replacement — plus a conformance results seed, all in one pass. This module is the
-//! pure core: it decides *what* to probe (from the database), models the probe's JSON output, and
-//! mints every artifact from that output. The live terminal I/O lives in the binary (`probe.rs`);
-//! everything here is exercised by unit tests feeding canned probe output, no terminal needed.
+//! The pure half of `qdb capture`: it decides *what* to probe (the [`ProbePlan`], built from the
+//! database under the replay-class gate), models what a run produced (the [`ProbeReport`]), and
+//! mints every artifact from that report — per-entry sidecars (`db/captures/FORMAT.md`),
+//! report-direction fixtures with `origin=capture:` headers (the quarantine replacement), the
+//! conformance results seed, and the scripted fixture-array edits. Everything here is exercised
+//! by unit tests feeding canned reports, no terminal needed.
 //!
-//! The runner is the first partial consumer of the conformance Target interface
-//! (`conformance-target-interface.md`): a probe *feeds* query bytes and *drains* reply bytes with a
-//! deadline. It does not yet grow the full `Target` trait — this is the `feed`/`drain_output` core
-//! the OQ-1 one-shot API later packages.
+//! The live half is the conformance runner (`crate::runner`) driving a `Target` adapter
+//! (`crate::targets`): capture mode is the runner loop with recording on, and the report it
+//! returns is this module's input.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +26,69 @@ pub enum ProbeSource {
     FixtureBytes,
 }
 
+/// An entry's replay safety class (`db/README.md`, "The replay rubric").
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReplayClass {
+    /// Pure output or a query; no lasting state change.
+    Safe,
+    /// Changes a terminal mode; reversible by its inverse.
+    Modal,
+    /// Irreversible or resizes the real terminal.
+    Destructive,
+}
+
+impl ReplayClass {
+    /// Parses the db field value.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "safe" => Some(Self::Safe),
+            "modal" => Some(Self::Modal),
+            "destructive" => Some(Self::Destructive),
+            _ => None,
+        }
+    }
+
+    /// The db field spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Safe => "safe",
+            Self::Modal => "modal",
+            Self::Destructive => "destructive",
+        }
+    }
+}
+
+/// Which replay classes a plan may include. `safe` is always in; everything else is the
+/// explicit opt-in the DECSLPP incident rule demands — nothing `modal`/`destructive` reaches a
+/// live terminal blind.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AllowedClasses {
+    /// Include `replay = "modal"` entries (e.g. the DECRQM mode queries).
+    pub modal: bool,
+    /// Include `replay = "destructive"` entries.
+    pub destructive: bool,
+}
+
+impl AllowedClasses {
+    /// The default gate: safe entries only.
+    pub const SAFE_ONLY: Self = Self {
+        modal: false,
+        destructive: false,
+    };
+
+    /// Whether `class` passes this gate.
+    #[must_use]
+    pub const fn allows(self, class: ReplayClass) -> bool {
+        match class {
+            ReplayClass::Safe => true,
+            ReplayClass::Modal => self.modal,
+            ReplayClass::Destructive => self.destructive,
+        }
+    }
+}
+
 /// One entry the runner will probe: its id, the reply id it `responds` with, the exact bytes to
 /// send, and the family fixture directory the minted reply fixture belongs in.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +103,9 @@ pub struct ProbeSpec {
     pub family_dir: String,
     /// How `query_bytes` was constructed.
     pub source: ProbeSource,
+    /// The entry's replay class, so the runner can enforce its gate independently of the plan
+    /// builder's.
+    pub replay: ReplayClass,
 }
 
 /// An entry that carries a `responds` link but is deliberately not probed, with the reason — the
@@ -85,14 +150,15 @@ fn unprobeable_reasons() -> BTreeMap<&'static str, &'static str> {
 
 impl ProbePlan {
     /// Builds the probe plan for a target from the database: every entry that has a `responds`
-    /// link and `replay = "safe"` (queries only — never `modal`/`destructive`), minus the
-    /// honestly-unprobeable set, optionally filtered to `only` entry ids.
+    /// link and a replay class `allowed` admits (`safe` always; `modal`/`destructive` only by
+    /// explicit opt-in — never blind), minus the honestly-unprobeable set, optionally filtered
+    /// to `only` entry ids.
     ///
     /// Query bytes come from the entry's own query fixture: it already holds complete, sendable
     /// bytes (see the harvested fixtures), so unescaping it is the single source of truth and no
     /// second byte-construction opinion can drift from the recorded command form.
     #[must_use]
-    pub fn build(db: &Database, only: &[String]) -> Self {
+    pub fn build(db: &Database, only: &[String], allowed: AllowedClasses) -> Self {
         let reasons = unprobeable_reasons();
         let mut plan = ProbePlan::default();
 
@@ -103,10 +169,13 @@ impl ProbePlan {
             if !only.is_empty() && !only.iter().any(|id| id == &entry.id) {
                 continue;
             }
-            // Safety gate: only queries. Modal/destructive replay classes never reach a live
-            // terminal blind (the DECSLPP incident rule); modal DECRQM mode queries are excluded
-            // here, not marked unprobeable, because the reason is the replay class, not the entry.
-            if entry.replay != "safe" {
+            // Safety gate (the DECSLPP incident rule): excluded modal/destructive entries are
+            // not marked unprobeable, because the reason is the replay class, not the entry.
+            // `qdb validate` guarantees the class parses; skip defensively if it ever doesn't.
+            let Some(class) = ReplayClass::parse(&entry.replay) else {
+                continue;
+            };
+            if !allowed.allows(class) {
                 continue;
             }
             if let Some(reason) = reasons.get(entry.id.as_str()) {
@@ -123,6 +192,7 @@ impl ProbePlan {
                     query_bytes: bytes,
                     family_dir,
                     source: ProbeSource::FixtureBytes,
+                    replay: class,
                 }),
                 Err(reason) => plan.unprobeable.push(Unprobeable {
                     query_id: entry.id.clone(),
@@ -189,8 +259,9 @@ pub enum ProbeStatus {
     Timeout,
 }
 
-/// One JSON line the probe emits per query: the entry id, the escaped raw reply bytes, and the
-/// status. Timestamp and identity are recorded once per run in [`ProbeReport`], not per line.
+/// One probed query's outcome, recorded by the runner: the entry id, the escaped raw reply
+/// bytes, and the status. Timestamp and identity are recorded once per run in [`ProbeReport`],
+/// not per line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeLine {
     /// The query entry id that was sent.
@@ -203,10 +274,20 @@ pub struct ProbeLine {
     pub reply_len: usize,
     /// Whether the reply arrived or the probe timed out.
     pub status: ProbeStatus,
+    /// Reply bytes (escaped) that arrived only after the deadline had already declared this
+    /// query silent — recorded as data on the query they belong to, never attributed to the
+    /// next one. Absent for on-time replies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub late_reply_escaped: Option<String>,
+    /// The "reply" is byte-identical to the query — almost certainly echo, the exact
+    /// fabrication failure mode the quarantine exists for. A suspect line never mints a
+    /// fixture.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub echo_suspect: bool,
 }
 
 /// The terminal's identity as probed: DA1 and XTVERSION replies (raw, escaped), plus any
-/// out-of-band version string the orchestrator supplied (e.g. `tmux -V`).
+/// out-of-band version string the adapter supplied (e.g. `tmux -V`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Identity {
     /// The target kind, e.g. `tmux` or `betamax`.
@@ -254,7 +335,7 @@ pub fn mint_sidecars(report: &ProbeReport) -> Vec<Artifact> {
         .lines
         .iter()
         .map(|line| {
-            let value = serde_json::json!({
+            let mut value = serde_json::json!({
                 "query_id": line.query_id,
                 "reply_id": line.reply_id,
                 "target": target,
@@ -264,6 +345,16 @@ pub fn mint_sidecars(report: &ProbeReport) -> Vec<Artifact> {
                 "reply_len": line.reply_len,
                 "reply_escaped": line.reply_escaped,
             });
+            // Anomaly fields appear only when set, so clean captures keep the M7-S2 sidecar
+            // byte-for-byte (see db/captures/FORMAT.md).
+            if let (Some(obj), Some(late)) = (value.as_object_mut(), &line.late_reply_escaped) {
+                obj.insert("late_reply_escaped".to_string(), late.as_str().into());
+            }
+            if line.echo_suspect {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("echo_suspect".to_string(), true.into());
+                }
+            }
             // Pretty-print for review, trailing newline for a clean diff. Serializing a
             // `serde_json::Value` never fails; default to empty rather than carry a panic.
             let json = serde_json::to_string_pretty(&value).unwrap_or_default();
@@ -281,9 +372,12 @@ pub fn mint_sidecars(report: &ProbeReport) -> Vec<Artifact> {
 /// Path: `fixtures/<family>/<name>_report_capture_<target>.seq`, where `<family>` is the query
 /// entry's fixture family and `<name>` is the reply id's mnemonic tail — a stable, collision-free
 /// name derived from the reply the fixture pins.
+///
+/// An echo-suspect line never mints: bytes that merely mirror the query are the fabrication
+/// failure mode the quarantine exists for, and a fixture is a trust artifact.
 #[must_use]
 pub fn mint_fixture(spec: &ProbeSpec, line: &ProbeLine, report: &ProbeReport) -> Option<Artifact> {
-    if line.status != ProbeStatus::Answered {
+    if line.status != ProbeStatus::Answered || line.echo_suspect {
         return None;
     }
     let target = &report.identity.target;
@@ -464,6 +558,8 @@ mod tests {
             reply_escaped: escaped.to_string(),
             reply_len: escape::unescape(escaped.as_bytes()).len(),
             status: ProbeStatus::Answered,
+            late_reply_escaped: None,
+            echo_suspect: false,
         }
     }
 
@@ -474,6 +570,8 @@ mod tests {
             reply_escaped: String::new(),
             reply_len: 0,
             status: ProbeStatus::Timeout,
+            late_reply_escaped: None,
+            echo_suspect: false,
         }
     }
 
@@ -505,6 +603,7 @@ mod tests {
             query_bytes: b"\x1b[6n".to_vec(),
             family_dir: "ecma48".to_string(),
             source: ProbeSource::FixtureBytes,
+            replay: ReplayClass::Safe,
         };
         let r = report(
             "tmux",
@@ -519,6 +618,11 @@ mod tests {
 
         let timeout_line = timed_out("csi.dsr.cursor_position", "csi.cpr");
         assert!(mint_fixture(&spec, &timeout_line, &r).is_none());
+
+        // An echo-suspect "reply" never becomes a fixture — that is the fabrication guard.
+        let mut echo_line = answered("csi.dsr.cursor_position", "csi.cpr", "\\e[6n");
+        echo_line.echo_suspect = true;
+        assert!(mint_fixture(&spec, &echo_line, &r).is_none());
     }
 
     #[test]
@@ -529,11 +633,108 @@ mod tests {
             query_bytes: vec![],
             family_dir: "osc".to_string(),
             source: ProbeSource::FixtureBytes,
+            replay: ReplayClass::Safe,
         };
         assert_eq!(
             fixture_path(&spec, "betamax"),
             "fixtures/osc/osc_11_background_report_report_capture_betamax.seq"
         );
+    }
+
+    #[test]
+    fn sidecar_anomaly_fields_appear_only_when_set() {
+        let clean = report(
+            "tmux",
+            vec![answered(
+                "csi.da.primary",
+                "csi.da.primary_report",
+                "\\e[?1;2c",
+            )],
+        );
+        let sidecar = &mint_sidecars(&clean)[0];
+        assert!(!sidecar.contents.contains("late_reply_escaped"));
+        assert!(!sidecar.contents.contains("echo_suspect"));
+
+        let mut late = timed_out("osc.52.clipboard_query", "osc.52.clipboard_report");
+        late.late_reply_escaped = Some("\\e]52;c;YQ==\\e\\\\".to_string());
+        let mut echo = answered("csi.da.primary", "csi.da.primary_report", "\\e[c");
+        echo.echo_suspect = true;
+        let anomalous = report("tmux", vec![late, echo]);
+        let sidecars = mint_sidecars(&anomalous);
+        assert!(
+            sidecars[0]
+                .contents
+                .contains("\"late_reply_escaped\": \"\\\\e]52;c;YQ==\\\\e\\\\\\\\\"")
+        );
+        assert!(sidecars[1].contents.contains("\"echo_suspect\": true"));
+    }
+
+    /// A minimal in-memory database for plan-gating tests.
+    fn tiny_db() -> Database {
+        use crate::model::{Family, Sequence};
+        let entry = |id: &str, replay: &str| Sequence {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: "test entry".to_string(),
+            direction: "host-to-terminal".to_string(),
+            syntax: None,
+            params: vec![],
+            refs: vec![],
+            fixtures: vec![format!("fixtures/ecma48/{}.seq", id.replace('.', "_"))],
+            replay: replay.to_string(),
+            responds: Some(format!("{id}_report")),
+            notes: None,
+            superseded_by: None,
+        };
+        Database {
+            families: vec![Family {
+                name: "test".to_string(),
+                entries: vec![
+                    entry("t.safe_query", "safe"),
+                    entry("t.modal_query", "modal"),
+                    entry("t.destructive_query", "destructive"),
+                ],
+            }],
+            sources: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn plan_admits_replay_classes_only_by_opt_in() {
+        let db = tiny_db();
+        let ids = |allowed: AllowedClasses| -> Vec<String> {
+            ProbePlan::build(&db, &[], allowed)
+                .specs
+                .iter()
+                .map(|s| s.query_id.clone())
+                .collect()
+        };
+
+        assert_eq!(ids(AllowedClasses::SAFE_ONLY), ["t.safe_query"]);
+        assert_eq!(
+            ids(AllowedClasses {
+                modal: true,
+                destructive: false
+            }),
+            ["t.safe_query", "t.modal_query"]
+        );
+        assert_eq!(
+            ids(AllowedClasses {
+                modal: true,
+                destructive: true
+            }),
+            ["t.safe_query", "t.modal_query", "t.destructive_query"]
+        );
+        // The spec carries its class for the runner's independent gate.
+        let plan = ProbePlan::build(
+            &db,
+            &[],
+            AllowedClasses {
+                modal: true,
+                destructive: true,
+            },
+        );
+        assert_eq!(plan.specs[1].replay, ReplayClass::Modal);
     }
 
     #[test]

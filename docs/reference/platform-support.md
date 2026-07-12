@@ -130,6 +130,11 @@ mode restoration — on a `windows-latest` runner. Interactive validation on the
 terminals (Windows Terminal, classic conhost, wezterm) and IME/CJK composition under VT input is an
 ongoing effort tracked for the Windows tier.
 
+That interactive pass is driven by the `input_event_viewer` example (the first example that runs on
+both Unix and Windows), which prints every decoded event so a human can see what the backend
+produces; the step-by-step matrix and checklist live in the [Windows validation
+runbook](https://github.com/joshka/qwertty/blob/main/docs/development/windows-validation.md).
+
 ## What This Means For Callers
 
 - Use command and parser types freely across platforms when you only need byte building or byte

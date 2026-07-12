@@ -48,3 +48,20 @@ pub(crate) fn osc(payload: impl AsRef<str>) -> Command {
     bytes.push(b'\\');
     Command::raw(bytes)
 }
+
+/// Builds a 7-bit APC (Application Program Command) command, ST-terminated.
+///
+/// `payload` is copied between the `ESC _` APC introducer and the same 7-bit `ESC \` String
+/// Terminator [`osc`] uses. The kitty graphics protocol is carried in APC sequences of the shape
+/// `ESC _ G <control-keys> ; <base64-payload> ESC \`, so the whole `G...`-prefixed body is passed
+/// as `payload`. For example, `apc("Ga=p,i=7;")` emits `b"\x1b_Ga=p,i=7;\x1b\\"`.
+pub(crate) fn apc(payload: impl AsRef<str>) -> Command {
+    let payload = payload.as_ref();
+    let mut bytes = Vec::with_capacity(2 + payload.len() + 2);
+    bytes.push(ESC);
+    bytes.push(b'_');
+    bytes.extend_from_slice(payload.as_bytes());
+    bytes.push(ESC);
+    bytes.push(b'\\');
+    Command::raw(bytes)
+}

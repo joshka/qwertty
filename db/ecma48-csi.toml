@@ -596,10 +596,11 @@ id          = "csi.cpr"
 name        = "CPR: Cursor Position Report"
 description = "Rows and columns use protocol coordinate space."
 direction   = "terminal-to-host"
+syntax      = "CSI row ; column R"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_cpr_report_capture_tmux.seq", "fixtures/ecma48/csi_cpr_report_capture_betamax.seq", "fixtures/ecma48/csi_cpr_report_capture_kitty.seq", "fixtures/ecma48/csi_cpr_report_capture_alacritty.seq", "fixtures/ecma48/csi_cpr_report_capture_wezterm.seq", "fixtures/ecma48/csi_cpr_report_capture_foot.seq", "fixtures/ecma48/csi_cpr_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; shape identical on all seven answering targets."
 
 [[sequence]]
 id          = "csi.dsr.cursor_position"
@@ -628,10 +629,11 @@ id          = "csi.da.primary_report"
 name        = "DA1: Primary Device Attributes Report"
 description = "The numeric payload is preserved for terminal identification layers."
 direction   = "terminal-to-host"
+syntax      = "CSI ? attributes c"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_da_primary_report_report_capture_tmux.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_betamax.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_kitty.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_alacritty.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_foot.seq", "fixtures/ecma48/csi_da_primary_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures. The attributes payload is a semicolon-separated list of numeric feature codes and varies by terminal: tmux reports `?1;2;4`, foot `?62;4;22`, xterm a twelve-code list."
 
 [[sequence]]
 id          = "csi.da.secondary"
@@ -649,10 +651,11 @@ id          = "csi.da.secondary_report"
 name        = "DA2: Secondary Device Attributes Report"
 description = "The numeric payload is preserved for terminal identification layers."
 direction   = "terminal-to-host"
+syntax      = "CSI > type ; firmware ; cartridge c"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_da_secondary_report_report_capture_tmux.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_betamax.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_kitty.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_alacritty.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_foot.seq", "fixtures/ecma48/csi_da_secondary_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures. Every captured target reports cartridge 0 (xterm-ctlseqs: ROM cartridge registration, always zero)."
 
 [[sequence]]
 id          = "csi.da.tertiary"
@@ -670,10 +673,11 @@ id          = "csi.da.tertiary_report"
 name        = "DA3: Tertiary Device Attributes Report"
 description = "The identity payload is intentionally not interpreted by the session decoder."
 direction   = "terminal-to-host"
+syntax      = "DCS ! | text ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_da_tertiary_report_report_capture_betamax.seq", "fixtures/ecma48/csi_da_tertiary_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_da_tertiary_report_report_capture_foot.seq", "fixtures/ecma48/csi_da_tertiary_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures. Every answering target (betamax/ghostty, wezterm, foot, xterm) reports the all-zero site id `00000000`; tmux and alacritty do not answer DA3."
 
 [[sequence]]
 id          = "csi.dsr.status"
@@ -691,10 +695,11 @@ id          = "csi.dsr.status_ok"
 name        = "DSR: Terminal Status OK"
 description = "Reports that the terminal is operating with no malfunction."
 direction   = "terminal-to-host"
+syntax      = "CSI 0 n"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_dsr_status_ok_report_capture_tmux.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_betamax.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_kitty.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_alacritty.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_wezterm.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_foot.seq", "fixtures/ecma48/csi_dsr_status_ok_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; byte-identical `CSI 0 n` on every answering target."
 
 [[sequence]]
 id          = "csi.ansi_mode.query"
@@ -713,10 +718,11 @@ id          = "csi.ansi_mode.report"
 name        = "DECRPM: ANSI Mode Report"
 description = "Fixture reports IRM as reset with `CSI 4 ; 2 $ y`."
 direction   = "terminal-to-host"
+syntax      = "CSI mode ; value $ y"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_ansi_mode_report_report_capture_tmux.seq", "fixtures/ecma48/csi_ansi_mode_report_report_capture_kitty.seq", "fixtures/ecma48/csi_ansi_mode_report_report_capture_alacritty.seq", "fixtures/ecma48/csi_ansi_mode_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_ansi_mode_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture; The shared mode report event preserves the numeric mode and state."
+notes       = "Syntax from live captures (IRM query answered `CSI 4 ; 2 $ y` on every answering target; betamax and foot do not answer). The shared mode report event preserves the numeric mode and state."
 
 [[sequence]]
 id          = "csi.xtwinops.text_area_cells"
@@ -734,10 +740,11 @@ id          = "csi.xtwinops.text_area_cells_report"
 name        = "XTWINOPS: Text Area Size In Cells"
 description = "Decoded as a resize event with `TextAreaCells` source."
 direction   = "terminal-to-host"
+syntax      = "CSI 8 ; rows ; columns t"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_tmux.seq", "fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_kitty.seq", "fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_alacritty.seq", "fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_foot.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; the reported geometry matches the harness-requested cell size except under foot, which reports the compositor-configured window size."
 
 [[sequence]]
 id          = "csi.xtwinops.text_area_pixels"
@@ -755,10 +762,11 @@ id          = "csi.xtwinops.text_area_pixels_report"
 name        = "XTWINOPS: Text Area Size In Pixels"
 description = "Decoded as a resize event with `TextAreaPixels` source."
 direction   = "terminal-to-host"
+syntax      = "CSI 4 ; height ; width t"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_tmux.seq", "fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_kitty.seq", "fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_alacritty.seq", "fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_wezterm.seq", "fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_foot.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; height precedes width, in pixels of the text area."
 
 [[sequence]]
 id          = "csi.ed.clear_screen"

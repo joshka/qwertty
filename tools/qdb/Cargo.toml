@@ -18,14 +18,14 @@ path = "src/main.rs"
 [dependencies]
 # serde: derive the entry/source structs straight from TOML tables; the schema is a
 # hand-curated record format, so declarative deserialization is the whole job.
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.225", features = ["derive"] }
 # toml: the database is TOML (design 05); this is the reference parser and the smallest one
 # that round-trips the table-array shape we use.
 toml = "1.1"
 # serde_json: the capture probe emits one JSON line per query (the collab-ask-4 sidecar handshake
 # is "raw bytes + a TOML sidecar"; the probe->orchestrator wire is JSON lines). The orchestrator
 # reads them back; a shared serde model keeps that contract honest.
-serde_json = "1"
+serde_json = "1.0.25"
 
 # qwertty: the library under test. The capture harness is its first partial consumer of the
 # conformance Target interface — `qdb capture-probe` drives a real terminal through the
@@ -38,7 +38,8 @@ qwertty = { path = "../.." }
 # adapter's efficient wait is a light FIONREAD poll instead. qwertty already depends on rustix;
 # qdb reuses it. Unix-only, matching the probe.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["stdio"] }
+# Floor consistent with the root crate's rustix dep (see the note there).
+rustix = { version = "1.1", features = ["stdio"] }
 
 [lints.rust]
 missing_docs = "warn"

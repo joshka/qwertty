@@ -11,6 +11,13 @@ entries.
 
 ## [Unreleased]
 
+### Changed
+
+- Raised dependency version floors to what the code actually requires: `tokio` ≥ 1.37
+  (`AsyncFd::try_new`) and `rustix` ≥ 1.1 (`Pid::as_raw_pid`). The CI minimal-versions check now
+  builds against these floors as a required gate. Consumers already resolving newer versions are
+  unaffected.
+
 ## [0.1.2] - 2026-07-12
 
 Maintenance release — internal CI, test, and packaging fixes only. No library code or public API

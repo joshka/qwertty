@@ -61,10 +61,13 @@ loom = "0.7"
 # used by the Tokio session's deterministic timing tests (the lone-Escape flush window). It is a
 # dev-only feature, so it never ships to downstream consumers of the `tokio` feature.
 [target.'cfg(unix)'.dev-dependencies]
-tokio = { version = "1", default-features = false, features = ["test-util"] }
+tokio = { version = "1.37", default-features = false, features = ["test-util"] }
 
+# Floors are real (the CI minimal-versions job builds against them): tokio 1.37 is the first with
+# `AsyncFd::try_new`, rustix 1.1 the first with `Pid::as_raw_pid`. qdb shares the rustix dep, so
+# its floor must stay consistent with this one for the workspace to resolve a single version.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = [
+rustix = { version = "1.1", features = [
     "event",
     "fs",
     "process",
@@ -72,7 +75,7 @@ rustix = { version = "1", features = [
     "stdio",
     "termios",
 ] }
-tokio = { version = "1", optional = true, default-features = false, features = [
+tokio = { version = "1.37", optional = true, default-features = false, features = [
     "macros",
     "net",
     "rt",

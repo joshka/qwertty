@@ -199,12 +199,7 @@ jobs:
           tool: cargo-minimal-versions,cargo-hack
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      # Informational for 0.1.0. qwertty's dependency lower bounds use the conventional `= "1"`
-      # form; the direct-minimal-versions resolver flags them as optimistic (the AsyncFd/rustix APIs
-      # in use need newer minors) and the `qdb` workspace member shares those deps, so tightening the
-      # floors is a cross-workspace follow-up tracked post-release. Keep the signal visible, non-blocking.
       - name: Check minimal versions
-        continue-on-error: true
         run: cargo minimal-versions check --direct --workspace --all-features
 
   # Gate PRs against unintended breaking changes in the public API. qwertty is at 0.1.0; once the

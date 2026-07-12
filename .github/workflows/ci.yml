@@ -355,6 +355,12 @@ jobs:
         # on Windows, so they cannot compile here. The platform-neutral core they document is still
         # fully exercised by the lib and integration tests, and the doctests run on the Unix jobs.
         run: cargo test -p qwertty --tests
+      - name: Test (all features)
+        # Runs the tokio-gated Windows async session tests (the console worker construction and
+        # teardown live suite) on a real console. Kept separate from the default-feature run above
+        # so a feature-gating hole in either build is still caught. `--tests` excludes doctests for
+        # the same reason as the default-feature step.
+        run: cargo test -p qwertty --tests --all-features
       - name: Clippy
         run: cargo clippy -p qwertty --all-targets -- -D warnings
 
@@ -380,12 +386,20 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check Windows target
         run: cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+      # The default-feature clippy above does not compile the Windows async session driver, which
+      # lives behind the `tokio` feature (the console worker + readiness transport). The
+      # `--all-features` pass is the only place that Windows FFI is compiled off a real Windows
+      # host, so without it the async driver would bitrot uncaught between windows-latest runs.
+      - name: Check Windows target (all features)
+        run: cargo clippy -p qwertty --all-features --all-targets --target x86_64-pc-windows-msvc -- -D warnings
       # Mirrors `just check-cross`: the clippy library pass alone lets a Unix-only API call in
       # test code slip through to the windows-latest job; compiling the tests here catches it in
       # the same fast Linux job. No wasm equivalent — the `generator` crate (via the loom
       # dev-dependency) has no wasm backend, so tests cannot compile for wasm32-unknown-unknown.
       - name: Check Windows target (tests)
         run: cargo check -p qwertty --tests --target x86_64-pc-windows-msvc
+      - name: Check Windows target (tests, all features)
+        run: cargo check -p qwertty --all-features --tests --target x86_64-pc-windows-msvc
       - name: Check wasm target
         run: cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 

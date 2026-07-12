@@ -27,8 +27,10 @@ Every file begins with exactly this shape:
 #! direction=host-to-terminal origin=<origin>
 ```
 
-- `direction` is always `host-to-terminal`: these fixtures are sequences a host sends **to** a
-  terminal (commands and queries), never terminal-to-host reports.
+- `direction` is `host-to-terminal` for a sequence a host sends **to** a terminal (commands and
+  queries) or `terminal-to-host` for a sequence a terminal sends **to** a host (input reports and
+  replies). Most fixtures are host-to-terminal; terminal-to-host fixtures are the live-capture
+  replies (`origin=capture:`) and spec-derived input reports (`origin=spec:`).
 - `origin` records provenance. Fixtures imported from the audited reference prototype use
   `origin=prototype:audited-2026-07-06`. Other durable origins are `spec:<key>` (derived from a
   specification) and `capture:<terminal-version>` (recorded from a live terminal).

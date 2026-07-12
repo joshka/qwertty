@@ -109,3 +109,8 @@ retrieved = "2026-07-06"
 title = "Contour: Synchronized Output VT extension"
 url = "https://contour-terminal.org/vt-extensions/synchronized-output/"
 retrieved = "2026-07-06"
+
+[conpty-4999]
+title = "Windows Terminal specs: #4999 — Improved keyboard handling in Conpty (win32-input-mode)"
+url = "https://github.com/microsoft/terminal/blob/main/doc/specs/%234999%20-%20Improved%20keyboard%20handling%20in%20Conpty.md"
+retrieved = "2026-07-11"

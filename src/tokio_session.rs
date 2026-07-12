@@ -18,21 +18,41 @@
 //! (design 04 / design 03 §proof plan).
 
 use std::collections::VecDeque;
+#[cfg(unix)]
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::fmt;
+#[cfg(unix)]
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind};
+#[cfg(unix)]
 use std::os::fd::OwnedFd;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::time::Duration;
 
-use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+#[cfg(unix)]
+use rustix::fs::{OFlags, fcntl_getfl};
+#[cfg(unix)]
 use rustix::process::{Pid, Signal as ProcessSignal, getpgrp, getsid, kill_process_group};
-use tokio::io::unix::AsyncFd;
+#[cfg(unix)]
 use tokio::signal::unix::{Signal, SignalKind, signal};
+#[cfg(windows)]
+use tokio::signal::windows::{CtrlBreak, CtrlC, CtrlClose};
 use tokio::time::{Instant, timeout_at};
 
+#[cfg(windows)]
+use self::readiness::ConsoleReadiness as FdReadiness;
+// The readiness transport is a `cfg` sibling: the pollable-fd `FdReadiness` on Unix, the
+// worker-thread `ConsoleReadiness` on Windows, aliased to the same name so the session body's
+// `FdReadiness` references resolve on both platforms.
+#[cfg(unix)]
+use self::readiness::FdReadiness;
+#[cfg(any(unix, windows))]
+use crate::ResizeEvent;
 use crate::caps::{
     Capabilities, Finding, identity_from_env, infer_hyperlinks, infer_truecolor, std_env_source,
 };
@@ -42,9 +62,12 @@ use crate::report::{
     CursorPositionReport, DecPrivateModeReport, OscColorKind, TerminalStatusReport,
 };
 use crate::{
-    Command, CommandBuffer, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, ResizeEvent,
+    Command, CommandBuffer, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant,
     SemanticDecoder, Terminal, TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
 };
+
+/// The internal readiness transport: `AsyncFd`/`rustix` live here, not in the session body.
+mod readiness;
 
 /// The DEC private modes the capability probe bundle queries, and the [`Capabilities`] field each
 /// answer sets. Kept as one table so the write side, the register side, and the collect side stay
@@ -84,14 +107,19 @@ enum CapabilityField {
     BracketedPaste,
 }
 
+#[cfg(unix)]
 const DEV_TTY: &str = "/dev/tty";
 const READ_BUFFER_LEN: usize = 1024;
 
-/// How many times [`resume`](TokioTerminalSession::resume) retries the ledger re-enter before
-/// giving up, tolerating the shell racing the returning process for the terminal (FM-G4). Ten tries
-/// at [`RESUME_REENTER_RETRY_DELAY`] apart is the helix/neovim pattern (~half a second total).
+/// How many times the ledger re-enter is retried before giving up, tolerating the shell (Unix
+/// `resume`) or a returning child (`run_detached`, both platforms) racing the process for the
+/// terminal (FM-G4). Ten tries at [`RESUME_REENTER_RETRY_DELAY`] apart is the helix/neovim pattern
+/// (~half a second total).
+#[cfg(any(unix, windows))]
 const RESUME_REENTER_RETRIES: u32 = 10;
-/// How long [`resume`](TokioTerminalSession::resume) waits between re-enter attempts.
+/// How long [`reenter_with_retry`](TokioTerminalSession::reenter_with_retry) waits between re-enter
+/// attempts.
+#[cfg(any(unix, windows))]
 const RESUME_REENTER_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 /// Which of the controlling-terminal fallback branches produced a session's device.
@@ -104,7 +132,9 @@ const RESUME_REENTER_RETRY_DELAY: Duration = Duration::from_millis(50);
 /// for branching on — it records what happened, it does not steer what happens next.
 ///
 /// This type is available when the `tokio` feature is enabled, on unix, alongside
-/// [`TokioTerminalSession`].
+/// [`TokioTerminalSession`]. It has no Windows counterpart: a console is addressed by name
+/// (`CONIN$`/`CONOUT$`) with no three-branch controlling-terminal fallback (ADR 0022).
+#[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TerminalAcquisition {
@@ -137,6 +167,7 @@ pub enum TerminalAcquisition {
     DevTtyAlias,
 }
 
+#[cfg(unix)]
 impl fmt::Display for TerminalAcquisition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let phrase = match self {
@@ -221,30 +252,24 @@ impl fmt::Display for TerminalAcquisition {
 pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// The composed sans-io session: device, mode ledger, restore handle, enter/leave.
     session: TerminalSession<D>,
-    /// A duplicate of the device descriptor registered with Tokio readiness.
+    /// The internal readiness transport: a reactor-registered dup plus its saved `fcntl` flags.
     ///
-    /// The dup shares the same open file description as the device the session owns, so readiness
-    /// observed on either applies to both. Setting the dup non-blocking (required by [`AsyncFd`])
-    /// therefore affects the shared description; [`original_flags`](Self::original_flags) captures
-    /// what to put back on teardown.
+    /// This is the transport seam. The session body never touches `AsyncFd` or `rustix` for its
+    /// read/write/registration paths — it drives every byte through [`FdReadiness`], whose dup
+    /// shares the same open file description as the device the session owns (so readiness observed
+    /// on either applies to both) and whose saved flags are restored on teardown.
     ///
     /// This is `Some` for the whole ordinary lifetime of the session: it is populated at
     /// construction and every method reaches it through the `readiness` / `readiness_mut`
-    /// accessors, which expect `Some`. It goes momentarily `None`
-    /// only inside [`run_detached`](Self::run_detached), which pulls the registered [`OwnedFd`]
-    /// out of the [`AsyncFd`] (dropping the reactor registration) while a synchronous child
-    /// owns the terminal, then re-registers a fresh [`AsyncFd`] over the *same* fd before
-    /// returning. Holding the fd raw across the handoff — rather than keeping a dormant
-    /// registration — is what guarantees the post-handoff registration reads current readiness
-    /// with no stale edge-triggered notification carried over from before the child ran.
-    readiness: Option<AsyncFd<OwnedFd>>,
-    /// The device status flags captured before this session set the descriptor non-blocking.
-    ///
-    /// Restored on every teardown path (leave and drop). This matters most for the
-    /// [`open`](Self::open) path, whose descriptor is a duplicate of the inherited standard input:
-    /// its open file description is shared with the parent shell, so a leaked non-blocking flag
-    /// would corrupt the shell's own reads (FM-L class).
-    original_flags: OFlags,
+    /// accessors, which expect `Some`. It goes momentarily `None` only inside
+    /// [`run_detached`](Self::run_detached), which [`detach`](FdReadiness::detach)es the transport
+    /// (dropping the reactor registration and holding the raw fd) while a synchronous child owns
+    /// the terminal, then [`reattach`](FdReadiness::reattach)es a fresh registration over the
+    /// *same* fd before returning. Holding the fd raw across the handoff — rather than keeping
+    /// a dormant registration — is what guarantees the post-handoff registration reads current
+    /// readiness with no stale edge-triggered notification carried over from before the child
+    /// ran.
+    readiness: Option<FdReadiness>,
     /// The semantic decoder that turns each read's raw bytes into typed events (design 02).
     decoder: SemanticDecoder,
     /// The sans-io correlator matching query replies to expectations (design 03).
@@ -284,7 +309,8 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// [`open_path`](Self::open_path)). It is `None` for [`from_device`](Self::from_device), which
     /// wraps an already-opened device (such as `FakeDevice`) rather than reaching for the
     /// controlling terminal, so no fallback branch was taken. Read-only observability; exposed
-    /// through [`acquisition`](Self::acquisition).
+    /// through [`acquisition`](Self::acquisition). Unix-only: Windows has no fallback to record.
+    #[cfg(unix)]
     acquisition: Option<TerminalAcquisition>,
     /// The injectable job-control stop-signal seam used by [`suspend`](Self::suspend).
     ///
@@ -295,7 +321,9 @@ pub struct TokioTerminalSession<D: TerminalDevice = Terminal> {
     /// every mechanic around the signal — ledger undo, restore-handle disarm, flags/mode
     /// resync, synthetic resize — runs while no real `SIGTSTP` is ever delivered to the runner
     /// (a CI-safety requirement, not just a test convenience). The closure returns a typed
-    /// error for a degenerate process group.
+    /// error for a degenerate process group. Unix-only: Windows job control does not exist
+    /// (ADR 0022 §7), so there is no stop signal to send.
+    #[cfg(unix)]
     stop_signal: StopSignal,
     /// How long [`next_event`](Self::next_event) waits on a lone pending `ESC` before flushing it
     /// as [`Key::Escape`](crate::Key::Escape), or `None` to never flush on a timeout.
@@ -329,8 +357,10 @@ const DEFAULT_ESC_FLUSH_TIMEOUT: Duration = Duration::from_millis(25);
 /// check-then-send so the FM-G7 process-group guard and the raw `kill` stay behind the same seam.
 /// The wrapper carries a manual [`fmt::Debug`] so the session can keep deriving `Debug` even though
 /// a boxed closure is not itself `Debug`.
+#[cfg(unix)]
 struct StopSignal(Box<dyn FnMut() -> terminal::Result<()> + Send>);
 
+#[cfg(unix)]
 impl StopSignal {
     /// Invokes the seam: checks the process group (FM-G7) and sends the stop signal, or records the
     /// call in a test stub.
@@ -339,12 +369,14 @@ impl StopSignal {
     }
 }
 
+#[cfg(unix)]
 impl fmt::Debug for StopSignal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("StopSignal(..)")
     }
 }
 
+#[cfg(unix)]
 impl TokioTerminalSession<Terminal> {
     /// Opens the current controlling terminal and starts a Tokio-backed session.
     ///
@@ -400,7 +432,11 @@ impl TokioTerminalSession<Terminal> {
         acquisition: TerminalAcquisition,
     ) -> terminal::Result<Self> {
         let session = TerminalSession::from_terminal(terminal)?;
-        Self::from_session(session, Some(acquisition))
+        let mut this = Self::from_session(session)?;
+        // `from_session` leaves `acquisition` `None` (the `from_device` default); record which
+        // controlling-terminal fallback branch produced this live terminal.
+        this.acquisition = Some(acquisition);
+        Ok(this)
     }
 
     /// Returns a panic-safe restore handle for this session.
@@ -415,14 +451,52 @@ impl TokioTerminalSession<Terminal> {
     }
 }
 
+#[cfg(windows)]
+impl TokioTerminalSession<Terminal> {
+    /// Opens the process console and starts a Tokio-backed session.
+    ///
+    /// This is the Windows entry point. It opens the console by name (`CONIN$`/`CONOUT$`) through
+    /// [`Terminal::open`], enters raw mode through the session's ledger, and spawns the readiness
+    /// worker: a dedicated thread that waits on the console input handle and the shutdown waker,
+    /// reading input records only after the wait reports them pending, and feeding the translated
+    /// VT bytes to the async session through a channel (ADR 0022 §4). Unlike the Unix
+    /// [`open`](TokioTerminalSession::open), it registers nothing with the reactor — a console
+    /// handle is not pollable — so it does **not** require a running Tokio runtime at construction;
+    /// the async methods do, as always.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no console is attached, raw mode cannot be entered, or the readiness
+    /// worker's handles or waker event cannot be created.
+    pub fn open() -> terminal::Result<Self> {
+        let terminal = Terminal::open()?;
+        let session = TerminalSession::from_terminal(terminal)?;
+        Self::from_session(session)
+    }
+
+    /// Returns a panic-safe restore handle for this session.
+    ///
+    /// The handle stays valid without borrowing the session, so it can live inside a panic hook
+    /// installed once for the whole program. This delegates to the composed
+    /// [`TerminalSession::restore_handle`]; see [`RestoreHandle`](crate::RestoreHandle) for the
+    /// hook pattern and what the emergency path covers. On Windows the emergency action writes the
+    /// teardown blob to a duplicated console output handle and resets the captured console modes
+    /// and codepage (ADR 0022 §7).
+    #[must_use]
+    pub fn restore_handle(&self) -> crate::RestoreHandle {
+        self.session.restore_handle()
+    }
+}
+
 impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Starts a Tokio-backed session over any pollable terminal device.
     ///
     /// This is the runtime-neutral-core payoff: a headless device such as `FakeDevice` drives the
     /// real Tokio session, so query correlation, cancellation, and event delivery are testable in
-    /// plain unit tests with no pseudoterminal. The device must expose a pollable descriptor
-    /// through [`TerminalDevice::as_fd`]; one that returns `None` is rejected with
-    /// [`terminal::Error::Unsupported`] because Tokio readiness has nothing to register.
+    /// plain unit tests with no pseudoterminal. The device must expose a readiness source — a
+    /// pollable descriptor through [`TerminalDevice::as_fd`] on Unix, or console handles through
+    /// `TerminalDevice::as_console_handles` on Windows; one that exposes neither is rejected with
+    /// [`terminal::Error::Unsupported`] because the readiness transport has nothing to drive.
     ///
     /// The session enters raw mode through its ledger, and the readiness descriptor is set
     /// non-blocking exactly as for a live terminal.
@@ -440,7 +514,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         let session = TerminalSession::from_device(device)?;
         // No controlling-terminal fallback runs here: the device is already open, so there is no
         // acquisition branch to record. `acquisition()` therefore returns `None` for this path.
-        Self::from_session(session, None)
+        Self::from_session(session)
     }
 
     /// Reports which controlling-terminal fallback branch produced this session's device.
@@ -454,83 +528,82 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// Returns `None` for sessions built with [`from_device`](Self::from_device), which wrap an
     /// already-opened device (such as `FakeDevice`) and so run no fallback and take no branch.
+    ///
+    /// Unix-only: a Windows console is addressed by name with no fallback branch to observe.
+    #[cfg(unix)]
     #[must_use]
     pub fn acquisition(&self) -> Option<TerminalAcquisition> {
         self.acquisition
     }
 
-    /// Wraps an entered [`TerminalSession`] with the readiness registration and sans-io core.
+    /// Wraps an entered [`TerminalSession`] with the readiness transport and sans-io core.
     ///
-    /// This duplicates the device descriptor for Tokio readiness (a dup shares the same open file
-    /// description, so readiness is shared), captures the original status flags, sets the dup
-    /// non-blocking, and registers it with the current runtime.
-    ///
-    /// `acquisition` is the fallback branch that produced the device, or `None` when the device was
-    /// supplied already open (the [`from_device`](Self::from_device) path).
-    fn from_session(
-        session: TerminalSession<D>,
-        acquisition: Option<TerminalAcquisition>,
-    ) -> terminal::Result<Self> {
-        let borrowed = session.device().as_fd().ok_or_else(|| {
-            terminal::Error::unsupported("Tokio readiness registration", "device without a fd")
-        })?;
-
-        let dup: OwnedFd = rustix::io::dup(borrowed)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-
-        let original_flags = fcntl_getfl(&dup)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-        fcntl_setfl(&dup, original_flags | OFlags::NONBLOCK)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
-
-        let readiness = match AsyncFd::try_new(dup) {
-            Ok(readiness) => readiness,
-            Err(err) => {
-                let (dup, err) = err.into_parts();
-                // Put the original flags back on the shared description before giving up.
-                _ = fcntl_setfl(&dup, original_flags);
-                return Err(terminal::Error::open_terminal(err));
-            }
+    /// The readiness construction is the one platform fork. On Unix the device must expose a
+    /// pollable descriptor through [`TerminalDevice::as_fd`]; on Windows it must expose its console
+    /// handles through `TerminalDevice::as_console_handles`. A device that supplies neither is
+    /// rejected with [`terminal::Error::Unsupported`] because the readiness transport has nothing
+    /// to drive. Everything after that — the decoder, correlator, and pending queue — is
+    /// identical on both platforms; `acquisition` is set separately by the Unix `from_terminal`
+    /// (Windows has no fallback to record).
+    fn from_session(session: TerminalSession<D>) -> terminal::Result<Self> {
+        #[cfg(unix)]
+        let readiness = {
+            let borrowed = session.device().as_fd().ok_or_else(|| {
+                terminal::Error::unsupported("Tokio readiness registration", "device without a fd")
+            })?;
+            FdReadiness::new(borrowed)?
+        };
+        #[cfg(windows)]
+        let readiness = {
+            let handles = session.device().as_console_handles().ok_or_else(|| {
+                terminal::Error::unsupported(
+                    "Tokio readiness worker",
+                    "device without a console handle",
+                )
+            })?;
+            FdReadiness::new(handles)?
         };
 
         Ok(Self {
             session,
             readiness: Some(readiness),
-            original_flags,
             decoder: SemanticDecoder::new(),
             correlator: Correlator::new(),
             pending: VecDeque::new(),
             active_query: None,
             active_probe: Vec::new(),
             capabilities: None,
-            acquisition,
+            #[cfg(unix)]
+            acquisition: None,
+            #[cfg(unix)]
             stop_signal: StopSignal(Box::new(send_real_stop_signal)),
             esc_flush_timeout: Some(DEFAULT_ESC_FLUSH_TIMEOUT),
         })
     }
 
-    /// Borrows the live Tokio readiness registration.
+    /// Borrows the live readiness transport.
     ///
     /// The `readiness` field is `Some` for the whole ordinary lifetime of the session,
     /// going `None` only for the brief handoff window inside
     /// [`run_detached`](Self::run_detached), which never calls this. Every other method reaches
-    /// the registration through this accessor so the `Option` stays an internal detail rather than
+    /// the transport through this accessor so the `Option` stays an internal detail rather than
     /// rippling `expect`s across the read/write paths.
-    fn readiness(&self) -> &AsyncFd<OwnedFd> {
+    ///
+    /// Unix-only: its callers are the job-control lifecycle methods (resume/detached handoff/resize
+    /// stream), which are Windows-gated; the shared read/write paths use `readiness_mut` instead.
+    #[cfg(unix)]
+    fn readiness(&self) -> &FdReadiness {
         self.readiness.as_ref().expect(
             "readiness registration is only absent inside run_detached, which never reads it",
         )
     }
 
-    /// Mutably borrows the live Tokio readiness registration.
+    /// Mutably borrows the live readiness transport.
     ///
     /// The mutable sibling of the `readiness` accessor, used by the read/write awaits that
-    /// need `&mut AsyncFd`. Same invariant: `Some` everywhere except the handoff window in
+    /// need `&mut FdReadiness`. Same invariant: `Some` everywhere except the handoff window in
     /// [`run_detached`](Self::run_detached).
-    fn readiness_mut(&mut self) -> &mut AsyncFd<OwnedFd> {
+    fn readiness_mut(&mut self) -> &mut FdReadiness {
         self.readiness.as_mut().expect(
             "readiness registration is only absent inside run_detached, which never reads it",
         )
@@ -541,7 +614,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// This is how the suspend/resume unit tests exercise every mechanic — ledger undo, restore
     /// disarm, flags/mode resync, synthetic resize — while `SIGTSTP` is stubbed out, so no test
     /// ever stops the test runner (a CI-safety requirement). It is not part of the public API.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn with_stop_signal(
         mut self,
         stop_signal: impl FnMut() -> terminal::Result<()> + Send + 'static,
@@ -623,34 +696,10 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// Returns an error when the terminal device cannot write all bytes.
     pub async fn bytes(&mut self, bytes: impl AsRef<[u8]>) -> terminal::Result<()> {
-        let mut bytes = bytes.as_ref();
-        while !bytes.is_empty() {
-            let mut guard = self
-                .readiness_mut()
-                .writable()
-                .await
-                .map_err(terminal::Error::write_terminal)?;
-
-            // Write through the *registered* readiness descriptor, which shares its open file
-            // description with the device the session owns (the dup), so bytes written here are the
-            // device's bytes. Doing the I/O on the fd Tokio registered is what keeps readiness
-            // correct under edge-triggered polling; the closure returns `io::Result` so `try_io`
-            // can classify a `WouldBlock` (clearing the guard's readiness) from a real
-            // error, exactly as the old direct-`File` loop did.
-            match guard.try_io(|inner| fd_write(inner.get_ref(), bytes)) {
-                Ok(Ok(0)) => {
-                    return Err(terminal::Error::write_terminal(io::Error::new(
-                        ErrorKind::WriteZero,
-                        "failed to write terminal output",
-                    )));
-                }
-                Ok(Ok(len)) => bytes = &bytes[len..],
-                Ok(Err(err)) => return Err(terminal::Error::write_terminal(err)),
-                Err(_would_block) => {}
-            }
-        }
-
-        Ok(())
+        // Write through the readiness transport, whose registered dup shares its open file
+        // description with the device the session owns, so bytes written here are the device's
+        // bytes and readiness stays correct under edge-triggered polling.
+        self.readiness_mut().write_all(bytes.as_ref()).await
     }
 
     /// Writes UTF-8 render text through Tokio readiness.
@@ -684,19 +733,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
             return Ok(InputBytes::default());
         }
 
-        loop {
-            let mut guard = self
-                .readiness_mut()
-                .readable()
-                .await
-                .map_err(terminal::Error::read_terminal)?;
-
-            match guard.try_io(|inner| fd_read(inner.get_ref(), buffer)) {
-                Ok(Ok(len)) => return Ok(InputBytes::new(buffer[..len].to_vec())),
-                Ok(Err(err)) => return Err(terminal::Error::read_terminal(err)),
-                Err(_would_block) => {}
-            }
-        }
+        let len = self.readiness_mut().read(buffer).await?;
+        Ok(InputBytes::new(buffer[..len].to_vec()))
     }
 
     /// Reads and delivers the next terminal input [`Event`].
@@ -1670,41 +1708,32 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// closes (a zero-length read). Cancel-safe: no decoder state is lost on a cancelled await
     /// because the decoder lives on the session and only advances on a completed read.
     async fn read_events(&mut self) -> terminal::Result<Vec<Event>> {
-        loop {
-            let mut guard = self
-                .readiness_mut()
-                .readable()
-                .await
-                .map_err(terminal::Error::read_terminal)?;
-
-            let mut buffer = [0; READ_BUFFER_LEN];
-            let read = guard.try_io(|inner| fd_read(inner.get_ref(), &mut buffer));
-            match read {
-                Ok(Ok(0)) => {
-                    return Err(terminal::Error::read_terminal(io::Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "terminal input closed before another event was available",
-                    )));
-                }
-                Ok(Ok(len)) => {
-                    let mut events = self.decoder.feed(&buffer[..len]);
-                    // Drain-boundary flush: a read that did not fill the buffer means the operating
-                    // system's input buffer is drained, so a trailing text run the syntax layer
-                    // parked for split-equivalence is settled input the caller should receive now.
-                    // Only *complete* trailing text is flushed; a partial escape, control sequence,
-                    // or mid-character UTF-8 run keeps waiting for the bytes that finish it (design
-                    // 02: the decoder never guesses across a real split). Without this, the last
-                    // character typed before a pause — the `o` in "hello" — would sit unseen until
-                    // the next keystroke, which the real-emulator typeahead gate would catch.
-                    if len < buffer.len() && self.decoder.has_settled_text() {
-                        events.extend(self.decoder.finish());
-                    }
-                    return Ok(events);
-                }
-                Ok(Err(err)) => return Err(terminal::Error::read_terminal(err)),
-                Err(_would_block) => {}
-            }
+        let mut buffer = [0; READ_BUFFER_LEN];
+        let len = self.readiness_mut().read(&mut buffer).await?;
+        if len == 0 {
+            return Err(terminal::Error::read_terminal(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "terminal input closed before another event was available",
+            )));
         }
+
+        // The decoder stays on the session, not in the readiness transport: the seam yields raw
+        // bytes and the session owns all decode/correlate/pending state, so cancel-safety keeps
+        // falling out of "state lives on the struct" (design 04). The read above performed no state
+        // mutation until it returned bytes here.
+        let mut events = self.decoder.feed(&buffer[..len]);
+        // Drain-boundary flush: a read that did not fill the buffer means the operating system's
+        // input buffer is drained, so a trailing text run the syntax layer parked for
+        // split-equivalence is settled input the caller should receive now. Only *complete*
+        // trailing text is flushed; a partial escape, control sequence, or mid-character
+        // UTF-8 run keeps waiting for the bytes that finish it (design 02: the decoder
+        // never guesses across a real split). Without this, the last character typed before
+        // a pause — the `o` in "hello" — would sit unseen until the next keystroke, which
+        // the real-emulator typeahead gate would catch.
+        if len < buffer.len() && self.decoder.has_settled_text() {
+            events.extend(self.decoder.finish());
+        }
+        Ok(events)
     }
 
     /// Flushes buffered terminal output.
@@ -1752,10 +1781,233 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
                   an async fn for API continuity with the awaited call sites"
     )]
     pub async fn leave(mut self) -> terminal::Result<()> {
+        // Restore the shared-description status flags before cooked mode (Unix only; the Windows
+        // console transport has no descriptor flags to put back). Dropping `self` afterward joins
+        // the readiness worker on Windows through the transport's `Drop`.
+        #[cfg(unix)]
         self.restore_flags();
         self.session.leave()
     }
+}
 
+/// The lifecycle steps both platforms share: the bounded ledger re-enter and the synthetic-resize
+/// enqueue. Unix `resume` and both platforms' `run_detached` re-establish terminal state through
+/// these, so they live outside the Unix-only job-control block.
+#[cfg(any(unix, windows))]
+impl<D: TerminalDevice> TokioTerminalSession<D> {
+    /// Re-enters the mode ledger with a bounded retry, tolerating the shell or a returning child
+    /// racing for the terminal.
+    ///
+    /// The first re-enter after a handoff can fail transiently while the shell (Unix `SIGCONT`) or
+    /// the just-returned child still holds the terminal (FM-G4). This retries up to
+    /// [`RESUME_REENTER_RETRIES`] times with [`RESUME_REENTER_RETRY_DELAY`] between attempts — the
+    /// helix/neovim ~10×50 ms pattern — before surfacing the last error. Each retry re-runs the
+    /// same idempotent ledger replay; a re-enter that partially applied is safe to replay because
+    /// the ledger entries are unchanged. Re-entering also re-arms the panic-safe restore handle.
+    async fn reenter_with_retry(&mut self) -> terminal::Result<()> {
+        let mut last_error = None;
+        for attempt in 0..RESUME_REENTER_RETRIES {
+            match self.session.enter() {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error);
+                    // The inner `enter` is a no-op once it has marked itself entered, so a retry
+                    // needs the session to be left again before it will replay. Leaving is
+                    // idempotent and keeps the ledger, so this cycles cleanly for the next attempt.
+                    _ = self.session.leave();
+                    if attempt + 1 < RESUME_REENTER_RETRIES {
+                        tokio::time::sleep(RESUME_REENTER_RETRY_DELAY).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("the retry loop runs at least once, so an error was recorded"))
+    }
+
+    /// Reads the current terminal size and enqueues a synthetic [`Event::Resize`] for delivery.
+    ///
+    /// The window may have been resized while the process was stopped or the child owned the
+    /// terminal, so the handoff enqueues one cell-geometry resize (no pixel geometry is available
+    /// out of band, matching the `SIGWINCH` fallback) onto the same `pending` queue
+    /// [`next_event`](Self::next_event) drains. The app then repaints at the size the terminal is
+    /// now without waiting for a `SIGWINCH` or an in-band report.
+    fn queue_synthetic_resize(&mut self) -> terminal::Result<()> {
+        let size = self.session.size()?;
+        let resize = ResizeEvent::new(size, None);
+        self.pending.push_back(Event::Resize(resize));
+        Ok(())
+    }
+}
+
+/// The Windows lifecycle: the editor/pager handoff and the console ctrl-event signal stream, plus
+/// the job-control methods that are typed `Unsupported` on a platform with no job control (ADR 0022
+/// §7). Unlike Unix there is no `suspend`/`resume` pair (no `SIGTSTP`/`SIGCONT`) and no
+/// `resize_stream` (resize arrives in band through [`next_event`](Self::next_event)); the handoff
+/// swaps Unix's fd detach/reattach for pausing and resuming the readiness worker.
+#[cfg(windows)]
+impl<D: TerminalDevice> TokioTerminalSession<D> {
+    /// Reports that suspend (job control) is unsupported on Windows.
+    ///
+    /// Windows has no job control: there is no `SIGTSTP`, no process-group stop, and no shell to
+    /// hand the terminal back to (ADR 0022 §7). `Ctrl+Z` is an ordinary input byte on a Windows
+    /// console, **not** a suspend request, so this never stops the process and never touches the
+    /// terminal — it returns a typed [`terminal::Error::Unsupported`] immediately. An application
+    /// that selects on [`signals`](Self::signals) simply never receives a
+    /// [`Suspend`](TerminalSignal::Suspend) to act on. To run a child with the terminal, use
+    /// [`run_detached`](Self::run_detached).
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`terminal::Error::Unsupported`].
+    #[expect(
+        clippy::unused_async,
+        reason = "mirrors the awaited Unix suspend so the call site is identical on both platforms"
+    )]
+    pub async fn suspend(&mut self) -> terminal::Result<()> {
+        Err(terminal::Error::unsupported(
+            "suspend (job control)",
+            "windows",
+        ))
+    }
+
+    /// Reports that the out-of-band resize stream is unsupported on Windows.
+    ///
+    /// Windows has no `SIGWINCH`. Resize is delivered **in band** instead: the readiness worker
+    /// translates each `WINDOW_BUFFER_SIZE_EVENT` record into an in-band resize report, so a size
+    /// change surfaces as an [`Event::Resize`](crate::Event::Resize) through
+    /// [`next_event`](Self::next_event) with no signal handling (ADR 0022 §7, MW-1/MW-2). The
+    /// `SIGWINCH` fallback this stream provides on Unix therefore has no role here, and the method
+    /// returns a typed [`terminal::Error::Unsupported`] rather than a stream that never fires.
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`terminal::Error::Unsupported`].
+    pub fn resize_stream(&self) -> terminal::Result<ResizeStream> {
+        Err(terminal::Error::unsupported("resize stream", "windows"))
+    }
+
+    /// Hands the console to a synchronous child, runs it, and reclaims the console cleanly
+    /// afterward — the `$EDITOR`/pager/subshell handoff (ADR 0022 §7).
+    ///
+    /// The Windows sibling of the Unix
+    /// [`run_detached`](TokioTerminalSession::run_detached). Where the Unix handoff detaches and
+    /// reattaches the reactor-registered fd, this **pauses and resumes the readiness worker**:
+    /// while the child owns the console, qwertty's reader must not be calling
+    /// `ReadConsoleInputW` on the same input, or the child and the worker would steal each
+    /// other's keystrokes. `f` is a synchronous `FnOnce`; the async session is quiescent for
+    /// the whole handoff (no `.await` between releasing and reclaiming the console), so the
+    /// child owns a clean console and this session is fully usable again on return. Whatever
+    /// `f` returns is returned on success.
+    ///
+    /// # Steps
+    ///
+    /// 1. **Ledger undo, entries kept.** Replays the mode ledger's resets so the child sees a
+    ///    normal (cooked) console and **disarms** the panic-safe restore handle, exactly as the
+    ///    Unix handoff does (the re-entrant [`TerminalSession::leave`]). The entries are kept for
+    ///    the re-enter.
+    /// 2. **Pause the reader worker.** Signals the worker's waker, joins it, and discards any
+    ///    buffered pre-child input — but keeps the console handles and the waker event alive. No
+    ///    worker is reading the console while the child runs.
+    /// 3. **Run `f()`** — the child blocks here, owning the console.
+    /// 4. **Resume the reader worker.** Resets the waker event and respawns the worker over the
+    ///    same handles with a fresh channel, so post-child reads start clean.
+    /// 5. **Termios resync.** Re-enters the kept ledger with the bounded retry through
+    ///    [`TerminalSession::enter`], re-entering raw mode, re-applying every recorded mode, and
+    ///    **re-arming** the restore handle. This never trusts what the child left (a child like
+    ///    `vi` may have scrambled the console modes).
+    /// 6. **Synthetic resize.** Queues an [`Event::Resize`](crate::Event::Resize) so the next
+    ///    [`next_event`](Self::next_event) reports the current geometry — the window may have been
+    ///    resized while the child owned the console.
+    ///
+    /// # Failed resume (well-defined state)
+    ///
+    /// The worker is joined in step 2 before the child runs, so at most one of the worker and the
+    /// child ever reads the console. If resuming the worker (step 4) fails — the waker cannot be
+    /// reset or the reader thread cannot be respawned — this returns the error with the transport
+    /// left worker-less (no live worker, so `Drop` never double-joins) and the restore handle
+    /// disarmed from step 1. The console has already been restored to a clean cooked state by step
+    /// 1, so the failure leaves a usable console for the caller even though this session can no
+    /// longer drive it — the same guarantee the Unix handoff makes on a failed re-registration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ledger undo fails, if the reader worker cannot be resumed, if the
+    /// bounded-retry re-enter never succeeds, or if the current size cannot be read for the
+    /// synthetic resize.
+    pub async fn run_detached<R>(&mut self, f: impl FnOnce() -> R) -> terminal::Result<R> {
+        // Step 1: undo the terminal state the re-entrant way (keeps the ledger entries) and disarm
+        // the restore handle — exactly what the Unix handoff does. `enter` in step 5 replays the
+        // kept entries and re-arms the handle.
+        self.session.leave()?;
+
+        // Step 2: pause the reader worker so it is not calling `ReadConsoleInputW` on the console
+        // the child is about to own. Pausing signals the waker, joins the worker, and discards
+        // buffered pre-child input, while keeping the handles and waker alive for the resume.
+        self.readiness_mut().pause();
+
+        // Run the child. It blocks on the current thread and owns the console for its lifetime. No
+        // `.await` runs while the worker is paused, so the session stays quiescent.
+        let result = f();
+
+        // Step 3 (steps 4-6 below): resume the reader worker — reset the waker and respawn the
+        // worker over the same handles with a fresh channel, so post-child reads start clean. A
+        // failed resume leaves the transport worker-less (Drop will not double-join) and the
+        // restore handle disarmed; the console is already cooked from step 1.
+        self.readiness_mut().resume()?;
+
+        // Step 5: termios resync — re-enter the kept ledger with the bounded retry (re-entering raw
+        // mode, re-applying every recorded mode, re-arming the restore handle). Never trust the
+        // console modes the child left.
+        self.reenter_with_retry().await?;
+
+        // Step 6: queue a synthetic resize so the app repaints at whatever size the console is now
+        // (the window may have been resized while the child owned it).
+        self.queue_synthetic_resize()?;
+
+        Ok(result)
+    }
+
+    /// Returns an awaitable [`SignalStream`] of the console control events a TUI cares about,
+    /// mapped to typed [`TerminalSignal`] values.
+    ///
+    /// This is the Windows analogue of the Unix
+    /// [`signals`](TokioTerminalSession::signals). qwertty installs no handler at construction; the
+    /// listeners are registered only when this is called, and the stream only *reports* — the
+    /// application owns the response. It owns three `tokio::signal::windows` listeners and maps
+    /// them: `Ctrl+C` and `Ctrl+Break` both to [`Interrupt`](TerminalSignal::Interrupt), and the
+    /// console close signal to [`Terminate`](TerminalSignal::Terminate).
+    ///
+    /// [`Suspend`](TerminalSignal::Suspend) and [`Continue`](TerminalSignal::Continue) **never
+    /// arrive on Windows** — there is no job control (ADR 0022 §7) — so an application's
+    /// `match` on those arms is simply never taken. The [`TerminalSignal`] enum is
+    /// `#[non_exhaustive]`, so the same `select!` wiring compiles unchanged across platforms.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any of the three console control listeners cannot be installed.
+    pub fn signals(&self) -> terminal::Result<SignalStream> {
+        use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close};
+
+        // Install the listeners now — never at construction (the app owns registration by calling
+        // this). Ctrl+C and Ctrl+Break both map to Interrupt; the console close signal maps to
+        // Terminate. There is no Suspend/Continue source on Windows.
+        let ctrl_c = ctrl_c().map_err(terminal::Error::read_terminal)?;
+        let ctrl_break = ctrl_break().map_err(terminal::Error::read_terminal)?;
+        let ctrl_close = ctrl_close().map_err(terminal::Error::read_terminal)?;
+        Ok(SignalStream {
+            ctrl_c,
+            ctrl_break,
+            ctrl_close,
+        })
+    }
+}
+
+/// The Unix job-control and signal lifecycle: suspend/resume, the detached handoff, the resize and
+/// signal streams, and the fd-flag restore they share. Windows has no job control (ADR 0022 §7) and
+/// no pollable descriptor, so none of this exists on the Windows build; its teardown is the
+/// readiness worker's `Drop`.
+#[cfg(unix)]
+impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Suspends the process to the shell, leaving the terminal clean, then requests a job-control
     /// stop (design 01 §4, playbook M6-S1).
     ///
@@ -1823,7 +2075,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// 2. **Flags resync (re-assert non-blocking).** It re-applies the `O_NONBLOCK` status flag on
     ///    the readiness descriptor. The session set the descriptor non-blocking at construction,
     ///    but the shell the process returned from may have cleared it on the shared open file
-    ///    description; [`AsyncFd`] requires non-blocking, so this must be re-asserted after
+    ///    description; `AsyncFd` requires non-blocking, so this must be re-asserted after
     ///    `SIGCONT`, after the termios resync.
     /// 3. **Optional input flush.** When `flush_input` is `true`, it `tcflush`es the pending input
     ///    so stale bytes the user typed at the shell (or a partially typed line) are dropped rather
@@ -1847,12 +2099,12 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // Step 2: flags resync — re-assert non-blocking on the readiness fd. The shell may have
         // cleared it on the shared description after SIGCONT; AsyncFd requires it. This is done
         // *after* the termios resync, so the ordering the playbook mandates holds.
-        self.reassert_nonblocking()?;
+        self.readiness().reassert_nonblocking()?;
 
         // Step 3: optional stale-input flush. The caller decides whether typeahead at the shell is
         // dropped (`tcflush` of the input queue) or kept.
         if flush_input {
-            self.flush_pending_input()?;
+            self.readiness().flush_input()?;
         }
 
         // Step 4: queue a synthetic resize so the app repaints at whatever size the terminal is now
@@ -1895,19 +2147,19 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///    does ordinary *blocking* reads on stdin; without this its reads would spuriously hit
     ///    `EAGAIN` from the non-blocking flag the session set on the shared description (FM-L
     ///    class).
-    /// 3. **Release the reactor registration.** Pulls the registered [`OwnedFd`] out of the
-    ///    [`AsyncFd`] ([`AsyncFd::into_inner`]), dropping the Tokio readiness registration entirely
-    ///    and holding the fd raw across the closure.
+    /// 3. **Release the reactor registration.** Detaches the readiness transport, dropping the
+    ///    Tokio readiness registration entirely and holding the raw fd (and its saved flags) across
+    ///    the closure.
     ///
     /// **Run `f()`** — call the closure and capture its `R`. It blocks; the caller's child runs
     /// here.
     ///
     /// **After `f` returns — reclaim the terminal, never trusting what the child left:**
     ///
-    /// 4. **Re-register.** Takes a **fresh** [`AsyncFd`] over the *same* fd ([`AsyncFd::try_new`]).
-    ///    Because the registration was fully released in step 3 and re-taken here, the reactor
-    ///    reads the descriptor's *current* readiness with no stale edge-triggered notification
-    ///    carried over from before the child ran — see below.
+    /// 4. **Re-register.** Reattaches a **fresh** reactor registration over the *same* fd. Because
+    ///    the registration was fully released in step 3 and re-taken here, the reactor reads the
+    ///    descriptor's *current* readiness with no stale edge-triggered notification carried over
+    ///    from before the child ran — see below.
     /// 5. **Termios + flags resync.** Re-asserts `O_NONBLOCK` on the readiness fd (the same
     ///    `reassert_nonblocking` step [`resume`](Self::resume) uses) and re-enters the kept ledger
     ///    with the same bounded retry through [`TerminalSession::enter`], which re-enters raw mode,
@@ -1924,12 +2176,12 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Panics
     ///
     /// Panics when called outside a Tokio runtime: reclaiming the terminal re-registers the fd with
-    /// the current runtime's reactor ([`AsyncFd::try_new`]), which requires an active runtime, the
+    /// the current runtime's reactor (`AsyncFd::try_new`), which requires an active runtime, the
     /// same requirement as [`open`](Self::open).
     ///
     /// # Why a fresh registration (the edge-triggered readiness concern)
     ///
-    /// Tokio's [`AsyncFd`] registers the descriptor with an edge-triggered reactor (kqueue/epoll).
+    /// Tokio's `AsyncFd` registers the descriptor with an edge-triggered reactor (kqueue/epoll).
     /// Readiness is delivered as *edges*: a transition to readable/writable notifies once, and the
     /// reactor then waits for the next transition. While the synchronous child owns the terminal
     /// the runtime is not polling this fd, yet the child freely reads and writes it — draining
@@ -1949,7 +2201,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the ledger undo fails, if the fresh [`AsyncFd`] cannot be registered
+    /// Returns an error if the ledger undo fails, if the fresh registration cannot be taken
     /// (surfaced as an open-terminal error, matching construction), if non-blocking cannot be
     /// re-asserted, if the bounded-retry re-enter never succeeds, or if the current size cannot be
     /// read for the synthetic resize. When re-registration fails the terminal has still been
@@ -1966,39 +2218,35 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // the readiness registration is still present, so `restore_flags` finds it.
         self.restore_flags();
 
-        // Step 3: release the reactor registration by pulling the OwnedFd out of the AsyncFd, and
-        // hold it raw across the closure. `readiness` is guaranteed `Some` here: a session with no
-        // pollable fd is rejected at construction, so the only way it is ever `None` is inside this
-        // very window. Dropping the AsyncFd (via into_inner) tears down the edge-triggered
-        // registration so step 4 can take a guaranteed-fresh one.
-        let owned = self
+        // Step 3: release the reactor registration by detaching the readiness transport, holding
+        // the raw fd (and its saved flags) across the closure. `readiness` is guaranteed `Some`
+        // here: a session with no pollable fd is rejected at construction, so the only way it is
+        // ever `None` is inside this very window. Detaching drops the edge-triggered registration
+        // so step 4 can reattach a guaranteed-fresh one.
+        let (owned, original_flags) = self
             .readiness
             .take()
             .expect("readiness is Some outside the run_detached window")
-            .into_inner();
+            .detach();
 
         // Run the child. It blocks; the caller spawns/waits their foreground process here. No
         // `.await` runs while the registration is released, so the session stays quiescent and no
         // read/write path can observe the `None`.
         let result = f();
 
-        // Step 4: re-register a FRESH AsyncFd over the SAME fd. A fresh registration reads the
+        // Step 4: reattach a FRESH registration over the SAME fd. A fresh registration reads the
         // descriptor's current readiness with no stale edge carried over from before the child ran
         // (see the method docs' edge-triggered discussion). On failure the fd is dropped with the
-        // error's parts; the terminal is already clean (steps 1-2), so the caller keeps a usable
-        // terminal even though this session cannot continue.
-        let readiness = AsyncFd::try_new(owned).map_err(|err| {
-            let (_owned, err) = err.into_parts();
-            terminal::Error::open_terminal(err)
-        })?;
-        self.readiness = Some(readiness);
+        // error; the terminal is already clean (steps 1-2), so the caller keeps a usable terminal
+        // even though this session cannot continue.
+        self.readiness = Some(FdReadiness::reattach(owned, original_flags)?);
 
         // Step 5: flags + termios resync. Re-assert non-blocking on the fresh registration (AsyncFd
         // requires it), then re-enter the kept ledger with the bounded retry — re-entering raw
         // mode, re-applying every recorded mode, and re-arming the restore handle. Never
         // trust the termios the child left (FM-L9): the re-enter re-asserts the session's
         // own modes wholesale.
-        self.reassert_nonblocking()?;
+        self.readiness().reassert_nonblocking()?;
         self.reenter_with_retry().await?;
 
         // Step 6: queue a synthetic resize so the app repaints at whatever size the terminal is now
@@ -2006,80 +2254,6 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         self.queue_synthetic_resize()?;
 
         Ok(result)
-    }
-
-    /// Re-enters the mode ledger with a bounded retry, tolerating the shell racing for the
-    /// terminal.
-    ///
-    /// The first re-enter after `SIGCONT` can fail transiently while the shell still holds the
-    /// terminal (FM-G4). This retries up to [`RESUME_REENTER_RETRIES`] times with
-    /// [`RESUME_REENTER_RETRY_DELAY`] between attempts — the helix/neovim ~10×50 ms pattern —
-    /// before surfacing the last error. Each retry re-runs the same idempotent ledger replay; a
-    /// re-enter that partially applied is safe to replay because the ledger entries are unchanged.
-    async fn reenter_with_retry(&mut self) -> terminal::Result<()> {
-        let mut last_error = None;
-        for attempt in 0..RESUME_REENTER_RETRIES {
-            match self.session.enter() {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    last_error = Some(error);
-                    // The inner `enter` is a no-op once it has marked itself entered, so a retry
-                    // needs the session to be left again before it will replay. Leaving is
-                    // idempotent and keeps the ledger, so this cycles cleanly for the next attempt.
-                    _ = self.session.leave();
-                    if attempt + 1 < RESUME_REENTER_RETRIES {
-                        tokio::time::sleep(RESUME_REENTER_RETRY_DELAY).await;
-                    }
-                }
-            }
-        }
-        Err(last_error.expect("the retry loop runs at least once, so an error was recorded"))
-    }
-
-    /// Re-asserts the readiness descriptor's non-blocking flag after a `SIGCONT`.
-    ///
-    /// [`AsyncFd`] requires the registered descriptor to be non-blocking. The session set it so at
-    /// construction, but the shell the process returned from may have cleared `O_NONBLOCK` on the
-    /// shared open file description while it owned the terminal, so resume re-asserts it. Reads the
-    /// current flags and sets non-blocking on top, so no other status flag the shell may have set
-    /// is disturbed.
-    fn reassert_nonblocking(&self) -> terminal::Result<()> {
-        let fd = self.readiness().get_ref();
-        let flags = fcntl_getfl(fd)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::set_terminal_mode)?;
-        fcntl_setfl(fd, flags | OFlags::NONBLOCK)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::set_terminal_mode)
-    }
-
-    /// Drops pending input on the terminal (`tcflush` of the input queue).
-    ///
-    /// Called by [`resume`](Self::resume) only when the caller passes `flush_input: true`. This
-    /// discards stale bytes typed at the shell while the process was stopped so they are not
-    /// delivered to the application as if typed into it. It flushes the *input* queue only; queued
-    /// output the session still owes is untouched.
-    fn flush_pending_input(&self) -> terminal::Result<()> {
-        rustix::termios::tcflush(
-            self.readiness().get_ref(),
-            rustix::termios::QueueSelector::IFlush,
-        )
-        .map_err(io::Error::from)
-        .map_err(terminal::Error::set_terminal_mode)
-    }
-
-    /// Reads the current terminal size and enqueues a synthetic [`Event::Resize`] for delivery.
-    ///
-    /// The window may have been resized while the process was stopped, so resume enqueues one
-    /// cell-geometry resize (a `SIGCONT` carries no pixel geometry, matching the `SIGWINCH`
-    /// fallback) onto the same `pending` queue [`next_event`](Self::next_event) drains. The app
-    /// then repaints at the size the terminal is now without waiting for a `SIGWINCH` or an
-    /// in-band report.
-    fn queue_synthetic_resize(&mut self) -> terminal::Result<()> {
-        let size = self.session.size()?;
-        let resize = ResizeEvent::new(size, None);
-        self.pending.push_back(Event::Resize(resize));
-        Ok(())
     }
 
     /// Returns an awaitable [`ResizeStream`] that yields a synthetic resize on every `SIGWINCH`.
@@ -2124,12 +2298,10 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Returns an error when the `SIGWINCH` listener cannot be installed or the descriptor cannot
     /// be duplicated for size reads.
     pub fn resize_stream(&self) -> terminal::Result<ResizeStream> {
-        let borrowed = self.session.device().as_fd().ok_or_else(|| {
-            terminal::Error::unsupported("SIGWINCH resize stream", "device without a fd")
-        })?;
-        let size_fd = rustix::io::dup(borrowed)
-            .map_err(io::Error::from)
-            .map_err(terminal::Error::open_terminal)?;
+        // The private size descriptor comes from the readiness transport, so the session body stops
+        // touching `rustix` for the dup: `dup_fd` duplicates the registered dup, which shares the
+        // device's open file description, so the size it measures is the session's terminal size.
+        let size_fd = self.readiness().dup_fd()?;
         let signal = signal(SignalKind::window_change()).map_err(terminal::Error::read_terminal)?;
         Ok(ResizeStream { signal, size_fd })
     }
@@ -2200,16 +2372,15 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Restores the device status flags captured before this session set the descriptor
     /// non-blocking.
     ///
-    /// The readiness dup and the session device share one open file description, so restoring the
-    /// flags on either restores them for both. This runs before the session teardown and again from
-    /// drop, so every exit path puts the flags back (idempotent; a redundant set is harmless).
+    /// Delegates to [`FdReadiness::restore_flags`], which puts the flags back on the shared open
+    /// file description (the readiness dup and the session device share one, so restoring on either
+    /// restores them for both). This runs before the session teardown and again from drop, so every
+    /// exit path puts the flags back (idempotent; a redundant set is harmless). The `Option` guard
+    /// keeps this a no-op inside the `run_detached` handoff window — the one path that holds the
+    /// dup raw and restored the flags itself before detaching.
     fn restore_flags(&self) {
-        // Restore on the shared description via the readiness dup. Every caller of this method
-        // (leave, drop) holds a registered readiness, so it is `Some` here; the one path that owns
-        // the dup raw — `run_detached` during its handoff window — restores the flags on the held
-        // fd directly rather than through this accessor, so `None` here is a no-op by construction.
         if let Some(readiness) = self.readiness.as_ref() {
-            _ = fcntl_setfl(readiness.get_ref(), self.original_flags);
+            readiness.restore_flags();
         }
     }
 }
@@ -2226,7 +2397,10 @@ impl<D: TerminalDevice> Drop for TokioTerminalSession<D> {
     fn drop(&mut self) {
         // Restore the shared-description status flags before the session's own drop restores cooked
         // mode; with a dup'd stdin description the non-blocking flag would otherwise leak into the
-        // parent shell (FM-L class). The session's Drop handles cooked-mode restoration.
+        // parent shell (FM-L class). The session's Drop handles cooked-mode restoration. On Windows
+        // there are no descriptor flags: the readiness field's own `Drop` signals the waker and
+        // joins the worker, and the session's `Drop` restores the console modes.
+        #[cfg(unix)]
         self.restore_flags();
     }
 }
@@ -2246,6 +2420,7 @@ impl<D: TerminalDevice> Drop for TokioTerminalSession<D> {
 /// (no `futures`/`Stream` in the public API before the vocabulary freeze) and is all a `select!`
 /// loop needs; a `Stream` impl can be added later without changing this method (design 04). Prefer
 /// in-band resize (mode 2048) where the terminal supports it — this is the fallback.
+#[cfg(unix)]
 #[derive(Debug)]
 pub struct ResizeStream {
     /// The Tokio `SIGWINCH` (`SIGWINCH` = window change) listener. Tokio owns the actual signal
@@ -2258,6 +2433,7 @@ pub struct ResizeStream {
     size_fd: OwnedFd,
 }
 
+#[cfg(unix)]
 impl ResizeStream {
     /// Awaits the next `SIGWINCH` and yields the terminal's new size as a [`ResizeEvent`].
     ///
@@ -2290,6 +2466,38 @@ impl ResizeStream {
     }
 }
 
+/// The Windows placeholder for the `SIGWINCH`-driven resize source, which Windows does not have.
+///
+/// It is the return type of the Windows [`resize_stream`](TokioTerminalSession::resize_stream),
+/// which always returns [`terminal::Error::Unsupported`]: resize is delivered in band through
+/// [`next_event`](TokioTerminalSession::next_event) instead (ADR 0022 §7). The type is
+/// **uninhabited** — its only field is [`Infallible`](std::convert::Infallible) — so a
+/// `ResizeStream` can never be constructed on Windows, and [`next_resize`](Self::next_resize) is
+/// statically unreachable. It exists only so the method keeps its cross-platform signature.
+#[cfg(windows)]
+#[derive(Debug)]
+pub struct ResizeStream {
+    /// Uninhabited: Windows never constructs a `ResizeStream`, so this field can never be
+    /// produced.
+    never: std::convert::Infallible,
+}
+
+#[cfg(windows)]
+impl ResizeStream {
+    /// Statically unreachable: a `ResizeStream` cannot be constructed on Windows.
+    ///
+    /// # Errors
+    ///
+    /// Never returns; the method cannot be called because no `ResizeStream` value exists.
+    #[expect(
+        clippy::unused_async,
+        reason = "uninhabited-type method kept async for signature parity with the Unix next_resize"
+    )]
+    pub async fn next_resize(&mut self) -> terminal::Result<ResizeEvent> {
+        match self.never {}
+    }
+}
+
 /// A terminal-relevant process signal a TUI selects on, reported by [`SignalStream`].
 ///
 /// These are the signals a full-screen application typically wants to respond to itself, distinct
@@ -2298,6 +2506,16 @@ impl ResizeStream {
 /// signals may be added.
 ///
 /// Obtain a stream of these from [`TokioTerminalSession::signals`].
+///
+/// # Platform coverage
+///
+/// The enum is whole on every platform, but which variants a stream can yield differs. On Unix all
+/// four arrive. On Windows there is no job control (ADR 0022 §7): the console signal source yields
+/// only [`Interrupt`](Self::Interrupt) (from `Ctrl+C`/`Ctrl+Break`) and
+/// [`Terminate`](Self::Terminate) (from the console close) — [`Suspend`](Self::Suspend) and
+/// [`Continue`](Self::Continue) never arrive. Because the enum is `#[non_exhaustive]`, one
+/// `select!` matching all four compiles and runs unchanged on both.
+#[cfg(any(unix, windows))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TerminalSignal {
@@ -2333,12 +2551,16 @@ pub enum TerminalSignal {
 /// value that does not borrow the session (design 01: qwertty installs no handler itself, only
 /// exposes a stream the app selects on), so it can sit in a `tokio::select!` alongside
 /// [`next_event`](TokioTerminalSession::next_event) and
-/// [`resize_stream`](TokioTerminalSession::resize_stream). It owns the four Tokio signal listeners
-/// (`SIGTSTP`, `SIGCONT`, `SIGTERM`, `SIGINT`) and `select!`s across them on each
-/// [`next`](Self::next), yielding whichever fired as a typed [`TerminalSignal`].
+/// [`resize_stream`](TokioTerminalSession::resize_stream). It owns the platform's signal listeners
+/// and `select!`s across them on each [`next`](Self::next), yielding whichever fired as a typed
+/// [`TerminalSignal`]: on Unix the four job-control/terminate/interrupt listeners (`SIGTSTP`,
+/// `SIGCONT`, `SIGTERM`, `SIGINT`); on Windows the three console control listeners (`Ctrl+C`,
+/// `Ctrl+Break`, and the console close), which never yield suspend/continue (ADR 0022 §7).
 ///
-/// `SIGWINCH` is deliberately excluded — that is [`ResizeStream`]'s responsibility, and mixing it
-/// in would blur the resize path with the lifecycle-signal path.
+/// The resize signal (`SIGWINCH` on Unix) is deliberately excluded — that is [`ResizeStream`]'s
+/// responsibility on Unix, and on Windows resize arrives in band through
+/// [`next_event`](TokioTerminalSession::next_event) — so mixing it in would blur the resize path
+/// with the lifecycle-signal path.
 ///
 /// # Shape choice
 ///
@@ -2347,19 +2569,42 @@ pub enum TerminalSignal {
 /// dependency-free (no `futures`/`Stream` in the public API before the vocabulary freeze) and is
 /// all a `select!` loop needs; a `Stream` impl can be added later without changing this method
 /// (design 04).
+#[cfg(any(unix, windows))]
+#[cfg_attr(
+    windows,
+    allow(
+        clippy::struct_field_names,
+        reason = "the three Windows listeners are all console `ctrl_*` events; the shared prefix \
+                  names the source, it is not redundant"
+    )
+)]
 #[derive(Debug)]
 pub struct SignalStream {
     /// The `SIGTSTP` (job-control stop) listener. Tokio owns the registration; qwertty installs no
     /// handler of its own.
+    #[cfg(unix)]
     suspend: Signal,
     /// The `SIGCONT` (continue) listener.
+    #[cfg(unix)]
     continue_: Signal,
     /// The `SIGTERM` (terminate) listener.
+    #[cfg(unix)]
     terminate: Signal,
     /// The `SIGINT` (interrupt) listener.
+    #[cfg(unix)]
     interrupt: Signal,
+    /// The `Ctrl+C` console control listener, mapped to [`TerminalSignal::Interrupt`].
+    #[cfg(windows)]
+    ctrl_c: CtrlC,
+    /// The `Ctrl+Break` console control listener, mapped to [`TerminalSignal::Interrupt`].
+    #[cfg(windows)]
+    ctrl_break: CtrlBreak,
+    /// The console close listener, mapped to [`TerminalSignal::Terminate`].
+    #[cfg(windows)]
+    ctrl_close: CtrlClose,
 }
 
+#[cfg(unix)]
 impl SignalStream {
     /// Awaits the next terminal-relevant signal and yields it as a typed [`TerminalSignal`].
     ///
@@ -2392,24 +2637,69 @@ impl SignalStream {
     }
 }
 
-/// Writes bytes to the readiness-registered descriptor with one `write(2)`, returning the count.
-///
-/// I/O runs on the fd Tokio registered — the dup that shares the device's open file description —
-/// so readiness stays correct under edge-triggered polling and the bytes are still the device's
-/// bytes. On the non-blocking descriptor a short write advances the caller's remaining slice, and a
-/// `WouldBlock` surfaces as an error so `try_io` clears the readiness guard and the caller retries
-/// on the next writable notification. This is the exact partial-write semantics of the old
-/// direct-`File::write` loop.
-fn fd_write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
-    rustix::io::write(fd, bytes).map_err(io::Error::from)
+#[cfg(windows)]
+impl SignalStream {
+    /// Awaits the next console control event and yields it as a typed [`TerminalSignal`].
+    ///
+    /// `select!`s across the three console control listeners and returns whichever fires first,
+    /// mapped through [`map_ctrl_event`]: `Ctrl+C` and `Ctrl+Break` to
+    /// [`TerminalSignal::Interrupt`], the console close to [`TerminalSignal::Terminate`]. Suspend
+    /// and continue never arrive on Windows (ADR 0022 §7). This only *reports* the event — the
+    /// application decides the response (see [`signals`](TokioTerminalSession::signals)).
+    ///
+    /// Cancel-safe: dropping the future mid-await abandons only the wait; the listeners live on
+    /// this value, so the next call resumes cleanly.
+    ///
+    /// # Errors
+    ///
+    /// Returns a read error if a console control stream closes, which does not happen in normal
+    /// operation.
+    pub async fn next(&mut self) -> terminal::Result<TerminalSignal> {
+        let event = tokio::select! {
+            received = self.ctrl_c.recv() => received.map(|()| ConsoleCtrlEvent::CtrlC),
+            received = self.ctrl_break.recv() => received.map(|()| ConsoleCtrlEvent::CtrlBreak),
+            received = self.ctrl_close.recv() => received.map(|()| ConsoleCtrlEvent::CtrlClose),
+        };
+        event.map(map_ctrl_event).ok_or_else(|| {
+            terminal::Error::read_terminal(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "terminal signal stream closed",
+            ))
+        })
+    }
 }
 
-/// Reads into `buffer` from the readiness-registered descriptor with one `read(2)`.
+/// A console control event the Windows [`SignalStream`] observes, before mapping to a
+/// [`TerminalSignal`].
 ///
-/// Returns `Ok(0)` at end of input. Runs on the registered fd for the same readiness-correctness
-/// reason as [`fd_write`].
-fn fd_read(fd: &OwnedFd, buffer: &mut [u8]) -> io::Result<usize> {
-    rustix::io::read(fd, buffer).map_err(io::Error::from)
+/// This is the pure input to [`map_ctrl_event`]: naming the three `tokio::signal::windows` sources
+/// as a plain enum keeps the ctrl-event → signal mapping a pure function, unit-tested on every
+/// platform even though the listeners themselves are Windows-only.
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConsoleCtrlEvent {
+    /// `Ctrl+C` — the interrupt request.
+    CtrlC,
+    /// `Ctrl+Break` — a second interrupt request the console delivers separately.
+    CtrlBreak,
+    /// The console close signal — the window is closing or the user logged off.
+    CtrlClose,
+}
+
+/// Maps a Windows console control event to the typed [`TerminalSignal`] the stream reports.
+///
+/// `Ctrl+C` and `Ctrl+Break` both surface as [`TerminalSignal::Interrupt`] — a Windows console
+/// has no separate "quit" the way a Unix terminal's `SIGQUIT` does, so both interrupt keys map to
+/// the one interrupt signal an application already handles. The console close maps to
+/// [`TerminalSignal::Terminate`], the graceful-shutdown request (ADR 0022 §7). There is no
+/// suspend/continue source, so those variants are never produced here. Pure, so the mapping is
+/// unit-tested on every platform.
+#[cfg(any(windows, test))]
+fn map_ctrl_event(event: ConsoleCtrlEvent) -> TerminalSignal {
+    match event {
+        ConsoleCtrlEvent::CtrlC | ConsoleCtrlEvent::CtrlBreak => TerminalSignal::Interrupt,
+        ConsoleCtrlEvent::CtrlClose => TerminalSignal::Terminate,
+    }
 }
 
 /// The default job-control stop-signal seam: guards the process group (FM-G7), then sends
@@ -2424,6 +2714,7 @@ fn fd_read(fd: &OwnedFd, buffer: &mut [u8]) -> io::Result<usize> {
 ///
 /// Returns [`terminal::Error::DegenerateProcessGroup`] when the group is a session leader with no
 /// job-control parent, or a read/write error if the id queries or the signal send fail.
+#[cfg(unix)]
 fn send_real_stop_signal() -> terminal::Result<()> {
     let pgrp = getpgrp();
     // A `getsid(None)` failure is treated as "cannot prove the group is safe", which is itself the
@@ -2448,6 +2739,7 @@ fn send_real_stop_signal() -> terminal::Result<()> {
 ///
 /// Kept as a pure function of the two ids so the guard is unit-testable without depending on the
 /// test process's real process group: a test passes the ids it wants to exercise.
+#[cfg(unix)]
 fn process_group_is_suspendable(pgrp: Pid, sid: Option<Pid>) -> terminal::Result<()> {
     let Some(sid) = sid else {
         return Err(terminal::Error::degenerate_process_group(
@@ -2628,6 +2920,7 @@ fn unexpected_reply(_reply: Reply) -> terminal::Error {
 /// specific device name, or [`DevTtyAlias`](TerminalAcquisition::DevTtyAlias) when it did not and
 /// the alias itself is the path. Threading the branch out here is what lets the session record an
 /// accurate acquisition instead of collapsing both cases into one path.
+#[cfg(unix)]
 fn resolved_controlling_terminal_path() -> (PathBuf, TerminalAcquisition) {
     OpenOptions::new()
         .read(true)
@@ -2660,6 +2953,7 @@ fn resolved_controlling_terminal_path() -> (PathBuf, TerminalAcquisition) {
 /// interactive shells set up their children. Otherwise (redirected stdin, read-only fd 0) the
 /// caller falls back to opening `/dev/tty`, which remains correct on platforms whose pollers accept
 /// it.
+#[cfg(unix)]
 fn controlling_terminal_via_stdin() -> Option<(File, PathBuf)> {
     let stdin = rustix::stdio::stdin();
     if !rustix::termios::isatty(stdin) {
@@ -2681,7 +2975,12 @@ fn controlling_terminal_via_stdin() -> Option<(File, PathBuf)> {
     Some((device, path))
 }
 
-#[cfg(test)]
+// The existing suite drives the real suspend/resume/detached-handoff/signal mechanics and the
+// coalescing/esc-flush policy over a Unix `FakeDevice` and PTYs (rustix, signals, fds), so it is
+// Unix-only. The Windows async driver's construction-and-teardown is covered by the
+// `#[cfg(all(test, windows))]` live suite below (compile-checked via `check-cross`, run on the
+// windows-latest CI job).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::event::ResizeEvent;
@@ -2758,6 +3057,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    // `fcntl_setfl` moved out of the module body with the readiness transport; the flag-poking
+    // tests (clearing/asserting `O_NONBLOCK` on the readiness fd, and the PTY-master
+    // helper) still need it.
+    use rustix::fs::fcntl_setfl;
     use tokio::time::timeout;
 
     use crate::{FakeDevice, FakeTerminal};
@@ -3391,5 +3694,536 @@ mod tests {
             waited.is_err(),
             "with no signal delivered, next() stays pending (a live, parked stream)",
         );
+    }
+}
+
+// The console ctrl-event → TerminalSignal mapping is a pure function, so it is unit-tested on every
+// platform (this runs on the Unix CI too, not only windows-latest) — the neutral-logic rule.
+#[cfg(test)]
+mod ctrl_event_map_tests {
+    use super::{ConsoleCtrlEvent, TerminalSignal, map_ctrl_event};
+
+    #[test]
+    fn ctrl_c_and_ctrl_break_map_to_interrupt_and_close_maps_to_terminate() {
+        // Both interrupt keys collapse to the one Interrupt an application already handles (a
+        // Windows console has no separate SIGQUIT-style quit); the console close is the graceful
+        // Terminate. There is no suspend/continue source on Windows, so those are never produced.
+        assert_eq!(
+            map_ctrl_event(ConsoleCtrlEvent::CtrlC),
+            TerminalSignal::Interrupt
+        );
+        assert_eq!(
+            map_ctrl_event(ConsoleCtrlEvent::CtrlBreak),
+            TerminalSignal::Interrupt
+        );
+        assert_eq!(
+            map_ctrl_event(ConsoleCtrlEvent::CtrlClose),
+            TerminalSignal::Terminate
+        );
+    }
+}
+
+// Live-console tests for the Windows async driver, run only on the windows-latest CI host (a real
+// console is required) and compile-checked off Windows via `just check-cross --tests`. They
+// construct a session over the real console through `open()`, write output, and tear down — proving
+// the readiness worker's construction and its `leave`/`Drop` teardown link and run, plus the MW-3
+// lifecycle surface (restore handle, typed-`Unsupported` job control, the detached handoff, and the
+// console signal stream). Real keystroke reads are deliberately not asserted (no one types on CI),
+// per the MW-2 spec.
+#[cfg(all(test, windows))]
+mod windows_live_tests {
+    //! See the module comment above. Two groups of live-console tests share this module (and its
+    //! one `CONSOLE` serialization lock):
+    //!
+    //! - **Construction + teardown** (MW-2/MW-3): open and tear the session down over the real
+    //!   console without reading input.
+    //! - **Read path end-to-end** (MW-5): inject console input records with `WriteConsoleInputW`
+    //!   and assert the decoded [`Event`] the async session yields — the injection helpers
+    //!   ([`inject_text`], [`inject_resize`]) and the `*_reads_*` tests below. This drives the real
+    //!   `open()` session (no production test-seam), proving the transport `records -> worker ->
+    //!   channel -> decoder -> next_event` and the query correlator over it.
+
+    // SAFETY: `AllocConsole` takes no arguments and is only reached inside `console_guard`; the
+    // crate lint is `unsafe_code = "deny"`, so this test-only console attach opts in the same
+    // way the device's live tests do.
+    #![allow(
+        unsafe_code,
+        reason = "attaching a console for the CI test binary is a single argument-free FFI call"
+    )]
+    // The console lock is a std `Mutex` held across the session's awaits to serialize
+    // process-global console mode changes. `#[tokio::test]` runs each test on its own
+    // current-thread runtime, so the guard never moves threads and cannot deadlock — the lint's
+    // concern does not apply.
+    #![allow(
+        clippy::await_holding_lock,
+        reason = "the console lock serializes process-global mode state; the current-thread test \
+                  runtime makes holding it across awaits safe"
+    )]
+
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::sync::{Mutex, Once};
+
+    use windows_sys::Win32::Foundation::{
+        GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{
+        COORD, FlushConsoleInputBuffer, GetConsoleMode, GetConsoleOutputCP, INPUT_RECORD,
+        INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, WINDOW_BUFFER_SIZE_EVENT,
+        WINDOW_BUFFER_SIZE_RECORD, WriteConsoleInputW,
+    };
+
+    use super::*;
+    use crate::Key;
+
+    /// Serializes console access: the console modes are process-global, so two tests entering raw
+    /// mode at once would corrupt each other's captured/restored state.
+    static CONSOLE: Mutex<()> = Mutex::new(());
+    /// Ensures a console is attached exactly once for the whole test binary.
+    static ALLOC: Once = Once::new();
+
+    /// Attaches a console if the test process has none, then takes the serialization lock.
+    fn console_guard() -> std::sync::MutexGuard<'static, ()> {
+        ALLOC.call_once(|| {
+            // SAFETY: AllocConsole takes no arguments and fails harmlessly when a console already
+            // exists (the CI host may attach one), so its result is intentionally ignored.
+            let _ = unsafe { windows_sys::Win32::System::Console::AllocConsole() };
+        });
+        CONSOLE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Opens a console device by name (`CONIN$`/`CONOUT$`) for a mode readback in these tests.
+    fn open_console(name: &str) -> OwnedHandle {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is a null-terminated UTF-16 name owned for the call; the access/share/
+        // disposition/flag arguments are plain values; the security and template pointers are null,
+        // which CreateFileW permits.
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(
+            handle != INVALID_HANDLE_VALUE && !handle.is_null(),
+            "open {name}"
+        );
+        // SAFETY: CreateFileW returned a valid handle; adopting it transfers sole ownership.
+        unsafe { OwnedHandle::from_raw_handle(handle) }
+    }
+
+    /// Reads a console mode via `GetConsoleMode` for a restore-readback assertion.
+    fn console_mode(handle: &OwnedHandle) -> u32 {
+        let mut mode: u32 = 0;
+        // SAFETY: `handle` is a live owned console handle; `mode` is a live out-param.
+        let ok = unsafe { GetConsoleMode(handle.as_raw_handle() as HANDLE, &raw mut mode) };
+        assert!(ok != 0, "GetConsoleMode");
+        mode
+    }
+
+    /// Reads the process-global console output codepage via `GetConsoleOutputCP`.
+    fn output_codepage() -> u32 {
+        // SAFETY: GetConsoleOutputCP takes no arguments and reads process-global console state.
+        unsafe { GetConsoleOutputCP() }
+    }
+
+    #[tokio::test]
+    async fn open_writes_output_and_leave_tears_down_the_worker() {
+        let _guard = console_guard();
+        // Construction spawns the readiness worker over a duplicated console input handle and
+        // enters raw mode.
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // Output flows through the transport's `WriteFile` path.
+        session
+            .text("qwertty MW-2 ready\r\n")
+            .await
+            .expect("write output");
+        session.flush().await.expect("flush");
+
+        // `leave` restores cooked mode and drops the transport, whose `Drop` signals the waker and
+        // joins the worker within the bounded teardown contract — this call returning proves the
+        // worker cannot wedge shutdown (RR-2).
+        session.leave().await.expect("leave restores the console");
+    }
+
+    #[tokio::test]
+    async fn dropping_the_session_joins_the_worker_without_hanging() {
+        let _guard = console_guard();
+        let session = TokioTerminalSession::open().expect("open console session");
+        // Drop (not `leave`) must also tear the worker down: the transport's `Drop` sets the waker
+        // and joins. If teardown could wedge, this test would hang rather than complete.
+        drop(session);
+    }
+
+    #[tokio::test]
+    async fn restore_handle_resets_the_console_and_is_disarm_once() {
+        let _guard = console_guard();
+
+        // Capture the live console modes and codepage BEFORE the session enters raw mode, so the
+        // readback after `restore()` can prove the emergency path put back the captured originals
+        // (the FM-W4 discipline), not synthesized defaults.
+        let input = open_console("CONIN$");
+        let output = open_console("CONOUT$");
+        let original_input = console_mode(&input);
+        let original_output = console_mode(&output);
+        let original_codepage = output_codepage();
+
+        let session = TokioTerminalSession::open().expect("open console session");
+        let restore = session.restore_handle();
+
+        // The armed handle restores exactly once and reports it.
+        assert!(restore.restore(), "the armed restore performs restoration");
+        assert_eq!(console_mode(&input), original_input, "input mode restored");
+        assert_eq!(
+            console_mode(&output),
+            original_output,
+            "output mode restored"
+        );
+        assert_eq!(output_codepage(), original_codepage, "codepage restored");
+
+        // Disarm-once: a second restore is a no-op and reports false (the atomic swap).
+        assert!(
+            !restore.restore(),
+            "a second restore is a no-op after the first disarmed the handle"
+        );
+
+        // Leaving after the restore already disarmed the handle is a no-op that still succeeds.
+        session.leave().await.expect("leave after restore");
+    }
+
+    #[tokio::test]
+    async fn suspend_and_resize_stream_are_typed_unsupported() {
+        let _guard = console_guard();
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        assert!(
+            matches!(
+                session.suspend().await,
+                Err(terminal::Error::Unsupported { .. })
+            ),
+            "suspend is unsupported on Windows (no job control)"
+        );
+        assert!(
+            matches!(
+                session.resize_stream(),
+                Err(terminal::Error::Unsupported { .. })
+            ),
+            "resize_stream is unsupported on Windows (resize is in band)"
+        );
+
+        session.leave().await.expect("leave");
+    }
+
+    #[tokio::test]
+    async fn run_detached_round_trips_and_leaves_the_session_readable() {
+        let _guard = console_guard();
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // The worker is paused for the handoff and resumed afterward; the closure's value round
+        // trips through.
+        let value = session
+            .run_detached(|| 42_u32)
+            .await
+            .expect("run_detached round-trips");
+        assert_eq!(value, 42);
+
+        // The session must be fully usable after the resume: output still flows, no panic from a
+        // resumed worker or a stale channel.
+        session
+            .text("after detached handoff\r\n")
+            .await
+            .expect("write after resume");
+        session.flush().await.expect("flush after resume");
+        session.leave().await.expect("leave after resume");
+    }
+
+    #[tokio::test]
+    async fn signals_installs_console_ctrl_listeners_and_returns_a_usable_stream() {
+        let _guard = console_guard();
+        let session = TokioTerminalSession::open().expect("open console session");
+
+        // Installing the three console control listeners must succeed; the stream is not awaited
+        // (no ctrl event is delivered on CI), only constructed.
+        let _signals = session
+            .signals()
+            .expect("install console control listeners");
+
+        session.leave().await.expect("leave");
+    }
+
+    // --- MW-5: console input injection + read-path integration tests -----------------------------
+    //
+    // These drive the real `open()` session and assert the decoded events. Input is injected with
+    // `WriteConsoleInputW` (the only way to feed a real console object — a pipe cannot back
+    // `ReadConsoleInputW`), which the worker reads exactly as it would live input. Every read is
+    // bounded by a timeout so a transport-wiring bug fails the CI job fast instead of hanging it.
+
+    /// The upper bound on every `next_event`/query await in these tests.
+    ///
+    /// Injected records are already pending when the worker's wait wakes, so a correct transport
+    /// delivers in milliseconds; this generous ceiling exists only so a *broken* transport fails
+    /// the CI job promptly instead of hanging it.
+    const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Injects `text` as a run of key-down records — one `KEY_EVENT_RECORD` per UTF-16 code unit —
+    /// into the shared console input buffer, exactly as conhost delivers VT bytes under VT input.
+    ///
+    /// Each unit becomes a `bKeyDown = 1`, `wRepeatCount = 1` record whose `UnicodeChar` is the
+    /// unit; the readiness worker's `translate_key` reads `UnicodeChar` straight back and re-emits
+    /// it (pairing surrogates across records through its persistent carry). So the three units of
+    /// `"\x1b[C"` reach the decoder as the bytes `ESC [ C`, and an emoji's two surrogate units
+    /// reach it as the one astral code point. The whole run is written in a single
+    /// `WriteConsoleInputW` call so it lands atomically and the worker reads it as one batch —
+    /// the session then decodes a complete sequence in one read, with no lone-`ESC` flush race.
+    fn inject_text(input: &OwnedHandle, text: &str) {
+        let records: Vec<INPUT_RECORD> = text
+            .encode_utf16()
+            .map(|unit| INPUT_RECORD {
+                EventType: u16::try_from(KEY_EVENT).expect("KEY_EVENT fits in u16"),
+                Event: INPUT_RECORD_0 {
+                    KeyEvent: KEY_EVENT_RECORD {
+                        bKeyDown: 1,
+                        wRepeatCount: 1,
+                        wVirtualKeyCode: 0,
+                        wVirtualScanCode: 0,
+                        uChar: KEY_EVENT_RECORD_0 { UnicodeChar: unit },
+                        dwControlKeyState: 0,
+                    },
+                },
+            })
+            .collect();
+        write_records(input, &records);
+    }
+
+    /// Injects a single `WINDOW_BUFFER_SIZE_EVENT` record into the shared console input buffer.
+    ///
+    /// The worker's resize path re-reads the live window rectangle via
+    /// `GetConsoleScreenBufferInfo`, never the record's `dwSize` (which is the scrollback buffer),
+    /// so the `dwSize` here is deliberately meaningless — the record only needs to be the type that
+    /// drives resize synthesis.
+    fn inject_resize(input: &OwnedHandle) {
+        let record = INPUT_RECORD {
+            EventType: u16::try_from(WINDOW_BUFFER_SIZE_EVENT)
+                .expect("WINDOW_BUFFER_SIZE_EVENT fits in u16"),
+            Event: INPUT_RECORD_0 {
+                WindowBufferSizeEvent: WINDOW_BUFFER_SIZE_RECORD {
+                    dwSize: COORD { X: 0, Y: 0 },
+                },
+            },
+        };
+        write_records(input, &[record]);
+    }
+
+    /// Writes a slice of input records into the console input buffer via `WriteConsoleInputW`.
+    ///
+    /// Constructing the `INPUT_RECORD` union above needs no `unsafe` (only *reading* an inactive
+    /// union field would); the sole FFI is this one call.
+    fn write_records(input: &OwnedHandle, records: &[INPUT_RECORD]) {
+        let count = u32::try_from(records.len()).expect("record count fits in u32");
+        let mut written: u32 = 0;
+        // SAFETY: `input` is a live owned console input handle opened with GENERIC_WRITE; `records`
+        // is readable for `count` entries; `written` is a live out-param.
+        let ok = unsafe {
+            WriteConsoleInputW(
+                input.as_raw_handle() as HANDLE,
+                records.as_ptr(),
+                count,
+                &raw mut written,
+            )
+        };
+        assert!(ok != 0, "WriteConsoleInputW");
+        assert_eq!(written as usize, records.len(), "all records written");
+    }
+
+    /// Empties the shared console input buffer so a test starts from a known-clean slate.
+    ///
+    /// The console input buffer is process-global and survives across the serialized tests; this
+    /// drops any record a prior test left behind (or any stray focus/menu record the host queued)
+    /// before injection, so each test observes only the records it wrote.
+    fn flush_console_input(input: &OwnedHandle) {
+        // SAFETY: `input` is a live owned console input handle.
+        let ok = unsafe { FlushConsoleInputBuffer(input.as_raw_handle() as HANDLE) };
+        assert!(ok != 0, "FlushConsoleInputBuffer");
+    }
+
+    /// Awaits the next key event, bounded by [`READ_TIMEOUT`], skipping a stray resize.
+    ///
+    /// A freshly attached console can surface an unsolicited `WINDOW_BUFFER_SIZE_EVENT`; it carries
+    /// no key intent, so it is skipped rather than allowed to fail a key assertion. Any other
+    /// unexpected event is a real transport defect and panics.
+    async fn expect_key(session: &mut TokioTerminalSession<Terminal>) -> Key {
+        let deadline = Instant::now() + READ_TIMEOUT;
+        loop {
+            let event = timeout_at(deadline, session.next_event())
+                .await
+                .expect("a key event arrives within the CI read timeout")
+                .expect("next_event decodes without error");
+            match event {
+                Event::Key(key) => return key.key(),
+                // A stray resize carries no key intent: skip it and read again.
+                Event::Resize(_) => {}
+                other => panic!("unexpected event while awaiting a key: {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn open_reads_a_plain_key_from_an_injected_record() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // One record (`UnicodeChar = 'a'`) -> one VT byte -> `Key::Char('a')`.
+        inject_text(&injector, "a");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char('a'),
+            "an injected 'a' record decodes to Key::Char('a')"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_reassembles_a_multi_record_arrow_sequence() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // Three separate records (`ESC` `[` `C`) reassemble through the channel and decoder into a
+        // single right-arrow key — the multi-record reassembly proof.
+        inject_text(&injector, "\x1b[C");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Right,
+            "the three-record ESC [ C sequence decodes to one right-arrow key"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_carries_an_astral_surrogate_pair_across_records() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // U+1F600 is a surrogate pair in UTF-16: two records, translated with the worker's carry
+        // pairing them into one astral code point.
+        let emoji = '\u{1f600}';
+        inject_text(&injector, "\u{1f600}");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char(emoji),
+            "the two surrogate records pair into one astral Key::Char"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn request_cursor_position_correlates_an_injected_report() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // Queue the report before the request: the request writes DSR to output (the console
+        // discards it) and then reads, and the correlator only matches replies fed *after* it
+        // registers the expectation, so a report already waiting in the worker's channel is
+        // consumed by the very first read of the query's deadline loop.
+        inject_text(&injector, "\x1b[10;20R");
+        let report = session
+            .request_cursor_position(READ_TIMEOUT)
+            .await
+            .expect("the injected cursor report resolves the query");
+        assert_eq!(report.row(), 10, "the correlator reports the injected row");
+        assert_eq!(
+            report.column(),
+            20,
+            "the correlator reports the injected column"
+        );
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn open_reads_a_resize_from_an_injected_record() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        // A window-buffer-size record drives in-band resize synthesis from the live window rect.
+        inject_resize(&injector);
+        let event = timeout_at(Instant::now() + READ_TIMEOUT, session.next_event())
+            .await
+            .expect("a resize event arrives within the CI read timeout")
+            .expect("next_event decodes without error");
+        let Event::Resize(resize) = event else {
+            panic!("expected a resize event, got {event:?}");
+        };
+        // The geometry is the live console window, not the record's `dwSize`; assert only that it
+        // is a sane, positive extent (the same tolerance as the device's `size` live test).
+        let cells = resize.cells();
+        assert!(cells.columns() > 0, "resize reports positive columns");
+        assert!(cells.rows() > 0, "resize reports positive rows");
+
+        session.leave().await.expect("leave after reads");
+    }
+
+    #[tokio::test]
+    async fn leave_restores_the_console_after_reads() {
+        let _guard = console_guard();
+        let injector = open_console("CONIN$");
+        flush_console_input(&injector);
+
+        // Capture the live modes/codepage before the session enters raw mode, so the post-`leave`
+        // readback proves teardown put the captured originals back after a real read.
+        let output = open_console("CONOUT$");
+        let original_input = console_mode(&injector);
+        let original_output = console_mode(&output);
+        let original_codepage = output_codepage();
+
+        let mut session = TokioTerminalSession::open().expect("open console session");
+
+        inject_text(&injector, "a");
+        assert_eq!(
+            expect_key(&mut session).await,
+            Key::Char('a'),
+            "the session reads before teardown"
+        );
+
+        session.leave().await.expect("leave restores the console");
+
+        assert_eq!(
+            console_mode(&injector),
+            original_input,
+            "input mode restored"
+        );
+        assert_eq!(
+            console_mode(&output),
+            original_output,
+            "output mode restored"
+        );
+        assert_eq!(output_codepage(), original_codepage, "codepage restored");
     }
 }

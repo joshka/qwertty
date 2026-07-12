@@ -1,0 +1,2 @@
+#! direction=terminal-to-host origin=spec:conpty-4999
+\e[37;75;0;1;256_

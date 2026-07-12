@@ -118,11 +118,16 @@ fuzz:
 #
 # The Windows check also compiles the test suite: the clippy library pass alone lets a
 # Unix-only API call in test code sail through locally and die in the windows-latest CI job.
+# The `--all-features` passes additionally build the Tokio session (the MW-2 async readiness
+# worker), which is `#[cfg(all(feature = "tokio", windows))]` and so invisible to a
+# default-feature Windows build — the only place the worker's Windows FFI is compiled off Unix.
 # No wasm `--tests` equivalent: the `generator` crate (via the loom dev-dependency) has no
 # wasm backend, so the test suite cannot compile for wasm32-unknown-unknown today.
 check-cross:
     cargo clippy -p qwertty --target x86_64-pc-windows-msvc -- -D warnings
+    cargo clippy -p qwertty --all-features --all-targets --target x86_64-pc-windows-msvc -- -D warnings
     cargo check -p qwertty --tests --target x86_64-pc-windows-msvc
+    cargo check -p qwertty --all-features --tests --target x86_64-pc-windows-msvc
     cargo clippy -p qwertty --target wasm32-unknown-unknown -- -D warnings
 
 # Supply-chain and dependency-hygiene recipes mirroring the new CI jobs. Each needs a cargo plugin

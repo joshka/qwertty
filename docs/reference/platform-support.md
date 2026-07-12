@@ -1,14 +1,32 @@
 # Platform Support
 
-qwertty's current public surface is intentionally uneven by platform.
+qwertty owns a live terminal on Unix and on Windows. The two platforms share one public surface —
+the same `Terminal`, `TerminalSession`, and `TokioTerminalSession` types, the same event vocabulary,
+the same query correlator — over two different operating-system backends. A few lifecycle operations
+exist only where the operating system has the concept behind them; those return `Error::Unsupported`
+on the other platform rather than pretending. This page is the durable place to understand that
+boundary without reading implementation files.
 
-The library is Unix-first today. It exposes the same public types where possible on other
-platforms, but live terminal operations that are not implemented yet return
-`Error::Unsupported`.
+The maintainer-facing decisions are
+[ADR 0013: Platform Support Policy](https://github.com/joshka/qwertty/blob/main/docs/adr/0013-platform-support-policy.md)
+and
+[ADR 0022: Windows Console Support Model](https://github.com/joshka/qwertty/blob/main/docs/adr/0022-windows-console-support-model.md).
 
-This page is the durable place to understand that boundary without reading implementation files.
-The corresponding maintainer-facing decision is
-[ADR 0013: Platform Support Policy](https://github.com/joshka/qwertty/blob/main/docs/adr/0013-platform-support-policy.md).
+## Windows At A Glance
+
+The Windows backend is a console *client*: it opens `CONIN$`/`CONOUT$`, requires virtual-terminal
+mode (`ENABLE_VIRTUAL_TERMINAL_PROCESSING` on output, `ENABLE_VIRTUAL_TERMINAL_INPUT` on input), and
+speaks the same VT byte stream the Unix backend does, so the decoder, command encoders, and
+capability model are shared unchanged. It is VT-only with no legacy-console rendering path.
+
+- **Floor:** Windows 10 build 1809 (10.0.17763), 64-bit. This is the ConPTY-era baseline; there is
+  no support below it and no legacy-console fallback.
+- **Async transport:** a Windows console input handle is not pollable like a Unix file descriptor,
+  so `TokioTerminalSession` reads through a worker thread that waits on the console input handle and
+  a cancellation event, then feeds a channel — cancel-safe by the same "state lives on the struct"
+  contract as the Unix `AsyncFd` path.
+- **Resize:** delivered in-band as `Event::Resize` (synthesized from console
+  `WINDOW_BUFFER_SIZE_EVENT` records); there is no separate resize stream on Windows.
 
 ## What Works Today
 
@@ -24,19 +42,21 @@ These APIs are platform-neutral because they only build or interpret bytes in me
 
 Those types do not open a live terminal device, enter raw mode, or depend on Tokio.
 
-### Unix Terminal Ownership
+### Terminal Ownership (Unix And Windows)
 
-The live terminal device and session owners are currently implemented on Unix:
+The live terminal device and session owners are implemented on both Unix and Windows:
 
 - `Terminal`
 - `TerminalSession`
 - `TokioTerminalSession` behind the optional `tokio` feature
 
-On Unix today, qwertty can:
+On both platforms, qwertty can:
 
-- open the current controlling terminal or a test-provided terminal path;
-- capture the original terminal mode;
-- enter raw mode and restore cooked mode;
+- open the current terminal (the controlling terminal on Unix; the process console via
+  `CONIN$`/`CONOUT$` on Windows);
+- capture the original terminal mode and restore it on teardown, drop, or a panic hook;
+- enter raw mode and restore cooked mode (termios on Unix; console modes plus the output codepage on
+  Windows);
 - query terminal size;
 - write ordered output and flush explicitly;
 - read raw input bytes and decoded input events;
@@ -59,47 +79,65 @@ That feature adds `TokioTerminalSession`, which owns:
 - live terminal-status query routing;
 - query timeout, cancellation, and preserved-input behavior documented in the session references.
 
-The `tokio` feature does not widen platform support by itself. It is still a Unix-only live
-terminal surface today.
+On Windows the `tokio` feature adds the same `TokioTerminalSession`, driven by the console worker
+thread described above instead of a reactor registration.
 
-## Unsupported Platforms
+## Where The Platforms Differ
 
-On platforms without a live terminal implementation yet, qwertty keeps the type surface where it
-can and fails explicitly at the operation boundary.
+A few session operations map to an operating-system concept that exists on one platform and not the
+other. Where the concept is absent, the method returns `Error::Unsupported` rather than approximating
+it:
 
-That means callers may still compile code that mentions the public terminal types, but operations
-such as these return `Error::Unsupported`:
+| Operation                          | Unix                                    | Windows                                                      |
+| ---------------------------------- | --------------------------------------- | ------------------------------------------------------------ |
+| `suspend` / `resume`               | `SIGTSTP`/`SIGCONT` job control         | `Unsupported` (Windows has no job control)                   |
+| `signals()`                        | Suspend, Continue, Terminate, Interrupt | Terminate, Interrupt only (no suspend/continue)              |
+| `resize_stream()`                  | `SIGWINCH` fallback stream              | `Unsupported` — resize is delivered in-band via `next_event` |
+| `run_detached` (`$EDITOR` handoff) | supported                               | supported                                                    |
+| `acquisition()`                    | reports the controlling-terminal branch | not applicable (the console is opened directly)              |
 
-- `Terminal::open`
-- `Terminal::open_path`
-- `Terminal::size`
-- `Terminal::set_raw_mode`
-- `Terminal::set_cooked_mode`
-- `Terminal::write_all`
-- `Terminal::read`
-- `Terminal::flush`
+Everything else — raw/cooked mode, size, ordered output, decoded events, the query family
+(`request_cursor_position`, `request_terminal_status`, `request_kitty_keyboard`,
+`probe_capabilities`), `RestoreHandle`, and `run_detached` — behaves the same on both platforms.
 
-Higher-level live terminal APIs built on that device boundary inherit the same unsupported behavior
-instead of pretending a broader platform contract.
+## Input Enhancement On Windows
 
-## Building On Unsupported Platforms
+Windows keyboard input arrives as VT byte sequences under `ENABLE_VIRTUAL_TERMINAL_INPUT`, decoded by
+the same parser as on Unix. Two enhancements sit on top:
 
-The platform-neutral types build the same everywhere. qwertty's CI cross-compiles and lints the
-library with warnings denied for `x86_64-pc-windows-msvc` and `wasm32-unknown-unknown` in addition
-to running the real test suite on Windows, which proves the platform-neutral surface stays portable
-even though live terminal ownership does not extend there yet. A clean cross-compile is evidence
-that the type surface stays honest on those targets, not evidence of live terminal support; the
-`Error::Unsupported` boundary above is still the operative contract.
+- **Kitty keyboard protocol** — the preferred enhancement, supported by Windows Terminal 1.25+ and
+  probed by readback like everywhere else.
+- **win32-input-mode** (`CSI ? 9001 h`) — qwertty *decodes* these sequences, but enabling the mode is
+  a policy-gated opt-in, not a default: it is all-or-nothing and absent under some hosts. See the
+  [keybinding portability reference](crate::docs::keybinding_portability) for what each host can and
+  cannot distinguish.
+
+## Other Platforms
+
+The platform-neutral command and parser types build everywhere, including `wasm32-unknown-unknown`.
+On a target with no live terminal backend, the `Terminal` operations (`open`, `size`, `set_raw_mode`,
+`read`, `write_all`, …) return `Error::Unsupported`, and higher-level session APIs inherit that
+boundary. A clean cross-compile is evidence the type surface stays honest, not evidence of live
+terminal support.
+
+## How Each Platform Is Validated
+
+Support means validated behavior, not a naming coincidence. CI cross-compiles and lints the library
+(including its tests) for `x86_64-pc-windows-msvc` and `wasm32-unknown-unknown`, runs the full Unix
+test suite on Linux and macOS runners, and runs the Windows test suite — including live console tests
+that open a real console, exercise the async read path through injected input records, and verify
+mode restoration — on a `windows-latest` runner. Interactive validation on the full matrix of Windows
+terminals (Windows Terminal, classic conhost, wezterm) and IME/CJK composition under VT input is an
+ongoing effort tracked for the Windows tier.
 
 ## What This Means For Callers
 
 - Use command and parser types freely across platforms when you only need byte building or byte
   interpretation.
-- Treat live terminal ownership as Unix-only until qwertty documents another implemented platform.
-- Match `Error::Unsupported` at the application boundary when you expose optional live terminal
-  behavior on platforms that qwertty does not support yet.
-- Do not infer broader support from the existence of a type alone; the support boundary is defined
-  by documented behavior and validation, not by naming symmetry.
+- Treat live terminal ownership as available on Unix and Windows; match `Error::Unsupported` where
+  the table above marks an operation platform-specific.
+- Do not infer support from the existence of a type alone; the support boundary is defined by
+  documented behavior and validation, not by naming symmetry.
 
 ## Related References
 

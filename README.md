@@ -9,14 +9,16 @@
 qwertty is a Rust library for building terminal applications that need explicit terminal ownership,
 ordered output, input handling, and policy-aware terminal features.
 
-qwertty is Unix-first and ships both a synchronous session owner and an optional Tokio-backed async
-session owner behind the `tokio` feature, so an application can pick the runtime shape it needs
-without qwertty imposing one.
+qwertty runs on Unix and Windows and ships both a synchronous session owner and an optional
+Tokio-backed async session owner behind the `tokio` feature, so an application can pick the runtime
+shape it needs without qwertty imposing one. The Windows backend is VT-based (Windows 10 1809+); the
+[platform support reference](docs/reference/platform-support.md) documents exactly what each platform
+validates and where they differ.
 
 ## Status
 
-qwertty has a runtime-neutral command encoding layer, a Unix terminal device layer, a synchronous
-terminal session (`TerminalSession`) and an optional Tokio-backed async session
+qwertty has a runtime-neutral command encoding layer, a live terminal device layer for Unix and
+Windows, a synchronous terminal session (`TerminalSession`) and an optional Tokio-backed async session
 (`TokioTerminalSession`), a total lossless input syntax layer, and a semantic decoder that maps
 input to typed `Event` values.
 
@@ -136,8 +138,8 @@ See `qwertty::docs` for the release-blocking examples reference page as well. It
 checked-in examples are part of the `0.1.0` release evidence instead of treating every example as
 equally release-critical.
 
-See `qwertty::docs` for the platform support reference page as well. It explains the current
-Unix-first live terminal boundary and what unsupported platforms return today.
+See `qwertty::docs` for the platform support reference page as well. It explains the Unix and Windows
+terminal backends, where they differ, and what unsupported targets return.
 
 See `qwertty::docs` for the release-readiness reference page too. It summarizes the current docs,
 examples, validation gates, and policy boundaries that should be true before publication stops

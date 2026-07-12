@@ -13,21 +13,48 @@ use std::{error, fmt, io};
 
 use crate::policy::PolicyGate;
 
+// Pure, console-free translation logic for the Windows device (UTF-16 carry, record→VT synthesis,
+// mode-bit math). Compiled in the Windows build and under `test` on every platform, so its logic is
+// unit-tested locally even though the live device only builds on Windows.
+#[cfg(any(test, windows))]
+mod console_translate;
+// The shared console input reader and its record-read helper: used by both the synchronous Windows
+// device and the async readiness worker (MW-2). Windows-only — it names `windows-sys` record types.
+#[cfg(windows)]
+mod console_input;
 mod device;
 #[cfg(unix)]
 mod fake;
 #[cfg(unix)]
 mod unix;
-#[cfg(not(unix))]
+// Non-unix platforms split three ways: Windows gets the real console device stub, every other
+// non-unix target (wasm, exotic) keeps the typed `Unsupported` boundary. `windows` is compiled only
+// for the windows target; it must never affect the Unix build (design 07 §seams-now).
+#[cfg(all(not(unix), not(windows)))]
 mod unsupported;
+#[cfg(windows)]
+mod windows;
 
+// `ConsoleHandles` is the public return type of `TerminalDevice::as_console_handles` (the
+// Windows analogue of `as_fd`'s `BorrowedFd`), so it is `pub`; it exists only with the async
+// driver.
+#[cfg(all(windows, feature = "tokio"))]
+pub use console_input::ConsoleHandles;
+// The console input reader and record-read helper feed the Windows async readiness worker
+// (`tokio_session::readiness`), which lives in a sibling module outside `terminal`; the
+// synchronous device reaches them through `super::console_input` directly. Only the worker
+// needs this crate-level re-export, so it is gated to the Tokio driver.
+#[cfg(all(windows, feature = "tokio"))]
+pub(crate) use console_input::{ConsoleInputReader, RECORD_BATCH, read_input_records};
 pub use device::{DeviceMode, TerminalDevice};
 #[cfg(unix)]
 pub use fake::{FakeDevice, FakeTerminal};
 #[cfg(unix)]
 pub use unix::Terminal;
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 pub use unsupported::Terminal;
+#[cfg(windows)]
+pub use windows::Terminal;
 
 /// Result alias for terminal device operations.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -181,44 +208,47 @@ pub enum Error {
 }
 
 impl Error {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn open_terminal(source: io::Error) -> Self {
         Self::OpenTerminal { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn get_terminal_mode(source: io::Error) -> Self {
         Self::GetTerminalMode { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn set_terminal_mode(source: io::Error) -> Self {
         Self::SetTerminalMode { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn get_terminal_size(source: io::Error) -> Self {
         Self::GetTerminalSize { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn write_terminal(source: io::Error) -> Self {
         Self::WriteTerminal { source }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn read_terminal(source: io::Error) -> Self {
         Self::ReadTerminal { source }
     }
 
-    #[cfg(all(feature = "tokio", unix))]
+    #[cfg(all(feature = "tokio", any(unix, windows)))]
     pub(crate) const fn query_timeout(operation: &'static str, timeout: Duration) -> Self {
         Self::QueryTimeout { operation, timeout }
     }
 
-    // Used on every target now: the non-unix device stub constructs it for every operation, and on
-    // Unix both the Tokio driver and the synchronous query driver (review-02 §2) construct it for a
-    // device with no pollable fd. No build is left without a caller, so it needs no cfg gate.
+    // Constructed on Unix (the Tokio driver and the synchronous query driver, review-02 §2, for a
+    // device with no pollable fd), by the fallback device stub on other non-Windows targets, and by
+    // the Windows Tokio driver (MW-2) for a device with no console handle. The synchronous Windows
+    // console device (MW-1) supports every operation, so a default Windows build never constructs
+    // this and the constructor would be dead code there — hence the `tokio`-gated Windows arm.
+    #[cfg(any(not(windows), all(feature = "tokio", windows)))]
     pub(crate) const fn unsupported(operation: &'static str, platform: &'static str) -> Self {
         Self::Unsupported {
             operation,

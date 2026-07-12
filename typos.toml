@@ -24,3 +24,10 @@ fo = "fo"
 WRONLY = "WRONLY"
 # `BROWSEABLE` is a deliberate uppercase rule-name token in the agent rules docs.
 BROWSEABLE = "BROWSEABLE"
+
+[default.extend-identifiers]
+# Win32 console button constants: `2ND`/`3RD` read as typos to the checker but are the real
+# `windows-sys` identifier names the Windows device mirrors (src/terminal/console_translate.rs).
+FROM_LEFT_2ND_BUTTON_PRESSED = "FROM_LEFT_2ND_BUTTON_PRESSED"
+FROM_LEFT_3RD_BUTTON_PRESSED = "FROM_LEFT_3RD_BUTTON_PRESSED"
+FROM_LEFT_4TH_BUTTON_PRESSED = "FROM_LEFT_4TH_BUTTON_PRESSED"

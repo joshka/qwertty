@@ -283,6 +283,9 @@ modified-key CSI forms over the syntax layer, and passes everything else through
   is delivered losslessly regardless of size: a large one arrives as several bounded segments with
   the last flagged `is_final`, and a missing end bracket flushes a final, non-`terminated` segment
   rather than hanging. See [Bracketed Paste Capture](#bracketed-paste-capture).
+- **win32-input-mode key events.** A `CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _` event (Windows Terminal's
+  `ConPTY` private mode 9001) decodes to `KeyEvent` values — see [win32-input-mode](#win32-input-mode)
+  below. Decode support is present now; enabling the mode is policy-gated and not yet wired.
 - **Standalone Escape.** A bare Escape, flushed by the layer above and surfaced by the parser as a
   lone `SyntaxToken::Esc`, maps to `Key::Escape`. The Escape-versus-sequence timing policy stays in
   the layer above this decoder; the decoder only ever sees a bare Escape once that layer has
@@ -296,6 +299,41 @@ A `KeyEvent` from legacy input is always a press (`KeyEventKind::Press`) with no
 (`Modifiers::empty()`), because legacy input carries neither a press/release distinction nor
 modifier information for those keys; the richer fields are populated only by the kitty `CSI u`
 decode.
+
+### win32-input-mode
+
+**Decode support; enabling is policy-gated and not yet wired.** Windows Terminal's `ConPTY` can report
+keyboard input as full Win32 key event records (the `#4999` win32-input-mode spec) once an
+application enables private mode 9001 (`CSI ? 9001 h`). Each console key event arrives as one CSI
+whose final byte is `_`:
+
+```text
+CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+```
+
+Every field is an optional decimal parameter (an omitted field takes its default), so `CSI _` is a
+legal degenerate event. The fields are the record's members: `Vk` the virtual-key code, `Sc` the
+scan code (ignored — decode needs the virtual key and character, not the physical position), `Uc`
+the UTF-16 code unit as a decimal (`0` = none), `Kd` the key-down flag, `Cs` the `dwControlKeyState`
+bitfield, and `Rc` the repeat count (omitted defaults to `1`). The decode maps onto the frozen
+`Event` vocabulary (ADR 0019); concepts with no home there are dropped, and the CSI still
+round-trips byte-for-byte through the syntax layer regardless:
+
+- `Kd = 1` is `KeyEventKind::Press`, `Kd = 0` is `KeyEventKind::Release`. Win32 cannot distinguish
+  auto-repeat from a fresh press, so this decode **never** emits `KeyEventKind::Repeat`.
+- The `Cs` bitfield collapses the two positional Alt bits and the two positional Ctrl bits into
+  `Modifiers::ALT` and `Modifiers::CTRL`; `SHIFT`, `NUMLOCK`, and `CAPSLOCK` map to `Modifiers::SHIFT`
+  and the frozen lock bits. `SCROLLLOCK` and `ENHANCED_KEY` have no frozen home and are dropped, as
+  is the Windows key (which never appears in `Cs`).
+- A real (non-control) character in `Uc` becomes a `Key::Char`; otherwise the virtual key names the
+  key (arrows, the navigation cluster, `F1`–`F24`, `Enter`/`Tab`/`Backspace`/`Escape`, and the base
+  character of a letter or digit key, so `Ctrl+A` still resolves to `Key::Char('a')`). A modifier or
+  lock virtual key with `Uc = 0` is chatter and emits nothing, as does any unrecognized virtual key
+  with `Uc = 0`.
+- A code point above the basic plane arrives as two consecutive events carrying the UTF-16 surrogate
+  halves; the decoder holds the high half (one code unit — its only state) and the low half completes
+  the character. A broken pair flushes `U+FFFD`. The repeat count is expanded up to a cap of 32
+  events, so a hostile count cannot grow decode memory without bound.
 
 ### Requesting Kitty Keyboard Flags
 

@@ -107,8 +107,11 @@ impl KittyKeyboardGrant {
     /// answer within the caller's budget).
     #[must_use]
     #[cfg_attr(
-        not(all(feature = "tokio", unix)),
-        expect(dead_code, reason = "constructed only by the tokio+unix async session")
+        not(all(feature = "tokio", any(unix, windows))),
+        expect(
+            dead_code,
+            reason = "constructed only by the tokio async session (unix or windows)"
+        )
     )]
     pub(crate) const fn new(
         requested: KittyKeyboardFlags,

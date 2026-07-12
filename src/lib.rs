@@ -118,7 +118,12 @@
     doc = "for `SIGWINCH` and job-control signals, plus [`TerminalAcquisition`] reporting how the"
 )]
 #![cfg_attr(feature = "tokio", doc = "controlling terminal was reached.")]
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: the Unix and pure layers carry zero `unsafe`, but the `#[cfg(windows)]`
+// console device (src/terminal/windows.rs) must scope a single `#[allow(unsafe_code)]` over its
+// `windows-sys` FFI, which a `forbid` cannot permit. Every Win32 console entry point is an unsafe
+// `extern "system"` call with no safe wrapper in the tree. This is the only `unsafe` opt-in in the
+// crate; see work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 // docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables
 // the nightly-only `doc_cfg` feature there so gated items (for example `TokioTerminalSession` under
@@ -154,7 +159,7 @@ pub mod report;
 mod session;
 mod syntax;
 mod terminal;
-#[cfg(all(feature = "tokio", unix))]
+#[cfg(all(feature = "tokio", any(unix, windows)))]
 mod tokio_session;
 
 pub use caps::{
@@ -173,17 +178,29 @@ pub use report::{
     CursorPositionReport, DecPrivateModeReport, DecPrivateModeState, OscColorKind, OscColorReport,
     TerminalStatus, TerminalStatusReport, XtVersionReport,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub use session::RestoreHandle;
 pub use session::{KittyKeyboardFlags, KittyKeyboardGrant, TerminalSession};
 pub use syntax::{
     ControlParams, ControlSequence, DEFAULT_PAYLOAD_LIMIT, EscapeSequence, Param, ParamSeparator,
     PasteSequence, StringKind, StringSequence, StringTerminator, SyntaxParser, SyntaxToken,
 };
+// The public return type of `TerminalDevice::as_console_handles` (the Windows async readiness
+// seam, the analogue of `as_fd`'s `BorrowedFd`); present only with the Tokio driver on
+// Windows.
+#[cfg(all(windows, feature = "tokio"))]
+pub use terminal::ConsoleHandles;
 pub use terminal::{DeviceMode, Error, PixelSize, Result, Terminal, TerminalDevice, TerminalSize};
 #[cfg(unix)]
 pub use terminal::{FakeDevice, FakeTerminal};
 #[cfg(all(feature = "tokio", unix))]
-pub use tokio_session::{
-    ResizeStream, SignalStream, TerminalAcquisition, TerminalSignal, TokioTerminalSession,
-};
+pub use tokio_session::TerminalAcquisition;
+#[cfg(all(feature = "tokio", any(unix, windows)))]
+pub use tokio_session::TokioTerminalSession;
+// The resize/signal stream types and the typed signal enum exist on both platforms:
+// `signals()` reports console control events on Windows, and `resize_stream()` keeps its
+// cross-platform signature (returning `Unsupported` on Windows, where resize is in band). The
+// acquisition observability stays Unix-only — Windows has no three-branch controlling-terminal
+// fallback to record (ADR 0022 §7).
+#[cfg(all(feature = "tokio", any(unix, windows)))]
+pub use tokio_session::{ResizeStream, SignalStream, TerminalSignal};

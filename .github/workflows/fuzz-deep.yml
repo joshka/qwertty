@@ -1,0 +1,75 @@
+name: Fuzz (deep)
+
+# Weekly deep fuzz runs (playbook §11: per-push stays short, depth moves to a schedule). Each
+# fuzz target gets ~10 minutes with a persisted corpus, versus the 30-second smoke runs the CI
+# workflow does per push. Failures are loud — the workflow fails and the crashing input is
+# uploaded as an artifact — but nothing beyond that is wired (no notifications).
+#
+# workflow_dispatch is for testing the workflow itself and for ad-hoc deep runs.
+
+on:
+  schedule:
+    # 05:17 UTC every Monday. An off-the-hour minute avoids the top-of-hour scheduled-run
+    # congestion on GitHub-hosted runners.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+# Set the token permissions to the minimum and grant per-job what is needed.
+# See https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-deep:
+    name: Fuzz deep (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      # One target crashing must not cancel the others: each matrix job's corpus save and
+      # crash-artifact upload should still happen.
+      fail-fast: false
+      matrix:
+        target:
+          - syntax_reconstruction
+          - syntax_split_equivalence
+          - syntax_no_panic_bounded
+          - correlator_properties
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-fuzz
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # Cache entries are immutable, so the key is unique per run (always saves the grown
+      # corpus) and restore-keys pulls the most recent prior corpus. The corpus directory is
+      # gitignored; this cache is its only persistence between scheduled runs.
+      - name: Restore fuzz corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz ${{ matrix.target }} (10 minutes)
+        run: cargo +nightly fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- -max_total_time=600 -rss_limit_mb=1024
+      # cargo-fuzz writes the crashing/OOM input to fuzz/artifacts/<target>/ on failure; without
+      # this upload the deterministic repro would be lost when the runner is discarded.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore

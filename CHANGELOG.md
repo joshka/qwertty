@@ -11,6 +11,8 @@ entries.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-12
+
 ### Added
 
 - Kitty graphics protocol command encoders under `commands::graphics::kitty`: `transmit_and_display`
@@ -19,11 +21,6 @@ entries.
   `commands::` helper these build raw bytes only — the inline transmission form, with no capability
   check and no policy; support gating and the file/temp/shared-memory transmission policy are
   session-layer concerns for a later slice. See the new graphics reference page.
-
-## [0.1.3] - 2026-07-12
-
-### Added
-
 - Windows console support. `Terminal`, `TerminalSession`, and (behind the `tokio` feature)
   `TokioTerminalSession` now own a live Windows console, sharing the Unix decoder, command encoders,
   query correlator, and capability model over a VT-based backend (Windows 10 1809+; no legacy-console

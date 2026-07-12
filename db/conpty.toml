@@ -1,0 +1,53 @@
+# ConPTY win32-input-mode sequence family. Derived from microsoft/terminal spec #4999 (see the
+# conpty-4999 citation in sources.toml); these entries are spec-normative, not prototype-audited, so
+# their syntax and fixtures come straight from the specification text rather than a live capture.
+
+[[sequence]]
+id          = "conpty.win32_input.enable"
+name        = "Enable win32-input-mode"
+description = "Asks the terminal to report keyboard input as full Win32 key event records."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 9001 h"
+refs        = [{ doc = "conpty-4999" }]
+fixtures    = ["fixtures/conpty/win32_input_enable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "conpty.win32_input.disable"
+name        = "Disable win32-input-mode"
+description = "Returns the terminal to sending ordinary key sequences instead of Win32 key records."
+direction   = "host-to-terminal"
+syntax      = "CSI ? 9001 l"
+refs        = [{ doc = "conpty-4999" }]
+fixtures    = ["fixtures/conpty/win32_input_disable.seq"]
+replay      = "modal"
+
+[[sequence]]
+id          = "conpty.win32_input.key_event"
+name        = "win32-input-mode Key Event"
+description = "Reports one Win32 keyboard event: virtual key, scan code, character, up/down, modifier state, and repeat count."
+direction   = "terminal-to-host"
+syntax      = "CSI Vk ; Sc ; Uc ; Kd ; Cs ; Rc _"
+params      = [
+    { name = "Vk", kind = "number", default = 0 },
+    { name = "Sc", kind = "number", default = 0 },
+    { name = "Uc", kind = "number", default = 0 },
+    { name = "Kd", kind = "number", default = 0 },
+    { name = "Cs", kind = "number", default = 0 },
+    { name = "Rc", kind = "number", default = 1 },
+]
+refs        = [{ doc = "conpty-4999" }]
+fixtures    = [
+    "fixtures/conpty/key_a_down.seq",
+    "fixtures/conpty/key_a_up.seq",
+    "fixtures/conpty/key_ctrl_a_down.seq",
+    "fixtures/conpty/key_left_arrow_down.seq",
+    "fixtures/conpty/key_f13_down.seq",
+    "fixtures/conpty/key_emoji_surrogate_high.seq",
+    "fixtures/conpty/key_emoji_surrogate_low.seq",
+    "fixtures/conpty/key_repeat_a_down.seq",
+    "fixtures/conpty/key_degenerate.seq",
+    "fixtures/conpty/key_all_empty_params.seq",
+]
+replay      = "safe"
+notes       = "Terminal-to-host input, final byte `_`. All six fields are optional decimal parameters (omitted = default); `CSI _` is a legal degenerate event. Syntax is spec-normative from #4999, not a captured reply. A surrogate-pair code point spans two consecutive events (high then low half)."

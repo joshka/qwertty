@@ -75,6 +75,7 @@ mod kitty;
 mod mouse;
 mod paste;
 mod resize;
+mod win32;
 
 pub use focus::{FocusEvent, FocusState};
 pub use key::{Key, KeyEvent, KeyEventKind, Modifiers, TextPayload};
@@ -218,6 +219,9 @@ pub struct SemanticDecoder {
     /// return, so a CRLF split across paste segments still normalizes to a single newline. Only
     /// ever `true` between segments of the same paste (design 02 paste normalization).
     paste_pending_cr: bool,
+    /// The streaming state for win32-input-mode key events: at most one pending UTF-16 high
+    /// surrogate held between two consecutive `CSI … _` events. Resets with the decoder.
+    win32: win32::Win32Decoder,
 }
 
 impl Default for SemanticDecoder {
@@ -233,6 +237,7 @@ impl SemanticDecoder {
         Self {
             parser: SyntaxParser::new(),
             paste_pending_cr: false,
+            win32: win32::Win32Decoder::default(),
         }
     }
 
@@ -247,6 +252,7 @@ impl SemanticDecoder {
         Self {
             parser: SyntaxParser::with_payload_limit(payload_limit),
             paste_pending_cr: false,
+            win32: win32::Win32Decoder::default(),
         }
     }
 
@@ -270,7 +276,13 @@ impl SemanticDecoder {
     #[must_use]
     pub fn finish(&mut self) -> Vec<Event> {
         let tokens = self.parser.finish();
-        self.map_tokens(tokens)
+        let mut events = self.map_tokens(tokens);
+        // A win32-input stream that ends on a dangling high surrogate flushes it as U+FFFD rather
+        // than dropping the code unit; this is the decoder's end-of-input flush path.
+        let mut flushed = Vec::new();
+        self.win32.flush(&mut flushed);
+        events.extend(flushed.into_iter().map(Event::Key));
+        events
     }
 
     /// Returns whether the decoder is holding a **settled** trailing text run.
@@ -370,9 +382,10 @@ impl SemanticDecoder {
             SyntaxToken::Text(bytes) => push_text_events(&bytes, events),
             // A C0 control maps to its named key, or a lossless catch-all key.
             SyntaxToken::Control(byte) => events.push(Event::Key(control_key_event(byte))),
-            // A CSI is tried against the typed decoders in order: kitty key, SGR mouse, focus, then
-            // the unmodified-arrow parity path; anything unrecognized passes through as syntax.
-            SyntaxToken::Csi(csi) => map_csi(csi, events),
+            // A CSI is tried against the typed decoders in order: win32-input key, kitty key, SGR
+            // mouse, focus, then the unmodified-arrow parity path; anything unrecognized passes
+            // through as syntax.
+            SyntaxToken::Csi(csi) => self.map_csi(csi, events),
             // A bracketed-paste segment becomes a paste event, threading the CR-normalization
             // carry.
             SyntaxToken::Paste(paste) => {
@@ -387,28 +400,35 @@ impl SemanticDecoder {
             other => events.push(Event::Syntax(other)),
         }
     }
-}
 
-/// Maps a CSI token to a typed event or lossless syntax passthrough.
-///
-/// The decoders are tried in a fixed order because their recognized shapes are disjoint: a kitty
-/// key ends in `u` or a functional final; an SGR mouse report carries the `<` private marker; focus
-/// is a bare `CSI I`/`CSI O`; an in-band resize report is a `CSI 48 ; … t`; and an unmodified arrow
-/// is `CSI A`-`D`. The first match wins; if none matches, the sequence is preserved as syntax
-/// (design 02 forward-compatibility).
-fn map_csi(csi: crate::syntax::ControlSequence, events: &mut Vec<Event>) {
-    if let Some(event) = kitty::decode_key(&csi) {
-        events.push(Event::Key(event));
-    } else if let Some(event) = mouse::decode_sgr(&csi) {
-        events.push(Event::Mouse(event));
-    } else if let Some(event) = focus::decode(&csi) {
-        events.push(Event::Focus(event));
-    } else if let Some(event) = resize::decode(&csi) {
-        events.push(Event::Resize(event));
-    } else if let Some(key) = arrow_key(&csi) {
-        events.push(Event::Key(KeyEvent::new(key)));
-    } else {
-        events.push(Event::Syntax(SyntaxToken::Csi(csi)));
+    /// Maps a CSI token to a typed event or lossless syntax passthrough.
+    ///
+    /// The decoders are tried in a fixed order because their recognized shapes are disjoint: a
+    /// win32-input key ends in `_`; a kitty key ends in `u` or a functional final; an SGR mouse
+    /// report carries the `<` private marker; focus is a bare `CSI I`/`CSI O`; an in-band resize
+    /// report is a `CSI 48 ; … t`; and an unmodified arrow is `CSI A`-`D`. The first match wins; if
+    /// none matches, the sequence is preserved as syntax (design 02 forward-compatibility).
+    ///
+    /// The win32-input decoder is a method rather than a free function because it threads streaming
+    /// state (a pending UTF-16 surrogate half) and can emit zero, one, or many key events from one
+    /// sequence, unlike the stateless single-event decoders below it.
+    fn map_csi(&mut self, csi: crate::syntax::ControlSequence, events: &mut Vec<Event>) {
+        let mut keys = Vec::new();
+        if self.win32.decode_key(&csi, &mut keys) {
+            events.extend(keys.into_iter().map(Event::Key));
+        } else if let Some(event) = kitty::decode_key(&csi) {
+            events.push(Event::Key(event));
+        } else if let Some(event) = mouse::decode_sgr(&csi) {
+            events.push(Event::Mouse(event));
+        } else if let Some(event) = focus::decode(&csi) {
+            events.push(Event::Focus(event));
+        } else if let Some(event) = resize::decode(&csi) {
+            events.push(Event::Resize(event));
+        } else if let Some(key) = arrow_key(&csi) {
+            events.push(Event::Key(KeyEvent::new(key)));
+        } else {
+            events.push(Event::Syntax(SyntaxToken::Csi(csi)));
+        }
     }
 }
 

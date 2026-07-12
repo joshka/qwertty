@@ -17,7 +17,7 @@ This README is the ten-minute read. A new entry is writable from it alone.
 | `db/caniuse.md`            | Generated support matrix rendering the results above (see below)  |
 | `../fixtures/<family>/`    | The `.seq` fixture files an entry's `fixtures` array points at    |
 
-Families partition the way sources and reviewers do: `dec`, `ecma48-csi`, `ecma48-syntax`,
+Families partition the way sources and reviewers do: `conpty`, `dec`, `ecma48-csi`, `ecma48-syntax`,
 `iterm2`, `kitty-color`, `kitty-graphics`, `kitty-keyboard`, `kitty-misc`, `kitty-multicursor`,
 `kitty-pointer`, `osc`, `vendor-dcs`, `xterm-capabilities`, `xterm-input`, `xterm-modes`,
 `xterm-session`.

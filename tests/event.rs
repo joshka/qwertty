@@ -434,9 +434,11 @@ fn unescape(input: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A parsed fixture: its path (for diagnostics) and unescaped sequence bytes.
+/// A parsed fixture: its path (for diagnostics), its header direction, and unescaped sequence
+/// bytes.
 struct Fixture {
     name: String,
+    direction: String,
     bytes: Vec<u8>,
 }
 
@@ -447,12 +449,19 @@ fn parse_fixture(path: &Path, raw: &[u8]) -> Fixture {
         .iter()
         .position(|&b| b == b'\n')
         .unwrap_or_else(|| panic!("{name}: fixture has no header line"));
+    let header = std::str::from_utf8(&raw[..newline]).unwrap_or_else(|_| panic!("{name}: header"));
+    let direction = header
+        .split_whitespace()
+        .find_map(|tok| tok.strip_prefix("direction="))
+        .unwrap_or_else(|| panic!("{name}: header has no direction="))
+        .to_owned();
     let mut body = &raw[newline + 1..];
     if body.last() == Some(&b'\n') {
         body = &body[..body.len() - 1];
     }
     Fixture {
         name,
+        direction,
         bytes: unescape(body),
     }
 }
@@ -520,33 +529,53 @@ fn fixture_corpus_decodes_without_panic_or_drops() {
         let split = decode_chunks(&fixture.bytes, 1);
         assert_eq!(whole, split, "{}: split-equivalence mismatch", fixture.name);
 
-        // Nothing is dropped: every non-key event preserves its token bytes exactly, and the input
-        // byte length is fully accounted for. A text key accounts for its UTF-8 byte length, a
-        // keyless key (control or arrow) for its one control byte or its arrow sequence, and a
-        // syntax event for its preserved token bytes.
-        let mut accounted = 0usize;
-        for event in &whole {
-            match event {
-                Event::Key(key) => accounted += key_byte_len(key),
-                Event::Syntax(_) => {
-                    let bytes = syntax_bytes(event).expect("syntax event has bytes");
+        if fixture.direction == "host-to-terminal" {
+            // Host-to-terminal commands and queries either pass through as syntax (byte-preserving)
+            // or decode to a legacy text/control key, so their input byte length is fully accounted
+            // for. A text key accounts for its UTF-8 byte length, a keyless key (control or arrow)
+            // for its one control byte or its arrow sequence, and a syntax event for its preserved
+            // token bytes.
+            let mut accounted = 0usize;
+            for event in &whole {
+                match event {
+                    Event::Key(key) => accounted += key_byte_len(key),
+                    Event::Syntax(_) => {
+                        let bytes = syntax_bytes(event).expect("syntax event has bytes");
+                        assert!(
+                            !bytes.is_empty(),
+                            "{}: empty syntax token bytes",
+                            fixture.name
+                        );
+                        accounted += bytes.len();
+                    }
+                    other => panic!("{}: unexpected event variant {other:?}", fixture.name),
+                }
+            }
+            assert_eq!(
+                accounted,
+                fixture.bytes.len(),
+                "{}: decoded events account for {accounted} bytes, not the {} input bytes",
+                fixture.name,
+                fixture.bytes.len(),
+            );
+        } else {
+            // Terminal-to-host input decodes reports into typed events — key events for
+            // win32-input-mode, syntax passthrough for device reports — which intentionally does
+            // not preserve bytes at the semantic layer (a `CSI … _` key event is far
+            // longer than the key it names). The byte-exact round-trip for these lives
+            // in the syntax-layer corpus test (`tests/fixture_corpus.rs`); here we only
+            // assert decode neither panics (above) nor emits an empty-byte syntax
+            // token.
+            for event in &whole {
+                if let Some(bytes) = syntax_bytes(event) {
                     assert!(
                         !bytes.is_empty(),
                         "{}: empty syntax token bytes",
                         fixture.name
                     );
-                    accounted += bytes.len();
                 }
-                other => panic!("{}: unexpected event variant {other:?}", fixture.name),
             }
         }
-        assert_eq!(
-            accounted,
-            fixture.bytes.len(),
-            "{}: decoded events account for {accounted} bytes, not the {} input bytes",
-            fixture.name,
-            fixture.bytes.len(),
-        );
     }
 }
 
@@ -908,4 +937,89 @@ fn crlf_split_across_paste_segments_normalizes_to_one_newline() {
         .flat_map(|e| e.paste_event().expect("paste").data().to_vec())
         .collect();
     assert_eq!(joined, b"ab\ncd");
+}
+
+#[test]
+fn win32_input_plain_character_decodes_through_the_semantic_decoder() {
+    // A win32-input 'a' down/up pair decodes to a press with text and a release without.
+    let events = decode_whole(b"\x1b[65;30;97;1_\x1b[65;30;97_");
+    assert_eq!(events.len(), 2);
+    let down = events[0].key_event().expect("a key event");
+    assert_eq!(down.key(), Key::Char('a'));
+    assert_eq!(down.kind(), KeyEventKind::Press);
+    assert_eq!(down.text().map(TextPayload::as_str), Some("a"));
+    let up = events[1].key_event().expect("a key event");
+    assert_eq!(up.kind(), KeyEventKind::Release);
+    assert_eq!(up.text(), None);
+}
+
+#[test]
+fn win32_input_arrow_and_ctrl_chord_decode() {
+    // Left arrow (VK_LEFT, enhanced-key bit dropped) and Ctrl+A (letter from the virtual key).
+    let events = decode_whole(b"\x1b[37;75;0;1;256_\x1b[65;30;1;1;8_");
+    assert_eq!(events[0].key_event().map(KeyEvent::key), Some(Key::Left));
+    let chord = events[1].key_event().expect("a key event");
+    assert_eq!(chord.key(), Key::Char('a'));
+    assert_eq!(chord.modifiers(), Modifiers::CTRL);
+}
+
+#[test]
+fn win32_input_surrogate_pair_reassembles_across_chunk_boundaries() {
+    // The two halves of U+1F600 arrive in separate feeds; the pending high surrogate carries across
+    // the read boundary and the pair still becomes one event.
+    let mut decoder = SemanticDecoder::new();
+    assert!(
+        decoder.feed(b"\x1b[0;0;55357;1_").is_empty(),
+        "the high surrogate is held until its low half"
+    );
+    let events = decoder.feed(b"\x1b[0;0;56832;1_");
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].key_event().map(KeyEvent::key),
+        Some(Key::Char('\u{1f600}'))
+    );
+    assert!(decoder.finish().is_empty());
+}
+
+#[test]
+fn win32_input_repeat_count_expands() {
+    let events = decode_whole(b"\x1b[65;30;97;1;0;3_");
+    assert_eq!(events.len(), 3);
+    for event in &events {
+        assert_eq!(event.key_event().map(KeyEvent::key), Some(Key::Char('a')));
+    }
+}
+
+#[test]
+fn win32_input_modifier_chatter_produces_no_event() {
+    // A VK_CONTROL down carries no key: the sequence is consumed as a valid win32 event but emits
+    // nothing, and it is not passed through as syntax.
+    let events = decode_whole(b"\x1b[17;29;0;1;8_");
+    assert!(events.is_empty());
+}
+
+#[test]
+fn win32_input_dangling_high_surrogate_flushes_at_finish() {
+    // A stream that ends on an unpaired high surrogate flushes U+FFFD at finish rather than
+    // dropping the code unit.
+    let mut decoder = SemanticDecoder::new();
+    assert!(decoder.feed(b"\x1b[0;0;55357;1_").is_empty());
+    let events = decoder.finish();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].key_event().map(KeyEvent::key),
+        Some(Key::Char(char::REPLACEMENT_CHARACTER)),
+    );
+}
+
+#[test]
+fn win32_input_malformed_underscore_form_passes_through_as_syntax() {
+    // A `_`-final CSI with a `:` sub-parameter is not win32-input grammar, so it round-trips as
+    // lossless syntax rather than decoding or panicking.
+    let events = decode_whole(b"\x1b[65:30;97;1_");
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0].syntax_token(),
+        Some(SyntaxToken::Csi(_))
+    ));
 }

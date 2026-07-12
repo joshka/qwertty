@@ -538,9 +538,10 @@ Restores the cursor position previously saved with SCOSC.
 Rows and columns use protocol coordinate space.
 
 - Direction: terminal-to-host
+- Syntax: `CSI row ; column R`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_cpr_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_tmux.seq), [`fixtures/ecma48/csi_cpr_report_capture_betamax.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_betamax.seq), [`fixtures/ecma48/csi_cpr_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_kitty.seq), [`fixtures/ecma48/csi_cpr_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_alacritty.seq), [`fixtures/ecma48/csi_cpr_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_wezterm.seq), [`fixtures/ecma48/csi_cpr_report_capture_foot.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_foot.seq), [`fixtures/ecma48/csi_cpr_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_cpr_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; shape identical on all seven answering targets.
 
 ## DSR: Query Cursor Position (`csi.dsr.cursor_position`)
 
@@ -569,9 +570,10 @@ Primary device attributes identify broad terminal class and feature flags.
 The numeric payload is preserved for terminal identification layers.
 
 - Direction: terminal-to-host
+- Syntax: `CSI ? attributes c`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_da_primary_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_betamax.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_betamax.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_alacritty.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_foot.seq), [`fixtures/ecma48/csi_da_primary_report_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_da_primary_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures. The attributes payload is a semicolon-separated list of numeric feature codes and varies by terminal: tmux reports `?1;2;4`, foot `?62;4;22`, xterm a twelve-code list.
 
 ## DA2: Query Secondary Device Attributes (`csi.da.secondary`)
 
@@ -589,9 +591,10 @@ Secondary device attributes usually include firmware or patch-level numbers.
 The numeric payload is preserved for terminal identification layers.
 
 - Direction: terminal-to-host
+- Syntax: `CSI > type ; firmware ; cartridge c`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_da_secondary_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_betamax.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_betamax.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_alacritty.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_foot.seq), [`fixtures/ecma48/csi_da_secondary_report_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_da_secondary_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures. Every captured target reports cartridge 0 (xterm-ctlseqs: ROM cartridge registration, always zero).
 
 ## DA3: Query Tertiary Device Attributes (`csi.da.tertiary`)
 
@@ -609,9 +612,10 @@ Tertiary attributes are preserved as an opaque identity string.
 The identity payload is intentionally not interpreted by the session decoder.
 
 - Direction: terminal-to-host
+- Syntax: `DCS ! | text ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_da_tertiary_report_report_capture_betamax.seq`](../../../fixtures/ecma48/csi_da_tertiary_report_report_capture_betamax.seq), [`fixtures/ecma48/csi_da_tertiary_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_da_tertiary_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_da_tertiary_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_da_tertiary_report_report_capture_foot.seq), [`fixtures/ecma48/csi_da_tertiary_report_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_da_tertiary_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures. Every answering target (betamax/ghostty, wezterm, foot, xterm) reports the all-zero site id `00000000`; tmux and alacritty do not answer DA3.
 
 ## DSR: Query Terminal Status (`csi.dsr.status`)
 
@@ -629,9 +633,10 @@ A normal terminal response is DSR 0, meaning no malfunction.
 Reports that the terminal is operating with no malfunction.
 
 - Direction: terminal-to-host
+- Syntax: `CSI 0 n`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_dsr_status_ok_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_tmux.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_betamax.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_betamax.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_kitty.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_alacritty.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_wezterm.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_foot.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_foot.seq), [`fixtures/ecma48/csi_dsr_status_ok_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_dsr_status_ok_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; byte-identical `CSI 0 n` on every answering target.
 
 ## DECRQM: Query ANSI Mode (`csi.ansi_mode.query`)
 
@@ -650,9 +655,10 @@ Fixture queries IRM, the insert/replace mode with numeric mode 4.
 Fixture reports IRM as reset with `CSI 4 ; 2 $ y`.
 
 - Direction: terminal-to-host
+- Syntax: `CSI mode ; value $ y`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_ansi_mode_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_ansi_mode_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_ansi_mode_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_ansi_mode_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_ansi_mode_report_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_ansi_mode_report_report_capture_alacritty.seq), [`fixtures/ecma48/csi_ansi_mode_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_ansi_mode_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_ansi_mode_report_report_capture_xterm.seq`](../../../fixtures/ecma48/csi_ansi_mode_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture; The shared mode report event preserves the numeric mode and state.
+- Notes: Syntax from live captures (IRM query answered `CSI 4 ; 2 $ y` on every answering target; betamax and foot do not answer). The shared mode report event preserves the numeric mode and state.
 
 ## XTWINOPS: Query Text Area Size In Cells (`csi.xtwinops.text_area_cells`)
 
@@ -670,9 +676,10 @@ Reports text area height and width in cells.
 Decoded as a resize event with `TextAreaCells` source.
 
 - Direction: terminal-to-host
+- Syntax: `CSI 8 ; rows ; columns t`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_alacritty.seq), [`fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_cells_report_report_capture_foot.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; the reported geometry matches the harness-requested cell size except under foot, which reports the compositor-configured window size.
 
 ## XTWINOPS: Query Text Area Size In Pixels (`csi.xtwinops.text_area_pixels`)
 
@@ -690,9 +697,10 @@ Reports text area height and width in pixels.
 Decoded as a resize event with `TextAreaPixels` source.
 
 - Direction: terminal-to-host
+- Syntax: `CSI 4 ; height ; width t`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_tmux.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_tmux.seq), [`fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_kitty.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_kitty.seq), [`fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_alacritty.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_alacritty.seq), [`fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_wezterm.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_wezterm.seq), [`fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_foot.seq`](../../../fixtures/ecma48/csi_xtwinops_text_area_pixels_report_report_capture_foot.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; height precedes width, in pixels of the text area.
 
 ## ED: Clear Entire Screen (`csi.ed.clear_screen`)
 

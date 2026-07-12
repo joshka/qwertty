@@ -282,7 +282,8 @@ fn write_artifact(repo_root: &Path, artifact: &Artifact) -> Result<(), String> {
 }
 
 /// A UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) via `date -u`, falling back to a date-only stamp.
-fn utc_timestamp() -> String {
+#[must_use]
+pub fn utc_timestamp() -> String {
     Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()

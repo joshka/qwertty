@@ -12,3 +12,4 @@ pub mod orchestrate;
 pub mod runner;
 pub mod targets;
 pub mod validate;
+pub mod width;

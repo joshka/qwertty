@@ -1496,6 +1496,89 @@ async fn tokio_probe_silent_terminal_returns_all_unknown_after_timeout_and_typea
 }
 
 #[tokio::test]
+async fn tokio_probe_gathers_kitty_graphics_and_pixel_geometry() {
+    // The graphics slice of the bundle: the fake answers the kitty graphics a=q query (echoing
+    // the probe's image id), the cell-size query with a real measurement, and the text-area query
+    // with ZEROS — the FM-Z5 case: answered, but not a measurement. The probe must record
+    // graphics support and cell size as probed values, and the zero text-area answer as a Probed
+    // finding with NO value (answered-zeros is not a geometry).
+    let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+    let mut session = TokioTerminalSession::from_device(device).expect("open Tokio fake session");
+
+    let probe = async move {
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .await
+            .expect("probe returns capabilities");
+        (session, caps)
+    };
+    let peer = async {
+        let bundle = read_fake_until_available(&mut terminal)
+            .await
+            .expect("read probe bundle");
+        // The bundle asks the graphics query (the spec's own probe shape, id u32::MAX) and both
+        // XTWINOPS geometry queries, all before the DA1 fence.
+        let graphics_query = b"\x1b_Gi=4294967295,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\";
+        assert!(
+            bundle
+                .windows(graphics_query.len())
+                .any(|w| w == graphics_query),
+            "graphics a=q queried, got {bundle:?}"
+        );
+        assert!(
+            bundle.windows(5).any(|w| w == b"\x1b[14t"),
+            "CSI 14 t queried"
+        );
+        assert!(
+            bundle.windows(5).any(|w| w == b"\x1b[16t"),
+            "CSI 16 t queried"
+        );
+        assert!(bundle.ends_with(b"\x1b[c"), "DA1 last as the fence");
+
+        // Answer: graphics OK (echoing the probe id), cell size 14x25 px, text area 0x0 (zeros),
+        // then the DA1 fence.
+        terminal
+            .feed_input(b"\x1b_Gi=4294967295;OK\x1b\\\x1b[6;25;14t\x1b[4;0;0t\x1b[?62;c")
+            .expect("feed graphics + geometry answers + DA1 fence");
+    };
+
+    let ((_session, caps), ()) = tokio::join!(probe, peer);
+
+    assert_eq!(
+        caps.kitty_graphics.value_copied(),
+        Some(true),
+        "an OK response to a=q is probed support"
+    );
+    assert_eq!(
+        caps.kitty_graphics.evidence(),
+        &Evidence::Probed {
+            via: "kitty graphics a=q"
+        },
+    );
+    assert_eq!(
+        caps.cell_size.value_copied(),
+        Some(PixelSize::new(14, 25)),
+        "CSI 6;25;14t is a 14-wide, 25-high cell"
+    );
+    assert_eq!(
+        caps.cell_size.evidence(),
+        &Evidence::Probed { via: "CSI 16 t" }
+    );
+    // The zeros case: Probed evidence (the terminal answered) with no value (zeros are an
+    // admission, not a measurement — FM-Z5).
+    assert_eq!(
+        caps.text_area_pixels.value_copied(),
+        None,
+        "a zero answer never becomes a geometry"
+    );
+    assert_eq!(
+        caps.text_area_pixels.evidence(),
+        &Evidence::Probed { via: "CSI 14 t" },
+        "answered zeros is still an answer: Probed evidence, unknown value"
+    );
+}
+
+#[tokio::test]
 async fn tokio_probe_two_decrqm_modes_do_not_cross_complete() {
     // FM-Q10: the bundle carries concurrent DECRQM expectations for 2026 and 2027. The fake answers
     // BOTH with their correct modes (2026 set, 2027 reset). Each field must be set from its own

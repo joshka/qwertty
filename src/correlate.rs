@@ -107,8 +107,8 @@
 // its earlier "unwired" allowances were removed.)
 use crate::event::Event;
 use crate::report::{
-    CursorPositionReport, DecPrivateModeReport, OscColorKind, OscColorReport, TerminalStatusReport,
-    XtVersionReport,
+    CellSizeReport, CursorPositionReport, DecPrivateModeReport, KittyGraphicsReport, OscColorKind,
+    OscColorReport, TerminalStatusReport, TextAreaPixelsReport, XtVersionReport,
 };
 use crate::syntax::{ControlSequence, StringSequence, SyntaxToken};
 
@@ -180,6 +180,31 @@ pub enum Expectation {
         /// Which default colour this expectation is waiting for.
         which: OscColorKind,
     },
+    /// A kitty graphics response, answering an id-carrying graphics command — most importantly the
+    /// `a=q` support query
+    /// ([`commands::graphics::kitty::query_support`](crate::commands::graphics::kitty::query_support)).
+    ///
+    /// Matches the `APC G i=<id> … ; OK|<error> ST` response **only when the echoed image id
+    /// equals `image_id`** — the id is the discriminator, exactly as the DECRQM mode number is
+    /// (FM-Q10): two graphics commands in flight with different ids each complete only their own
+    /// query. The reply is APC-framed, so its shape is disjoint from every CSI/DCS/OSC-based
+    /// expectation.
+    KittyGraphics {
+        /// The image id this expectation is waiting for (the id sent with the command).
+        image_id: u32,
+    },
+    /// A text-area pixel-size report, answering a `CSI 14 t` XTWINOPS query.
+    ///
+    /// Matches `CSI 4 ; height ; width t`. The leading window-operation code `4` is the
+    /// discriminator that separates it from the cell-size report (`6`), the cells report (`8`),
+    /// and the in-band resize report (`48`, which decodes as a resize event and never reaches the
+    /// correlator as syntax).
+    TextAreaPixels,
+    /// A character-cell pixel-size report, answering a `CSI 16 t` XTWINOPS query.
+    ///
+    /// Matches `CSI 6 ; height ; width t`; the leading `6` is the discriminator (see
+    /// [`TextAreaPixels`](Self::TextAreaPixels)).
+    CellSize,
 }
 
 impl Expectation {
@@ -222,6 +247,21 @@ impl Expectation {
                 // The discriminator: only the report for *this* colour completes the query.
                 (report.kind() == which).then_some(Reply::OscColor(report))
             }
+            // APC-framed reply.
+            Self::KittyGraphics { image_id } => {
+                let report = KittyGraphicsReport::from_string_sequence(apc_string(event)?)?;
+                // The discriminator (FM-Q10 analogue): only the response echoing *this* image id
+                // completes the query.
+                (report.image_id() == Some(image_id)).then_some(Reply::KittyGraphics(report))
+            }
+            // XTWINOPS geometry replies, discriminated by their leading window-operation code.
+            Self::TextAreaPixels => {
+                TextAreaPixelsReport::from_control_sequence(control_sequence(event)?)
+                    .map(Reply::TextAreaPixels)
+            }
+            Self::CellSize => {
+                CellSizeReport::from_control_sequence(control_sequence(event)?).map(Reply::CellSize)
+            }
         }
     }
 }
@@ -238,10 +278,13 @@ impl Expectation {
 ///
 /// For the fieldless variants the reply shapes are disjoint by frame and final byte — CPR ends in
 /// `R`, DSR in `n`, DA1 in `c`, the kitty flags report in `u` (with a `?` marker DA1 lacks),
-/// XTVERSION is DCS-framed, and the OSC colour reports are OSC-framed — so every pair of
-/// *different* variants distinguishes. The discriminator-carrying variants (DECRQM by mode number,
-/// OSC colour by index) refine this: two same-variant expectations distinguish exactly when their
-/// discriminators differ, because the matcher for each requires its own mode/colour (FM-Q10). Since
+/// XTVERSION is DCS-framed, the OSC colour reports are OSC-framed, the kitty graphics response is
+/// APC-framed, and the two XTWINOPS geometry reports share the `t` final but require different
+/// leading window-operation codes (`4` vs `6`) — so every pair of *different* variants
+/// distinguishes. The discriminator-carrying variants (DECRQM by mode number, OSC colour by index,
+/// kitty graphics by image id) refine this: two same-variant expectations distinguish exactly when
+/// their discriminators differ, because the matcher for each requires its own mode/colour/id
+/// (FM-Q10). Since
 /// [`Expectation`] derives structural equality, "different discriminator" is simply "not equal," so
 /// the whole relation collapses to `a != b`: identical expectations (same variant, same
 /// discriminator) are the only non-distinguishing pairs, and those coalesce.
@@ -255,29 +298,24 @@ impl Expectation {
 ///
 /// // Different reply shapes always distinguish.
 /// assert!(distinguishes(
-///     &Expectation::CursorPosition,
-///     &Expectation::TerminalStatus,
+///     Expectation::CursorPosition,
+///     Expectation::TerminalStatus,
 /// ));
 /// // An expectation never distinguishes from an identical one; that is the coalescing case.
 /// assert!(!distinguishes(
-///     &Expectation::CursorPosition,
-///     &Expectation::CursorPosition,
+///     Expectation::CursorPosition,
+///     Expectation::CursorPosition,
 /// ));
 /// ```
 ///
 /// The executed form of this example lives in the module's unit tests (the `distinguishes` matrix).
-// The `&Expectation` signature is intentional and part of the design 03 contract: `distinguishes`
-// is a *relation over expectations*, and future discriminator-carrying variants (M3) will make
-// `Expectation` larger than a `Copy`-by-value threshold, so the by-reference signature is the
-// stable one. Suppress the trivially-copy lint that fires only while the M2 variants are still
-// fieldless; `expect` makes this self-retiring — the day a discriminator grows `Expectation` past
-// the by-value threshold the lint stops firing and this attribute becomes a build error to remove.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "by-reference is the stable signature; see comment above"
-)]
+// By-value: `Expectation` is a small `Copy` enum. An earlier by-reference signature carried a
+// self-retiring `#[expect(trivially_copy_pass_by_ref)]` ("remove when a discriminator grows the
+// enum past the by-value threshold"); the kitty-graphics image-id discriminator grew it to the
+// point where the lint's target-dependent threshold diverged (fulfilled on 64-bit, unfulfilled on
+// wasm32), which is exactly the retirement trigger the comment promised.
 #[must_use]
-pub fn distinguishes(a: &Expectation, b: &Expectation) -> bool {
+pub fn distinguishes(a: Expectation, b: Expectation) -> bool {
     // Two expectations fail to distinguish exactly when a single event could complete both. Every
     // pair of different variants has disjoint reply shapes (by frame and final byte), and each
     // discriminator-carrying variant's matcher accepts only its own discriminator's reply — so two
@@ -325,6 +363,19 @@ pub enum Reply {
     /// An OSC default-colour report completed an [`Expectation::OscColor`], carrying the parsed
     /// colour and which default (foreground/background) it describes.
     OscColor(OscColorReport),
+    /// A kitty graphics response completed an [`Expectation::KittyGraphics`].
+    ///
+    /// Carries the parsed response; its echoed image id always equals the id in the expectation it
+    /// completed (that is the discriminator). `OK` means the terminal loaded the queried data —
+    /// for the `a=q` support probe, that it speaks the graphics protocol.
+    KittyGraphics(KittyGraphicsReport),
+    /// A text-area pixel-size report completed an [`Expectation::TextAreaPixels`].
+    ///
+    /// Zero dimensions are preserved in the report; the capability layer records them as
+    /// *unknown*, never as a real geometry (FM-Z5).
+    TextAreaPixels(TextAreaPixelsReport),
+    /// A character-cell pixel-size report completed an [`Expectation::CellSize`].
+    CellSize(CellSizeReport),
 }
 
 /// The parameters of a Primary Device Attributes (DA1) fence reply.
@@ -542,7 +593,7 @@ impl Correlator {
                 slot.outstanding += 1;
                 return Ok(slot.id);
             }
-            if !distinguishes(&slot.expectation, &expectation) {
+            if !distinguishes(slot.expectation, expectation) {
                 return Err(RegisterError::Ambiguous {
                     conflicting: slot.id,
                 });
@@ -745,6 +796,17 @@ fn dcs_string(event: &Event) -> Option<&StringSequence> {
 fn osc_string(event: &Event) -> Option<&StringSequence> {
     match event.syntax_token()? {
         SyntaxToken::Osc(osc) => Some(osc),
+        _ => None,
+    }
+}
+
+/// Returns the APC string sequence carried by a passthrough syntax event, or `None`.
+///
+/// Only a [`Event::Syntax`] holding a [`SyntaxToken::Apc`] can be a kitty graphics response; every
+/// other token is never a match candidate for [`Expectation::KittyGraphics`].
+fn apc_string(event: &Event) -> Option<&StringSequence> {
+    match event.syntax_token()? {
+        SyntaxToken::Apc(apc) => Some(apc),
         _ => None,
     }
 }

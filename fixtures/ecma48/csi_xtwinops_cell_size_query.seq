@@ -1,0 +1,2 @@
+#! direction=host-to-terminal origin=spec:xterm-ctlseqs
+\e[16t

@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?65;4;6;18;22c",
+    "target": "wezterm",
+    "version": "WezTerm 20240203-110809-5046fc22",
+    "xtversion_escaped": "\\eP>|WezTerm 20240203-110809-5046fc22\\e\\\\"
+  },
+  "query_id": "csi.xtwinops.cell_size",
+  "reply_escaped": "\\e[6;0;0t",
+  "reply_id": "csi.xtwinops.cell_size_report",
+  "reply_len": 8,
+  "status": "answered",
+  "target": "wezterm",
+  "timestamp": "2026-07-12T14:52:49Z"
+}

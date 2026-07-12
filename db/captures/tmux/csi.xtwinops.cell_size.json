@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "da1_escaped": "\\e[?1;2;4c",
+    "target": "tmux",
+    "version": "tmux 3.7b",
+    "xtversion_escaped": "\\eP>|tmux 3.7b\\e\\\\"
+  },
+  "query_id": "csi.xtwinops.cell_size",
+  "reply_escaped": "\\e[6;32;16t",
+  "reply_id": "csi.xtwinops.cell_size_report",
+  "reply_len": 10,
+  "status": "answered",
+  "target": "tmux",
+  "timestamp": "2026-07-12T14:51:52Z"
+}

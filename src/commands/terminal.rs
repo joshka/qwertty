@@ -121,6 +121,60 @@ pub fn request_xtversion() -> Command {
     escape::csi(">", 'q')
 }
 
+/// Requests the text-area size in pixels (XTWINOPS 14).
+///
+/// This encodes `CSI 14 t`, emitted as `b"\x1b[14t"` (`db/ecma48-csi.toml`'s
+/// `csi.xtwinops.text_area_pixels`). Terminals answer with `CSI 4 ; height ; width t`, which
+/// qwertty parses into a [`TextAreaPixelsReport`](crate::report::TextAreaPixelsReport). Some
+/// terminal stacks answer with zero dimensions; the report type preserves the zeros and its
+/// `pixel_size` accessor refuses to turn them into a fake geometry (FM-Z5).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a
+/// response, route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_text_area_pixels());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[14t");
+/// ```
+#[must_use]
+pub fn request_text_area_pixels() -> Command {
+    escape::csi("14", 't')
+}
+
+/// Requests the character-cell size in pixels (XTWINOPS 16).
+///
+/// This encodes `CSI 16 t`, emitted as `b"\x1b[16t"` (`db/ecma48-csi.toml`'s
+/// `csi.xtwinops.cell_size`). Terminals answer with `CSI 6 ; height ; width t`, which qwertty
+/// parses into a [`CellSizeReport`](crate::report::CellSizeReport) — the cells-to-pixels
+/// conversion an application needs to size image placements. Fewer terminals implement this than
+/// the text-area query; silence and zero answers both stay *unknown* (FM-Z5).
+///
+/// This helper only builds the request bytes. It does not write to a terminal, wait for a
+/// response, route query responses, or filter unrelated input.
+///
+/// # Example
+///
+/// ```
+/// use qwertty::CommandBuffer;
+/// use qwertty::commands::terminal;
+///
+/// let mut frame = CommandBuffer::new();
+/// frame.command(terminal::request_cell_size());
+///
+/// assert_eq!(frame.as_bytes(), b"\x1b[16t");
+/// ```
+#[must_use]
+pub fn request_cell_size() -> Command {
+    escape::csi("16", 't')
+}
+
 /// Requests the state of a DEC private mode (DECRQM).
 ///
 /// This encodes the private-mode DECRQM request `CSI ? mode $ p`. For mode 2026 it emits

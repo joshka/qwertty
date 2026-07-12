@@ -22,10 +22,6 @@ point without scanning the repository tree.
   (`set_scroll_region`, `insert_lines`, `scroll_up`, `reset_scroll_region`, DECSTBM/IL/SU) with
   `CommandBuffer`, all without opening a terminal — and documents why neither mode 2026 nor DECSTBM
   emission is gated at this layer.
-- `kitty_graphics.rs`: build the kitty graphics protocol command bytes
-  (`commands::graphics::kitty::transmit_and_display`, `place`, `delete_image`, `delete_all_images`)
-  and print them escaped — encode-only, without opening a terminal, with capability and transmission
-  policy documented as session-layer obligations above the encode helpers.
 - `iterm2_inline_image.rs`: build the iTerm2 inline-image command bytes
   (`commands::graphics::iterm2::inline_image` and `inline_image_sized` with a `Dimension`) and print
   them escaped — the OSC 1337 `File` inline form, encode-only, without opening a terminal.
@@ -116,6 +112,14 @@ point without scanning the repository tree.
   `TokioTerminalSession::synchronized` — it emits the mode-2026 wrap only when the probe answered
   supported, and runs the same frame un-batched otherwise, never the 2026 bytes into a terminal
   that did not answer. See [Terminal Control](crate::docs::terminal_control) for the gating rule.
+- `kitty_graphics.rs`: probe for kitty graphics support (the `a=q` query rides the same DA1-fenced
+  bundle), and only on a probed *supported* finding transmit a generated RGBA image under a
+  client-assigned id (`commands::graphics::kitty::transmit`), place it scaled
+  (`place_with`), decode the terminal's acknowledgement as a `report::KittyGraphicsReport`, and
+  explicitly delete the image (`delete_image_and_data`) — placed images are app-owned content,
+  never auto-cleared. An unknown finding draws nothing: graphics escapes never leak into a
+  terminal that did not affirm the protocol. See [Graphics](crate::docs::graphics) for the
+  protocol scope, the policy split, and the pixel-geometry honesty rule.
 - `mouse_and_paste.rs`: enable SGR mouse (`enable_mouse`), focus (`enable_focus_events`), and
   bracketed paste (`enable_bracketed_paste`), then print the decoded `Event::Mouse`, `Event::Focus`,
   and `Event::Paste` values — scroll events uncoalesced, paste line endings normalized and control

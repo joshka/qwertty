@@ -15,22 +15,6 @@ Two protocols are implemented:
   [`commands::graphics::iterm2`](crate::commands::graphics::iterm2) — a simpler one-shot form (also
   spoken by `WezTerm`) with no support query.
 
-## What these helpers do and do not do
-
-A graphics helper returns a `Command` of raw bytes, built without a terminal, session, decoder, or
-policy — exactly like every other [`commands`](crate::commands) helper. Two obligations therefore
-live above this layer, wherever session code forwards the bytes to a real terminal:
-
-- **Capability gating.** Send an image protocol only to a terminal that supports it. Painting kitty
-  graphics bytes at a terminal that cannot render them prints garbage. Support is a session-level
-  capability finding (for kitty, confirmed by a support probe); the encode helpers cannot and do
-  not check.
-- **Transmission policy.** The helpers build only the *inline* transmission form, where the caller
-  supplies the image bytes and the escape opens no new resource. The kitty protocol also defines
-  file, temp-file, and shared-memory transmission, where the escape names a path or object the
-  terminal opens on the caller's behalf — a local-file-read and exfiltration surface. Those forms
-  belong behind a `Policy` gate at the session layer and are intentionally not built here.
-
 ## kitty graphics at a glance
 
 The protocol carries images in Application Program Command sequences:
@@ -40,27 +24,96 @@ ESC _ G <control-keys> ; <base64-payload> ESC \
 ```
 
 The `G`-prefixed control keys are a comma-separated `key=value` list; the payload after `;` is the
-base64 of the image (empty for a control-only command like a delete). The helpers cover:
+base64 of the image (empty for a control-only command like a delete). Payloads past the protocol's
+4096-byte chunk bound split automatically into `m=1`/`m=0` chunked transmissions. The helpers
+cover:
 
-- `transmit_and_display` → `ESC _ Ga=T,f=…;<b64> ESC \` — send an image and show it at the cursor.
-- `place` → `ESC _ Ga=p,i=<id>; ESC \` — show an already-transmitted image by id.
-- `delete_all_images` → `ESC _ Ga=d; ESC \` — drop every image and placement.
-- `delete_image` → `ESC _ Ga=d,d=i,i=<id>; ESC \` — drop one image by id.
+- `query_support` → the spec's own `a=q` support probe (see below).
+- `transmit` → `ESC _ Ga=t,i=<id>,f=…;<b64> ESC \` — send an image under a client-assigned id,
+  without displaying it; the terminal acknowledges by echoing the id.
+- `transmit_and_display` → `ESC _ Ga=T,f=…;<b64> ESC \` — send an image and show it at the cursor
+  in one un-acknowledged shot (no id).
+- `place` / `place_with` → `ESC _ Ga=p,i=<id>…; ESC \` — show an already-transmitted image by id,
+  optionally with a placement id, column/row scaling, and z-index.
+- `delete_image` / `delete_all_images` / `delete_placement` → drop placements, keeping the stored
+  data for re-display; the `…_and_data` forms also free it.
+- `transmit_file` / `transmit_temp_file` / `transmit_shared_memory` → the policy-gated
+  resource-naming transmission forms (see below).
 
 Image ids are client-assigned: the application chooses the number and reuses it to place or delete.
-qwertty keeps no registry — the id space is the caller's.
+qwertty keeps no registry — the id space is the caller's. Every id-carrying command is acknowledged
+with `APC G i=<id> ; OK ST` (or an ASCII error such as `ENOENT:…`), parsed by
+[`KittyGraphicsReport`](crate::report::KittyGraphicsReport); the echoed id is how the internal
+query correlator matches an acknowledgement to the command that provoked it, so two graphics
+commands in flight can never complete each other's query.
 
-```rust
-use qwertty::CommandBuffer;
-use qwertty::commands::graphics::kitty::{self, Format};
+## Capability: probe, never sniff
 
-// Transmit a PNG and display it, then clear it later.
-let show = CommandBuffer::new()
-    .command(kitty::transmit_and_display(Format::Png, /* png bytes */ b"\x00\x00\x00"))
-    .as_bytes()
-    .to_vec();
-assert_eq!(show, b"\x1b_Ga=T,f=100;AAAA\x1b\\");
-```
+The kitty graphics query rides the same DA1-fenced bundle as every other capability probe (on the
+Tokio session, `probe_capabilities` — the spec itself recommends exactly this query-then-DA1
+pattern). The result lands in [`Capabilities::kitty_graphics`](crate::Capabilities::kitty_graphics)
+with honest provenance:
+
+| Terminal behaviour             | Finding value | Evidence                               |
+| ------------------------------ | ------------- | -------------------------------------- |
+| answers `OK`                   | `Some(true)`  | `Probed { via: "kitty graphics a=q" }` |
+| answers an error               | `Some(false)` | `Probed { via: "kitty graphics a=q" }` |
+| silent (or a mux swallowed it) | `None`        | `Unknown`                              |
+
+Live conformance runs confirm the split — kitty, ghostty, and `WezTerm` answer `OK`; tmux and
+alacritty stay silent (see [Conformance](crate::docs::conformance)). Unknown is not unsupported (a
+multiplexer may have eaten the APC), and it is also not permission to emit: painting kitty
+graphics bytes at a terminal that cannot render them prints garbage, so gate emission on a
+known-`true` finding, the same rule that keeps mode-2026 wraps off terminals that never answered.
+
+iTerm2 images have no support query at all, so a session gates their emission on a
+terminal-identity finding rather than a probe.
+
+## Pixel geometry: zeros are an admission, not a measurement
+
+Sizing a placement needs the cells-to-pixels conversion. The probe asks two XTWINOPS questions —
+[`request_text_area_pixels`](crate::commands::terminal::request_text_area_pixels) (`CSI 14 t`) and
+[`request_cell_size`](crate::commands::terminal::request_cell_size) (`CSI 16 t`) — parsed by
+[`TextAreaPixelsReport`](crate::report::TextAreaPixelsReport) and
+[`CellSizeReport`](crate::report::CellSizeReport). Many terminal stacks answer these with zero
+dimensions. The reports preserve the zeros verbatim, but their `pixel_size` accessors — and the
+[`text_area_pixels`](crate::Capabilities::text_area_pixels) /
+[`cell_size`](crate::Capabilities::cell_size) findings — refuse to turn a zero into a geometry: the
+value stays unknown and the application chooses its own fallback. qwertty never fabricates a
+default cell size.
+
+## The policy split: who opens the resource?
+
+Image *bytes* are not the security surface — *resource naming* is. The kitty protocol has four
+transmission media, and they differ in exactly one way that matters:
+
+| Transmission          | Who supplies the bytes               | Gating                              |
+| --------------------- | ------------------------------------ | ----------------------------------- |
+| direct (`t=d`)        | the application, inline              | capability only                     |
+| file (`t=f`)          | **the terminal reads a path**        | capability + policy (file transfer) |
+| temp file (`t=t`)     | **the terminal reads, then deletes** | capability + policy (file transfer) |
+| shared memory (`t=s`) | **the terminal opens an IPC object** | capability + policy (file transfer) |
+
+Direct transmission carries bytes the application already owns; it opens no new resource and needs
+no policy. The other three make the escape stream name a resource **the terminal itself opens** —
+attacker-influenced output could steer a supporting terminal into reading any readable file and
+rendering it, a local-file-read and exfiltration primitive. Their session-level emits
+([`transmit_kitty_file`](crate::TerminalSession::transmit_kitty_file) and siblings) therefore sit
+behind the existing file-transfer policy gate: the default
+[`Policy::restricted`](crate::Policy::restricted) denies them with a typed
+[`PolicyDenied`](crate::Error::PolicyDenied), a missing capability finding refuses with
+[`CapabilityUnverified`](crate::Error::CapabilityUnverified), and no bytes are written in either
+case. The encode-only builders remain the raw escape hatch for callers that gate themselves.
+
+## Lifecycle: images are content, not session state
+
+A placed image is output content, exactly like emitted text. It does not enter the session's mode
+ledger, is not replayed or undone by `leave` or drop, and is never auto-cleared — an
+alternate-screen exit clears its screen anyway, and a primary-screen application owns its own
+cleanup. The explicit surface is the delete family:
+[`delete_image`](crate::commands::graphics::kitty::delete_image) and friends drop placements while
+the terminal may keep the transmitted data for re-display, and the `…_and_data` forms free the
+stored data too.
 
 ## iTerm2 inline images at a glance
 
@@ -80,9 +133,6 @@ it opens no resource. The helpers cover:
 Unlike kitty, the protocol has no support query, so a session gates emission on a terminal-identity
 finding rather than a probe.
 
-## Not yet built
-
-The support probe and capability findings (kitty's readback query and iTerm2's identity keying), the
-policy-gated file/temp/shared-memory transmission forms, and image-id-carrying kitty transmission are
-planned follow-ups. The full surface, capability, and policy design is in
+See the `kitty_graphics.rs` example for the full gated flow: probe, transmit, place, decode the
+acknowledgement, delete. The full surface, capability, and policy design is in
 `work/phase2/design/11-graphics.md`.

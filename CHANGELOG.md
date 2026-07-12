@@ -26,6 +26,32 @@ entries.
   `Some(ProbeSkip::LinuxConsole)`; `None` when the probe actually ran). The guard itself is public
   as `caps::probe_skip_from_env` for callers composing their own query flow. Previously this was
   documented as a caller duty.
+- The rest of the kitty graphics protocol surface on top of the 0.1.3 encoders: `query_support`
+  (the spec's canonical `a=q` probe), id-carrying `transmit` with raw-format dimensions
+  (`ImageSize`), `place_with` placement options (`Placement`: placement id, column/row scaling,
+  z-index), the data-freeing `delete_image_and_data` / `delete_all_images_and_data` /
+  `delete_placement` forms, the resource-naming `transmit_file` / `transmit_temp_file` /
+  `transmit_shared_memory` builders, and protocol-correct chunking of every payload past the
+  4096-byte bound (previously oversized payloads were emitted as one over-long escape). Terminal
+  acknowledgements decode as the new `report::KittyGraphicsReport`, matched by the query
+  correlator on the echoed image id.
+- Graphics capability probing: both `probe_capabilities` drivers now send the kitty graphics
+  `a=q` query plus the XTWINOPS text-area (`CSI 14 t`) and cell-size (`CSI 16 t`) pixel-geometry
+  queries behind the same DA1 fence, populating `Capabilities::kitty_graphics`,
+  `text_area_pixels`, and `cell_size`. Zero-dimension geometry answers stay unknown — never a
+  fabricated default. New report parsers `TextAreaPixelsReport` and `CellSizeReport`; new command
+  builders `commands::terminal::request_text_area_pixels` / `request_cell_size`.
+- Policy-gated session emits for the resource-naming kitty transmission modes
+  (`TerminalSession::transmit_kitty_file` / `transmit_kitty_temp_file` /
+  `transmit_kitty_shared_memory`): the escape names a file or IPC object the terminal itself
+  opens — a local-file-read primitive — so the emit consults the existing file-transfer policy
+  gate (denied under the default `Policy::restricted()`) and requires a known-true capability
+  finding. A refused capability check is the new typed `Error::CapabilityUnverified`; inline
+  (direct) transmission carries app-owned bytes and is capability-gated only. Placed images are
+  app-owned content: not ledgered, not auto-cleared, ids caller-owned.
+- The graphics reference page (`docs::graphics`) now covers the capability-provenance table, the
+  resource-naming policy split, and the pixel-geometry honesty rule; the `kitty_graphics.rs`
+  example runs the full gated flow (probe, transmit, place, decode the acknowledgement, delete).
 
 ## [0.1.3] - 2026-07-12
 

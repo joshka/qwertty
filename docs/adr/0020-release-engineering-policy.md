@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (amended 2026-07-12 — see [Amendment](#amendment-2026-07-12))
 
 ## Context
 
@@ -70,3 +70,24 @@ required (rustfmt, fuzzing, some doc builds).
 - These decisions are captured as a reusable standard in
   [`docs/development/release-engineering.md`](../development/release-engineering.md) so they can be
   applied consistently across the maintainer's libraries.
+
+## Amendment (2026-07-12)
+
+The policy above is unchanged; this records how it landed in practice once the 0.1.x releases
+shipped, where reality refined the original wording:
+
+- **The bootstrap sequence completed.** 0.1.0 was published manually (local `cargo login`), the
+  repository was registered as a crates.io trusted publisher, and 0.1.1+ have published via OIDC
+  with no long-lived registry token.
+- **Release tags use `qwertty-v<version>`** — release-plz's default `<crate>-v` format, kept
+  deliberately rather than shortened to `v*`; CHANGELOG version links match it.
+- **`release_always = true`** was added to `release-plz.toml` so a `workflow_dispatch` can publish
+  whenever main's version is ahead of crates.io. The release workflow's `if` gate still keeps
+  ordinary pushes from publishing; this enables the dispatch path (used for 0.1.1 and 0.1.2)
+  alongside the release-PR path.
+- **Changelog curation is spread across PRs, not done in the release PR** as the Consequences
+  section first assumed: contributors add entries under `[Unreleased]` in the PRs that make the
+  changes, and the maintainer converts that section to a version heading at release time.
+  release-plz never writes `CHANGELOG.md` (`changelog_update = false`).
+- The repository setting "Allow GitHub Actions to create and approve pull requests" is enabled;
+  without it the release-PR job cannot open its PRs.

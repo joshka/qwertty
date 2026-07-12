@@ -51,13 +51,31 @@ concurrency models, and the **windows + wasm cross-compile** jobs.
 
 ## Release automation
 
-- **release-plz** cuts releases: it opens a version-bump + publish PR, with the bump determined by
-  `cargo-semver-checks` (no conventional commits). The human curates the `CHANGELOG.md` entry in that
-  PR.
-- **Trusted Publishing** (crates.io OIDC via `rust-lang/crates-io-auth-action`) for automated
-  releases — **but** the sequence is: (1) publish the first version **manually** with a local
-  `cargo login`; (2) register the repo as a crates.io trusted publisher; (3) release-plz then
-  publishes subsequent versions with no long-lived token.
+Status for qwertty: **this machinery is live** — 0.1.0 was published manually, trusted publishing
+was then registered, and 0.1.1+ have shipped through it. Releases are the maintainer's act;
+sessions never merge release PRs or dispatch the release workflow.
+
+- **release-plz** cuts releases: it opens a version-bump PR (`chore: release vX.Y.Z`), with the
+  bump determined by `cargo-semver-checks` (no conventional commits). `changelog_update = false`:
+  release-plz never writes `CHANGELOG.md`. Entries accumulate under `[Unreleased]` in the PRs
+  that make the changes; the maintainer converts that section into a version heading at release
+  time (in the release PR, or in the version-bump commit on the dispatch path).
+- **Two release paths**, both gated by the release job's `if` (ordinary pushes never publish):
+  1. **Merge the release-plz PR** — the squash commit's `chore: release` subject triggers the
+     release job, which publishes, tags, and creates the GitHub Release.
+  2. **`workflow_dispatch` the Release-plz workflow** — `release_always = true` lets the release
+     job publish whenever main's version is ahead of crates.io, so a hand-made version-bump +
+     changelog commit followed by a dispatch also releases (how 0.1.1 and 0.1.2 shipped).
+- **Tag format is `qwertty-v<version>`** (release-plz's `<crate>-v` default, kept deliberately).
+  CHANGELOG version links and anything matching release tags must use it.
+- **Trusted Publishing** (crates.io OIDC, `id-token: write`, no `CARGO_REGISTRY_TOKEN` secret).
+  Bootstrap for a **new** library: (1) publish the first version **manually** with a local
+  `cargo login` (trusted publishing can only be configured for a crate that already exists);
+  (2) register the repo as a crates.io trusted publisher; (3) release-plz then publishes
+  subsequent versions with no long-lived token.
+- The release job runs in the protected **`release` environment**; the repository setting
+  **"Allow GitHub Actions to create and approve pull requests"** (Settings → Actions → General)
+  must be enabled or the release-PR job cannot open its PR.
 
 ## Governance and packaging
 
@@ -89,5 +107,7 @@ concurrency models, and the **windows + wasm cross-compile** jobs.
    `CODEOWNERS`/`FUNDING.yml`; add README badges.
 5. Add `[package] exclude` and verify the tarball with `cargo publish --dry-run`.
 6. Set MSRV to stable-N-1 and add the MSRV CI job.
-7. Publish the first version manually; then register crates.io trusted publishing and let release-plz
-   take over.
+7. Enable "Allow GitHub Actions to create and approve pull requests" (Settings → Actions →
+   General) so release-plz can open its release PRs.
+8. Publish the first version manually; then register crates.io trusted publishing and let release-plz
+   take over (tags follow release-plz's `<crate>-v<version>` format).

@@ -63,9 +63,10 @@ Asks the terminal to report its current default foreground color.
 Reports the terminal's current default foreground color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 10 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_foot.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_foot.seq), [`fixtures/osc/osc_10_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_10_foreground_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target.
 
 ## Set Foreground Color (`osc.10.foreground_set`)
 
@@ -101,9 +102,10 @@ Asks the terminal to report its current default background color.
 Reports the terminal's current default background color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 11 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_11_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_11_background_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_alacritty.seq), [`fixtures/osc/osc_11_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_wezterm.seq), [`fixtures/osc/osc_11_background_report_report_capture_foot.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_foot.seq), [`fixtures/osc/osc_11_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_11_background_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target.
 
 ## Set Background Color (`osc.11.background_set`)
 
@@ -130,9 +132,10 @@ Asks the terminal to report its current text-cursor color.
 Reports the terminal's current text-cursor color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 12 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_foot.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_foot.seq), [`fixtures/osc/osc_12_cursor_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_12_cursor_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query.
 
 ## Set Cursor Color (`osc.12.cursor_set`)
 
@@ -159,9 +162,10 @@ Fixture uses palette index 2.
 Reports the RGB value of an indexed palette color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 4 ; index ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_4_palette_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_kitty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq), [`fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq), [`fixtures/osc/osc_4_palette_report_report_capture_foot.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_foot.seq), [`fixtures/osc/osc_4_palette_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_4_palette_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; echoes the queried `index` back, followed by xterm's typed `rgb:rrrr/gggg/bbbb` color form on every answering target.
 
 ## Set Palette Color (`osc.4.palette_set`)
 
@@ -197,9 +201,10 @@ Fixture queries special color index 1.
 Fixture reports special color index 1.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 5 ; index ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_5_special_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_5_special_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live capture (xterm only — the sole target that answers this query); echoes the queried `index` back, followed by xterm's typed `rgb:rrrr/gggg/bbbb` color form.
 
 ## Set Special Color (`osc.5.special_set`)
 
@@ -235,9 +240,10 @@ Fixture queries the pointer foreground color.
 Reports the terminal's current mouse-pointer foreground color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 13 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_13_pointer_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_13_pointer_foreground_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live capture (xterm only — the sole target that answers this query); `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form.
 
 ## Set Pointer Foreground Color (`osc.13.pointer_foreground_set`)
 
@@ -273,9 +279,10 @@ Fixture queries the pointer background color.
 Reports the terminal's current mouse-pointer background color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 14 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_14_pointer_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_14_pointer_background_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live capture (xterm only — the sole target that answers this query); `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form.
 
 ## Set Pointer Background Color (`osc.14.pointer_background_set`)
 
@@ -311,9 +318,10 @@ Fixture queries the highlight background color.
 Reports the terminal's current selection-highlight background color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 17 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_foot.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_foot.seq), [`fixtures/osc/osc_17_highlight_background_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_17_highlight_background_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query.
 
 ## Set Highlight Background Color (`osc.17.highlight_background_set`)
 
@@ -349,9 +357,10 @@ Fixture queries the highlight foreground color.
 Reports the terminal's current selection-highlight foreground color.
 
 - Direction: terminal-to-host
+- Syntax: `OSC 19 ; color ST`
 - References: [XTerm Control Sequences (invisible-island)](https://www.invisible-island.net/xterm/ctlseqs/ctlseqs.html) (retrieved 2026-07-06)
 - Fixtures: [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_foot.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_foot.seq), [`fixtures/osc/osc_19_highlight_foreground_report_report_capture_xterm.seq`](../../../fixtures/osc/osc_19_highlight_foreground_report_report_capture_xterm.seq)
-- Notes: reply syntax pending live capture
+- Notes: Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query.
 
 ## Set Highlight Foreground Color (`osc.19.highlight_foreground_set`)
 

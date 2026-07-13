@@ -11,6 +11,8 @@ entries.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-13
+
 ### Added
 
 - `TerminalSession::probe_capabilities`: the DA1-fenced capability probe bundle (XTVERSION, kitty
@@ -162,7 +164,8 @@ explicit terminal ownership, ordered output, input handling, and policy-aware te
 - Checked-in examples and docs.rs reference pages (`qwertty::docs`) for the public workflows above.
 - Dual `MIT OR Apache-2.0` licensing.
 
-[Unreleased]: https://github.com/joshka/qwertty/compare/qwertty-v0.1.3...HEAD
+[Unreleased]: https://github.com/joshka/qwertty/compare/qwertty-v0.1.4...HEAD
+[0.1.4]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.4
 [0.1.3]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.3
 [0.1.2]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.2
 [0.1.1]: https://github.com/joshka/qwertty/releases/tag/qwertty-v0.1.1

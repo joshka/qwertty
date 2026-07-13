@@ -11,6 +11,22 @@ entries.
 
 ## [Unreleased]
 
+### Added
+
+- `Capabilities::iterm2_images`: identity-keyed iTerm2 inline-image support. The protocol has no
+  support query, so the finding is inferred (never probed) from the resolved terminal identity —
+  known-true under iTerm2 and WezTerm (which speaks the protocol too), honestly unknown for every
+  other identity, and re-derived when an XTVERSION reply improves on the environment's identity (a
+  multiplexer answering XTVERSION for itself downgrades it back to unknown). The inference is
+  public as `caps::infer_iterm2_images`. Both `probe_capabilities` drivers now seed their
+  env-inferred findings through one shared constructor so they cannot drift.
+- Capability-gated session emits for iTerm2 inline images: `inline_iterm2_image` /
+  `inline_iterm2_image_sized` on both `TerminalSession` and `TokioTerminalSession` refuse with the
+  typed `Error::CapabilityUnverified` — writing nothing — unless the finding affirms support
+  (R-CAP-4). No policy gate: the bytes are inline and open no resource, unlike the kitty
+  resource-naming transmissions. The `iterm2_inline_image.rs` example now runs this full
+  identity-gated flow end to end.
+
 ## [0.1.4] - 2026-07-13
 
 ### Added

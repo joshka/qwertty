@@ -512,6 +512,61 @@ impl<D: TerminalDevice> TerminalSession<D> {
         ))
     }
 
+    /// Displays an iTerm2 inline image at the cursor, gated on a capability finding (R-CAP-4).
+    ///
+    /// When `support` is a known-`true` finding this emits
+    /// [`commands::graphics::iterm2::inline_image`] through the same immediate-write path as
+    /// [`command`](Self::command). `support` is the
+    /// [`iterm2_images`](crate::Capabilities::iterm2_images) finding from a capability probe —
+    /// identity-inferred, because the protocol has no support query — or a finding the caller
+    /// built from out-of-band verification (for example
+    /// `Finding::probed(Some(true), "out-of-band")`); the escape hatch is explicit, never silent.
+    /// Requiring it here keeps OSC 1337 image escapes out of terminals that nothing affirmed can
+    /// render them — on any other terminal the payload is garbled or dropped.
+    ///
+    /// There is deliberately no policy gate: the image bytes are inline, supplied by the
+    /// application itself, so the escape names no file, path, or IPC object the terminal would
+    /// open — unlike the kitty resource-naming transmissions
+    /// ([`transmit_kitty_file`](Self::transmit_kitty_file) and siblings), it opens no new
+    /// resource (design 11's policy split).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::CapabilityUnverified`] when `support` is not a known `true` —
+    /// **without writing anything**. Otherwise returns the terminal device's write error if the
+    /// encoded bytes cannot be written.
+    pub fn inline_iterm2_image(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image: &[u8],
+    ) -> terminal::Result<&mut Self> {
+        check_iterm2_capability(support)?;
+        self.command(commands::graphics::iterm2::inline_image(image))
+    }
+
+    /// Displays an iTerm2 inline image constrained to `width` by `height`, gated on a capability
+    /// finding.
+    ///
+    /// Identical gating to [`inline_iterm2_image`](Self::inline_iterm2_image); the emitted
+    /// command is [`commands::graphics::iterm2::inline_image_sized`].
+    ///
+    /// # Errors
+    ///
+    /// As [`inline_iterm2_image`](Self::inline_iterm2_image): `CapabilityUnverified` or the
+    /// device write error.
+    pub fn inline_iterm2_image_sized(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image: &[u8],
+        width: commands::graphics::iterm2::Dimension,
+        height: commands::graphics::iterm2::Dimension,
+    ) -> terminal::Result<&mut Self> {
+        check_iterm2_capability(support)?;
+        self.command(commands::graphics::iterm2::inline_image_sized(
+            image, width, height,
+        ))
+    }
+
     /// Applies the two gates every kitty resource-naming transmission passes: policy first (the
     /// security gate is never bypassed by an unknown capability), then the capability finding.
     fn check_kitty_resource_gates(
@@ -1295,12 +1350,7 @@ impl<D: TerminalDevice> TerminalSession<D> {
         // reply (FM-C12: no query exists for hyperlinks/truecolor), so they are populated once, up
         // front, from the environment alone. An XTVERSION reply later overwrites `identity` with
         // the wire-informed cross-check via `store_bundle_reply`.
-        let mut capabilities = Capabilities {
-            hyperlinks: crate::caps::infer_hyperlinks(crate::caps::std_env_source),
-            truecolor: crate::caps::infer_truecolor(crate::caps::std_env_source),
-            identity: crate::caps::identity_from_env(None, crate::caps::std_env_source),
-            ..Capabilities::default()
-        };
+        let mut capabilities = crate::caps::env_seeded_capabilities(crate::caps::std_env_source);
 
         // Step 3: deadline loop over the whole probe, one total timeout (FM-C6).
         #[expect(
@@ -1643,6 +1693,18 @@ impl<D: TerminalDevice> Drop for TerminalSession<D> {
 }
 
 /// Returns whether a reported size is usable rather than a known degenerate value.
+/// The capability gate every iTerm2 inline-image emit passes, shared by the sync and Tokio
+/// sessions so the two cannot drift: a known-`true` finding, or a typed refusal that writes
+/// nothing (unknown is not unsupported, and it is also not permission to emit — R-CAP-4/FM-V4).
+pub(crate) fn check_iterm2_capability(support: &crate::Finding<bool>) -> terminal::Result<()> {
+    if support.value_copied() != Some(true) {
+        return Err(terminal::Error::CapabilityUnverified {
+            operation: "iTerm2 inline image",
+        });
+    }
+    Ok(())
+}
+
 fn size_is_usable(size: TerminalSize) -> bool {
     let columns = size.columns();
     let rows = size.rows();
@@ -1855,6 +1917,70 @@ mod tests {
         graphics::kitty::transmit_temp_file(2, Format::Png, None, b"/tmp/b.png")
             .encode(&mut expected);
         graphics::kitty::transmit_shared_memory(3, Format::Png, None, b"/shm-c")
+            .encode(&mut expected);
+        assert_eq!(fake_terminal.output().expect("output"), expected);
+    }
+
+    #[test]
+    fn iterm2_inline_image_requires_a_known_true_finding() {
+        use crate::commands::graphics::iterm2::Dimension;
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // No finding affirms support: unknown is not unsupported, and it is also not permission
+        // to emit (R-CAP-4 / FM-V4). No policy is involved — inline bytes open no resource.
+        for support in [
+            crate::Finding::unknown(),
+            crate::Finding::inferred(Some(false), "test"),
+            crate::Finding::inferred(None, "test"),
+        ] {
+            let result = session.inline_iterm2_image(&support, b"\x00");
+            assert!(
+                matches!(result, Err(Error::CapabilityUnverified { .. })),
+                "expected CapabilityUnverified for {support:?}, got {result:?}",
+            );
+            let sized = session.inline_iterm2_image_sized(
+                &support,
+                b"\x00",
+                Dimension::Cells(4),
+                Dimension::Auto,
+            );
+            assert!(
+                matches!(sized, Err(Error::CapabilityUnverified { .. })),
+                "expected CapabilityUnverified for {support:?}, got {sized:?}",
+            );
+        }
+        assert_eq!(
+            fake_terminal.output().expect("output"),
+            Vec::<u8>::new(),
+            "a refused inline image must not emit any bytes",
+        );
+    }
+
+    #[test]
+    fn iterm2_inline_image_allowed_writes_exact_command_bytes_and_chains() {
+        use crate::commands::graphics::iterm2::{self, Dimension};
+
+        let (device, mut fake_terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // The default restricted() policy stays: inline transmission is capability-gated only
+        // (design 11's policy split), so a known-true finding is all it takes.
+        let support = crate::Finding::inferred(Some(true), "terminal identity");
+        session
+            .inline_iterm2_image(&support, b"\x00\x00\x00")
+            .expect("inline image allowed")
+            .inline_iterm2_image_sized(&support, b"\x00", Dimension::Cells(10), Dimension::Auto)
+            .expect("sized inline image allowed")
+            .flush()
+            .expect("flush");
+
+        // The exact bytes are the two command builders' own encodings, in call order — the
+        // session gate adds no framing.
+        let mut expected = Vec::new();
+        iterm2::inline_image(b"\x00\x00\x00").encode(&mut expected);
+        iterm2::inline_image_sized(b"\x00", Dimension::Cells(10), Dimension::Auto)
             .encode(&mut expected);
         assert_eq!(fake_terminal.output().expect("output"), expected);
     }
@@ -2148,6 +2274,61 @@ mod tests {
             elapsed < Duration::from_secs(5),
             "the DA1 fence must end the probe fast, took {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn sync_probe_xtversion_identity_derives_the_iterm2_images_finding() {
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // XTVERSION answers as iTerm2, then the DA1 fence. XTVERSION-resolved identity wins over
+        // whatever TERM_PROGRAM the test process has, so this is env-independent.
+        terminal
+            .feed_input(b"\x1bP>|iTerm2 3.5.0\x1b\\\x1b[?1;2c")
+            .expect("feed XTVERSION + DA1 fence");
+
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .expect("probe returns capabilities");
+
+        assert_eq!(
+            caps.identity.program,
+            Some(crate::TerminalProgram::Iterm2),
+            "XTVERSION resolved the identity"
+        );
+        assert_eq!(
+            caps.iterm2_images.value_copied(),
+            Some(true),
+            "an iTerm2 identity affirms inline-image support"
+        );
+        assert_eq!(
+            caps.iterm2_images.evidence(),
+            &Evidence::Inferred {
+                via: "terminal identity"
+            },
+            "identity-keyed support is Inferred, never Probed — no query exists"
+        );
+    }
+
+    #[test]
+    fn sync_probe_mux_xtversion_leaves_iterm2_images_unknown() {
+        let (device, mut terminal) = FakeDevice::open().expect("open fake device");
+        let mut session = TerminalSession::from_device(device).expect("start fake session");
+
+        // A mux answering XTVERSION for itself (FM-C3) resolves the identity to the mux, so the
+        // identity-keyed finding honestly stays unknown — OSC 1337 written into an unaware tmux
+        // is garbled regardless of what the outer terminal could render.
+        terminal
+            .feed_input(b"\x1bP>|tmux 3.5a\x1b\\\x1b[?1;2c")
+            .expect("feed XTVERSION + DA1 fence");
+
+        let caps = session
+            .probe_capabilities(Duration::from_secs(30))
+            .expect("probe returns capabilities");
+
+        assert_eq!(caps.identity.program, Some(crate::TerminalProgram::Tmux));
+        assert_eq!(caps.iterm2_images.value_copied(), None);
+        assert_eq!(caps.iterm2_images.evidence(), &Evidence::Unknown);
     }
 
     #[test]

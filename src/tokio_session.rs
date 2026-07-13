@@ -54,13 +54,13 @@ use self::readiness::FdReadiness;
 #[cfg(any(unix, windows))]
 use crate::ResizeEvent;
 use crate::caps::{
-    Capabilities, EnvSource, ProbeBundle, identity_from_env, infer_hyperlinks, infer_truecolor,
-    probe_bundle_commands, probe_skip_from_env, skipped_capabilities, std_env_source,
-    store_bundle_reply,
+    Capabilities, EnvSource, ProbeBundle, env_seeded_capabilities, probe_bundle_commands,
+    probe_skip_from_env, skipped_capabilities, std_env_source, store_bundle_reply,
 };
 use crate::commands::terminal::MouseMode;
 use crate::correlate::{Correlator, Expectation, ExpectationId, Feed, Reply, Resolution};
 use crate::report::{CursorPositionReport, TerminalStatusReport};
+use crate::session::check_iterm2_capability;
 use crate::{
     Command, Event, InputBytes, KittyKeyboardFlags, KittyKeyboardGrant, SemanticDecoder, Terminal,
     TerminalDevice, TerminalSession, TerminalSize, commands, terminal,
@@ -929,6 +929,59 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         Ok(())
     }
 
+    /// Displays an iTerm2 inline image at the cursor, gated on a capability finding (R-CAP-4) —
+    /// the async analogue of
+    /// [`TerminalSession::inline_iterm2_image`](crate::TerminalSession::inline_iterm2_image).
+    ///
+    /// When `support` is a known-`true` finding this emits
+    /// [`commands::graphics::iterm2::inline_image`] through the same write path as
+    /// [`command`](Self::command). `support` is the
+    /// [`iterm2_images`](crate::Capabilities::iterm2_images) finding from
+    /// [`probe_capabilities`](Self::probe_capabilities) — identity-inferred, because the protocol
+    /// has no support query — or a finding the caller built from out-of-band verification; the
+    /// escape hatch is explicit, never silent. There is deliberately no policy gate: the image
+    /// bytes are inline, supplied by the application itself, so the escape names no resource the
+    /// terminal would open (design 11's policy split).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`terminal::Error::CapabilityUnverified`] when `support` is not a known `true` —
+    /// **without writing anything**. Otherwise returns the terminal device's write error if the
+    /// encoded bytes cannot be written.
+    pub async fn inline_iterm2_image(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image: &[u8],
+    ) -> terminal::Result<()> {
+        check_iterm2_capability(support)?;
+        self.command(commands::graphics::iterm2::inline_image(image))
+            .await
+    }
+
+    /// Displays an iTerm2 inline image constrained to `width` by `height`, gated on a capability
+    /// finding.
+    ///
+    /// Identical gating to [`inline_iterm2_image`](Self::inline_iterm2_image); the emitted
+    /// command is [`commands::graphics::iterm2::inline_image_sized`].
+    ///
+    /// # Errors
+    ///
+    /// As [`inline_iterm2_image`](Self::inline_iterm2_image): `CapabilityUnverified` or the
+    /// device write error.
+    pub async fn inline_iterm2_image_sized(
+        &mut self,
+        support: &crate::Finding<bool>,
+        image: &[u8],
+        width: commands::graphics::iterm2::Dimension,
+        height: commands::graphics::iterm2::Dimension,
+    ) -> terminal::Result<()> {
+        check_iterm2_capability(support)?;
+        self.command(commands::graphics::iterm2::inline_image_sized(
+            image, width, height,
+        ))
+        .await
+    }
+
     /// Requests kitty keyboard progressive-enhancement flags and verifies what was granted.
     ///
     /// This is the opt-in verify-after-push convenience layered on the set-only primitive
@@ -1227,12 +1280,7 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
         // front, from the environment alone. If an XTVERSION reply arrives later,
         // `store_bundle_reply` overwrites `identity` with the XTVERSION-informed cross-check; until
         // then this is the best identity available (env only, no probed signal).
-        let mut capabilities = Capabilities {
-            hyperlinks: infer_hyperlinks(std_env_source),
-            truecolor: infer_truecolor(std_env_source),
-            identity: identity_from_env(None, std_env_source),
-            ..Capabilities::default()
-        };
+        let mut capabilities = env_seeded_capabilities(std_env_source);
 
         // Step 4: drain already-buffered events through the correlator before any read (design 03's
         // drain-before-read rule): a reply that arrived interleaved with earlier typeahead, already

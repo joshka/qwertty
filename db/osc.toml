@@ -679,6 +679,9 @@ description = "Inline images share the OSC 1337 File command with `inline=1` met
 direction   = "host-to-terminal"
 syntax      = "OSC 1337 ; File=inline=1;args:base64-payload ST"
 refs        = [{ doc = "iterm2-escape-codes" }, { doc = "iterm2-images" }]
-fixtures    = ["fixtures/osc/iterm2_inline_image.seq"]
+fixtures    = [
+    "fixtures/osc/iterm2_inline_image.seq",
+    "fixtures/osc/iterm2_inline_image_sized.seq",
+]
 replay      = "safe"
 notes       = "MultipartFile/FilePart/FileEnd remains preserve-only."

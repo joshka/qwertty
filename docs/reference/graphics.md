@@ -66,8 +66,9 @@ multiplexer may have eaten the APC), and it is also not permission to emit: pain
 graphics bytes at a terminal that cannot render them prints garbage, so gate emission on a
 known-`true` finding, the same rule that keeps mode-2026 wraps off terminals that never answered.
 
-iTerm2 images have no support query at all, so a session gates their emission on a
-terminal-identity finding rather than a probe.
+iTerm2 images have no support query at all, so a session gates their emission on the
+identity-keyed [`Capabilities::iterm2_images`](crate::Capabilities::iterm2_images) finding rather
+than a probe (see the iTerm2 section below).
 
 ## Pixel geometry: zeros are an admission, not a measurement
 
@@ -130,9 +131,27 @@ it opens no resource. The helpers cover:
 - `inline_image_sized` → adds `;width=<w>;height=<h>` — constrain to a `Dimension` (cells, pixels,
   percent, or auto).
 
-Unlike kitty, the protocol has no support query, so a session gates emission on a terminal-identity
-finding rather than a probe.
+Unlike kitty, the protocol has no support query, so the capability finding is *identity-keyed*:
+[`Capabilities::iterm2_images`](crate::Capabilities::iterm2_images) is a known `true` with
+`Inferred { via: "terminal identity" }` evidence when the resolved identity is iTerm2 or `WezTerm`
+— which speaks both this protocol and kitty graphics, so one `WezTerm` identity may enable two image
+protocols at once — and honestly unknown for every other identity: an identity can fail to affirm
+support, but it can never prove absence. An inferred finding is deliberately weaker provenance
+than a probed one; the difference stays inspectable on the finding's `Evidence`, never papered
+over. Because the finding is keyed on the *resolved* identity, an XTVERSION reply that improves on
+the environment's story re-derives it — a multiplexer answering XTVERSION for itself downgrades an
+env-inferred `true` back to unknown, because OSC 1337 written into an unaware mux is garbled no
+matter what the outer terminal renders.
 
-See the `kitty_graphics.rs` example for the full gated flow: probe, transmit, place, decode the
-acknowledgement, delete. The full surface, capability, and policy design is in
-`work/phase2/design/11-graphics.md`.
+Emission is gated on that finding at the session layer, exactly like every other graphics emit
+(R-CAP-4): [`inline_iterm2_image`](crate::TerminalSession::inline_iterm2_image) and
+[`inline_iterm2_image_sized`](crate::TerminalSession::inline_iterm2_image_sized) — with async
+analogues on the Tokio session — refuse with a typed
+[`CapabilityUnverified`](crate::Error::CapabilityUnverified), writing nothing, unless the finding
+is known-`true`. There is no policy gate: the image bytes are inline and the escape names no
+resource the terminal would open, exactly like kitty direct transmission. A caller that verified
+rendering out of band builds its own finding — the explicit escape hatch, same as the kitty gates.
+
+See the `kitty_graphics.rs` example for the full probed flow (probe, transmit, place, decode the
+acknowledgement, delete) and the `iterm2_inline_image.rs` example for the identity-gated flow. The
+full surface, capability, and policy design is in `work/phase2/design/11-graphics.md`.

@@ -16,8 +16,9 @@ use std::path::PathBuf;
 
 use qwertty::report::TerminalStatus;
 use qwertty::{
-    Error, Event, Evidence, FakeDevice, FakeTerminal, Key, KeyEvent, KittyKeyboardFlags, PixelSize,
-    ProtocolPosition, Rgb, SyntaxParser, SyntaxToken, TerminalSize, TokioTerminalSession, commands,
+    Error, Event, Evidence, FakeDevice, FakeTerminal, Finding, Key, KeyEvent, KittyKeyboardFlags,
+    PixelSize, ProtocolPosition, Rgb, SyntaxParser, SyntaxToken, TerminalSize,
+    TokioTerminalSession, commands,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use rustix::pty::{grantpt, ptsname, unlockpt};
@@ -370,6 +371,47 @@ async fn tokio_session_in_band_resize_lifecycle_over_fake_device() {
         undo.windows(8).any(|w| w == b"\x1b[?2048l"),
         "leave wrote CSI ? 2048 l, got {undo:?}",
     );
+}
+
+/// The Tokio iTerm2 inline-image emit is capability-gated exactly like the sync one (R-CAP-4):
+/// nothing short of a known-`true` finding writes a byte, and an affirmed finding writes the
+/// command builder's exact bytes.
+#[tokio::test]
+async fn tokio_session_iterm2_inline_image_is_capability_gated() {
+    use qwertty::commands::graphics::iterm2::{self, Dimension};
+
+    let (device, mut peer) = FakeDevice::open().expect("open fake device");
+    let mut session =
+        TokioTerminalSession::from_device(device).expect("open Tokio session over fake device");
+
+    // Unknown is not unsupported, and it is also not permission to emit (FM-V4).
+    let unknown = Finding::unknown();
+    let refused = session.inline_iterm2_image(&unknown, b"\x00").await;
+    assert!(
+        matches!(refused, Err(Error::CapabilityUnverified { .. })),
+        "expected CapabilityUnverified, got {refused:?}",
+    );
+    let refused_sized = session
+        .inline_iterm2_image_sized(&unknown, b"\x00", Dimension::Cells(4), Dimension::Auto)
+        .await;
+    assert!(
+        matches!(refused_sized, Err(Error::CapabilityUnverified { .. })),
+        "expected CapabilityUnverified, got {refused_sized:?}",
+    );
+
+    // A known-true finding emits the builder's exact bytes — the session gate adds no framing.
+    let support = Finding::inferred(Some(true), "terminal identity");
+    session
+        .inline_iterm2_image(&support, b"\x00\x00\x00")
+        .await
+        .expect("inline image allowed");
+    session.flush().await.expect("flush");
+
+    let mut expected = Vec::new();
+    iterm2::inline_image(b"\x00\x00\x00").encode(&mut expected);
+    assert_eq!(peer.output().expect("read output"), expected);
+
+    session.leave().await.expect("leave Tokio session");
 }
 
 /// Entering the alternate screen over a headless `FakeDevice` writes the enter-and-clear pair

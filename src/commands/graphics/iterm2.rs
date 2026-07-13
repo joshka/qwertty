@@ -136,6 +136,8 @@ mod tests {
 
     #[test]
     fn sized_image_carries_width_and_height_arguments() {
+        // fixtures/osc/iterm2_inline_image_sized.seq (origin=spec:iterm2-images): the db entry's
+        // spec-origin fixture for the sized inline form is byte-for-byte this encoder's output.
         assert_eq!(
             bytes(inline_image_sized(
                 b"\x00\x00\x00",

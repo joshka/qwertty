@@ -623,5 +623,5 @@ Inline images share the OSC 1337 File command with `inline=1` metadata.
 - Direction: host-to-terminal
 - Syntax: `OSC 1337 ; File=inline=1;args:base64-payload ST`
 - References: [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html) (retrieved 2026-07-06); [iTerm2 Inline Images Protocol](https://iterm2.com/documentation-images.html) (retrieved 2026-07-06)
-- Fixtures: [`fixtures/osc/iterm2_inline_image.seq`](../../../fixtures/osc/iterm2_inline_image.seq)
+- Fixtures: [`fixtures/osc/iterm2_inline_image.seq`](../../../fixtures/osc/iterm2_inline_image.seq), [`fixtures/osc/iterm2_inline_image_sized.seq`](../../../fixtures/osc/iterm2_inline_image_sized.seq)
 - Notes: MultipartFile/FilePart/FileEnd remains preserve-only.

@@ -22,9 +22,10 @@ point without scanning the repository tree.
   (`set_scroll_region`, `insert_lines`, `scroll_up`, `reset_scroll_region`, DECSTBM/IL/SU) with
   `CommandBuffer`, all without opening a terminal — and documents why neither mode 2026 nor DECSTBM
   emission is gated at this layer.
-- `iterm2_inline_image.rs`: build the iTerm2 inline-image command bytes
-  (`commands::graphics::iterm2::inline_image` and `inline_image_sized` with a `Dimension`) and print
-  them escaped — the OSC 1337 `File` inline form, encode-only, without opening a terminal.
+- `iterm2_inline_image.rs`: the identity-gated iTerm2 inline-image flow — run the sync capability
+  probe, read the identity-inferred `Capabilities::iterm2_images` finding, and either display a
+  small PNG through the gated `TerminalSession::inline_iterm2_image_sized` emit (under iTerm2 or
+  `WezTerm`) or explain the unknown finding and print the escaped OSC 1337 bytes it would have sent.
 - `session_status.rs`: open a synchronous `TerminalSession`, write ordered output, flush
   explicitly, and leave cleanly.
 - `raw_mode.rs`: open the current terminal, enter raw mode through session ownership, and restore

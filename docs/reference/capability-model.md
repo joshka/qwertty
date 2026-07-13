@@ -33,8 +33,8 @@ assert!(synchronized_output.is_known());
   negative-unknown way DECRQM allows. That is different from silence.
 - **`Evidence::Inferred { via }`** — no query exists for this capability; the value was guessed
   from an environment variable or heuristic named by `via`. Always used for
-  `Capabilities::hyperlinks` and `Capabilities::truecolor`, never for the DECRQM/query-backed
-  fields.
+  `Capabilities::hyperlinks`, `Capabilities::truecolor`, and `Capabilities::iterm2_images`, never
+  for the DECRQM/query-backed fields.
 - **`Evidence::Unknown`** — nothing probed and nothing inferred.
 
 A consumer that only reads `.value()` sees a tri-state `Option<T>`; a consumer that needs to tell
@@ -114,7 +114,7 @@ the real process environment, which is unsound to do from parallel tests.
 
 ## Environment Heuristics Have No Query
 
-Two `Capabilities` fields have no backing query at all, because none exists in the protocol:
+Three `Capabilities` fields have no backing query at all, because none exists in the protocol:
 
 - **`hyperlinks`** — OSC 8 hyperlink support. Inferred from the documented `HYPERLINK_ENV_HEURISTICS`
   table (mirroring the `supports-hyperlinks` sniff set): `TERM_PROGRAM` ∈ `{Hyper, iTerm.app,
@@ -123,10 +123,17 @@ Two `Capabilities` fields have no backing query at all, because none exists in t
   numeric threshold the table's exact-value rows can't express.
 - **`truecolor`** — 24-bit RGB SGR support. Inferred from `COLORTERM` ∈ `{truecolor, 24bit}` — a
   workaround for truecolor being otherwise inexpressible in terminfo.
+- **`iterm2_images`** — iTerm2 inline-image (OSC 1337 `File`) support. Inferred by
+  `qwertty::caps::infer_iterm2_images` from the *resolved identity* rather than a raw env var:
+  `Some(true)` when the identity is iTerm2 or `WezTerm` (which speaks the protocol too), `Unknown`
+  for everything else — identity never proves absence (FM-C4). Because it is identity-keyed, an
+  XTVERSION reply that improves the identity re-derives it, and a multiplexer answering XTVERSION
+  for itself honestly downgrades it to unknown.
 
-Both tables are public, inspectable data (`qwertty::caps::HYPERLINK_ENV_HEURISTICS`,
-`qwertty::caps::VTE_HYPERLINK_MIN_VERSION`), not hidden logic, so a caller can audit exactly which
-signal produced a `hyperlinks`/`truecolor` finding. Both findings are always `Evidence::Inferred` or
+The tables and the inference functions are public, inspectable data/logic
+(`qwertty::caps::HYPERLINK_ENV_HEURISTICS`, `qwertty::caps::VTE_HYPERLINK_MIN_VERSION`,
+`qwertty::caps::infer_iterm2_images`), not hidden fallbacks, so a caller can audit exactly which
+signal produced a finding. All three findings are always `Evidence::Inferred` or
 `Evidence::Unknown` — never `Evidence::Probed`, because no query exists.
 
 ### `NO_COLOR` / `FORCE_COLOR` overrides

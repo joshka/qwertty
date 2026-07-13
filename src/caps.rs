@@ -621,6 +621,31 @@ pub fn infer_truecolor(env: impl EnvSource) -> Finding<bool> {
     Finding::unknown()
 }
 
+/// Infers iTerm2 inline-image (OSC 1337 `File`) support from a resolved terminal identity —
+/// the protocol has no support query (design 11), so identity is the only honest signal.
+///
+/// Returns an [`Evidence::Inferred`] `true` when `identity` resolved to a terminal documented to
+/// render the protocol: [`TerminalProgram::Iterm2`] itself, or [`TerminalProgram::WezTerm`],
+/// which speaks both this protocol and kitty graphics (so a `WezTerm` identity may enable more than
+/// one image protocol at once). Every other identity — including none at all — yields
+/// [`Evidence::Unknown`], never a `false`: identity fails to *affirm* support, but it cannot
+/// prove absence (FM-C4), and this table only ever grows from documented protocol adoptions.
+///
+/// The result is only as good as the identity behind it. A multiplexer that answers XTVERSION
+/// itself resolves `program` to the mux, not the outer terminal (FM-C3), which correctly leaves
+/// this unknown — OSC 1337 written into an unaware mux is garbled, whatever the outer terminal
+/// renders. This finding is never [`Evidence::Probed`]; a caller that has verified rendering out
+/// of band constructs its own finding, exactly as for the kitty transmission gates.
+#[must_use]
+pub fn infer_iterm2_images(identity: &TerminalIdentity) -> Finding<bool> {
+    match identity.program {
+        Some(TerminalProgram::Iterm2 | TerminalProgram::WezTerm) => {
+            Finding::inferred(Some(true), "terminal identity")
+        }
+        _ => Finding::unknown(),
+    }
+}
+
 /// Why a capability probe was skipped without writing a single byte (R-QRY-5, FM-C5).
 ///
 /// Both probe drivers (`TerminalSession::probe_capabilities` and
@@ -693,9 +718,9 @@ pub fn probe_skip_from_env(env: impl EnvSource) -> Option<ProbeSkip> {
 ///
 /// # Env-inferred fields have no query
 ///
-/// [`hyperlinks`](Self::hyperlinks) and [`truecolor`](Self::truecolor) are never
-/// [`Evidence::Probed`] — no query exists for either (FM-C12) — so they are always
-/// [`Evidence::Inferred`] or [`Evidence::Unknown`].
+/// [`hyperlinks`](Self::hyperlinks), [`truecolor`](Self::truecolor), and
+/// [`iterm2_images`](Self::iterm2_images) are never [`Evidence::Probed`] — no query exists for
+/// any of them (FM-C12) — so they are always [`Evidence::Inferred`] or [`Evidence::Unknown`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct Capabilities {
@@ -726,6 +751,18 @@ pub struct Capabilities {
     pub hyperlinks: Finding<bool>,
     /// Truecolor (24-bit RGB SGR) support, inferred from `COLORTERM` (FM-C12: no query exists).
     pub truecolor: Finding<bool>,
+    /// iTerm2 inline-image (OSC 1337 `File`) support, inferred from the terminal's identity —
+    /// the protocol has no support query, so this finding is never [`Evidence::Probed`].
+    ///
+    /// `Some(true)` with [`Evidence::Inferred`] when [`identity`](Self::identity) resolved to a
+    /// terminal documented to render the protocol (iTerm2 itself, or `WezTerm`, which speaks both
+    /// this protocol and kitty graphics); [`Evidence::Unknown`] for every other identity —
+    /// identity alone never proves absence (FM-C4), it just fails to affirm support. Derived by
+    /// [`infer_iterm2_images`] from the best identity available: re-derived when an XTVERSION
+    /// reply improves on the env-only identity, so under a multiplexer that answers XTVERSION
+    /// itself (FM-C3) the finding honestly stays unknown even if `TERM_PROGRAM` named the outer
+    /// terminal.
+    pub iterm2_images: Finding<bool>,
     /// kitty graphics protocol support, probed with the protocol's own `a=q` query.
     ///
     /// `Some(true)` means the terminal answered the query with `OK` — it speaks the protocol.
@@ -752,8 +789,8 @@ pub struct Capabilities {
     /// by value from a fully silent terminal — so this field is the inspectable difference between
     /// "we asked and nothing answered" and "we refused to ask" (see [`ProbeSkip`]). The
     /// env-inferred fields ([`hyperlinks`](Self::hyperlinks), [`truecolor`](Self::truecolor),
-    /// [`identity`](Self::identity)) are still populated on a skipped probe: they only read
-    /// environment variables and never write to the terminal.
+    /// [`iterm2_images`](Self::iterm2_images), [`identity`](Self::identity)) are still populated
+    /// on a skipped probe: they only read environment variables and never write to the terminal.
     pub probe_skip: Option<ProbeSkip>,
 }
 
@@ -763,10 +800,10 @@ impl Capabilities {
     ///
     /// This is the fully-silent case (a terminal that ignored the probe, or a transport that
     /// swallowed it): unknown across the board, never a claim of unsupported (FM-C4). Env-inferred
-    /// fields ([`hyperlinks`](Self::hyperlinks), [`truecolor`](Self::truecolor)) are excluded from
-    /// this check: they are independent of whether the terminal answered, so a silent terminal in
-    /// an environment with `COLORTERM=truecolor` set is still "all unknown" from the probe's point
-    /// of view.
+    /// fields ([`hyperlinks`](Self::hyperlinks), [`truecolor`](Self::truecolor),
+    /// [`iterm2_images`](Self::iterm2_images)) are excluded from this check: they are independent
+    /// of whether the terminal answered, so a silent terminal in an environment with
+    /// `COLORTERM=truecolor` set is still "all unknown" from the probe's point of view.
     #[must_use]
     pub fn is_all_unknown(&self) -> bool {
         !self.synchronized_output.is_known()
@@ -819,7 +856,8 @@ impl fmt::Display for TerminalProgram {
 // legitimately dead code — `just check-cross` catches exactly that class of hole.
 #[cfg(any(unix, all(feature = "tokio", windows)))]
 pub(crate) use bundle::{
-    ProbeBundle, probe_bundle_commands, skipped_capabilities, store_bundle_reply,
+    ProbeBundle, env_seeded_capabilities, probe_bundle_commands, skipped_capabilities,
+    store_bundle_reply,
 };
 
 #[cfg(any(unix, all(feature = "tokio", windows)))]
@@ -836,10 +874,26 @@ mod bundle {
     /// on [`Capabilities::probe_skip`].
     pub(crate) fn skipped_capabilities(skip: ProbeSkip, env: impl EnvSource) -> Capabilities {
         Capabilities {
+            probe_skip: Some(skip),
+            ..env_seeded_capabilities(env)
+        }
+    }
+
+    /// The [`Capabilities`] snapshot every probe path starts from: the findings that come from
+    /// the environment alone, with every probe-backed field [`super::Evidence::Unknown`].
+    ///
+    /// [`Capabilities::hyperlinks`] and [`Capabilities::truecolor`] never come from a terminal
+    /// reply (FM-C12: no query exists); [`Capabilities::identity`] starts env-only and is
+    /// overwritten by `store_bundle_reply` when an XTVERSION reply arrives, which also re-derives
+    /// the identity-keyed [`Capabilities::iterm2_images`]. Shared between the sync and Tokio
+    /// drivers and [`skipped_capabilities`] so the three construction sites can never drift.
+    pub(crate) fn env_seeded_capabilities(env: impl EnvSource) -> Capabilities {
+        let identity = identity_from_env(None, &env);
+        Capabilities {
             hyperlinks: super::infer_hyperlinks(&env),
             truecolor: super::infer_truecolor(&env),
-            identity: identity_from_env(None, &env),
-            probe_skip: Some(skip),
+            iterm2_images: super::infer_iterm2_images(&identity),
+            identity,
             ..Capabilities::default()
         }
     }
@@ -1073,6 +1127,11 @@ mod bundle {
             crate::correlate::Reply::XtVersion(report) => {
                 let version = report.version().to_owned();
                 capabilities.identity = identity_from_env(Some(&version), std_env_source);
+                // The identity just improved from env-only to wire-informed, so the
+                // identity-keyed finding is re-derived from it — an XTVERSION that resolves to a
+                // mux answering for itself (FM-C3) honestly downgrades an env-inferred `true`
+                // back to unknown.
+                capabilities.iterm2_images = super::infer_iterm2_images(&capabilities.identity);
             }
             crate::correlate::Reply::KittyKeyboardFlags(bits) => {
                 capabilities.kitty_keyboard =
@@ -1527,6 +1586,62 @@ mod tests {
         let env = env_map(&[("COLORTERM", "gnome-terminal")]);
         let finding = infer_truecolor(env);
         assert_eq!(finding.value(), None);
+    }
+
+    #[test]
+    fn infer_iterm2_images_iterm2_identity() {
+        let identity = super::TerminalIdentity {
+            program: Some(super::TerminalProgram::Iterm2),
+            ..Default::default()
+        };
+        let finding = super::infer_iterm2_images(&identity);
+        assert_eq!(finding.value_copied(), Some(true));
+        assert_eq!(
+            finding.evidence(),
+            &Evidence::Inferred {
+                via: "terminal identity"
+            }
+        );
+    }
+
+    #[test]
+    fn infer_iterm2_images_wezterm_speaks_the_protocol_too() {
+        let identity = super::TerminalIdentity {
+            program: Some(super::TerminalProgram::WezTerm),
+            ..Default::default()
+        };
+        let finding = super::infer_iterm2_images(&identity);
+        assert_eq!(finding.value_copied(), Some(true));
+    }
+
+    #[test]
+    fn infer_iterm2_images_other_identity_is_unknown_never_false() {
+        // FM-C4: an identity that fails to affirm support is unknown, not unsupported.
+        for program in [
+            Some(super::TerminalProgram::Kitty),
+            Some(super::TerminalProgram::Tmux),
+            Some(super::TerminalProgram::Unknown("mystery".to_owned())),
+            None,
+        ] {
+            let identity = super::TerminalIdentity {
+                program,
+                ..Default::default()
+            };
+            let finding = super::infer_iterm2_images(&identity);
+            assert_eq!(finding.value_copied(), None, "for {identity:?}");
+            assert_eq!(finding.evidence(), &Evidence::Unknown, "for {identity:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(any(unix, all(feature = "tokio", windows)))]
+    fn env_seeded_capabilities_derives_iterm2_images_from_env_identity() {
+        let env = env_map(&[("TERM_PROGRAM", "iTerm.app")]);
+        let caps = super::env_seeded_capabilities(env);
+        assert_eq!(caps.identity.program, Some(super::TerminalProgram::Iterm2));
+        assert_eq!(caps.iterm2_images.value_copied(), Some(true));
+        // Probe-backed findings stay untouched by the env seed.
+        assert_eq!(caps.kitty_graphics.evidence(), &Evidence::Unknown);
     }
 
     // --- Dumb-terminal probe skip (R-QRY-5, FM-C5) -----------------------------------------------

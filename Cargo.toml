@@ -83,7 +83,7 @@ tokio = { version = "1.37", default-features = false, features = ["test-util"] }
 # console before driving the public `Terminal` surface headlessly on CI. Only the console feature is
 # pulled in for tests; the library's own console FFI lives under `[target.'cfg(windows)'.dependencies]`.
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 # Floors are real (the CI minimal-versions job builds against them): tokio 1.37 is the first with
 # `AsyncFd::try_new`, rustix 1.1 the first with `Pid::as_raw_pid`. qdb shares the rustix dep, so
@@ -114,7 +114,7 @@ tokio = { version = "1.37", optional = true, default-features = false, features 
 # primitives (`CreateEventW`, `SetEvent`, `WaitForMultipleObjects`) the readiness worker uses
 # instead of an `AsyncFd` equivalent (ADR 0022 §4; MW-2).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",

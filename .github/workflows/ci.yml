@@ -69,7 +69,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install typos
-        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
         with:
           tool: typos-cli
       - name: Check spelling
@@ -158,7 +158,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install cargo-deny
-        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
         with:
           tool: cargo-deny
       - name: Run cargo-deny
@@ -194,7 +194,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install cargo-minimal-versions
-        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
         with:
           tool: cargo-minimal-versions,cargo-hack
       - name: Cache Rust build artifacts
@@ -220,7 +220,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install cargo-semver-checks
-        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
         with:
           tool: cargo-semver-checks
       - name: Cache Rust build artifacts
@@ -390,7 +390,7 @@ jobs:
         with:
           toolchain: nightly
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        uses: taiki-e/install-action@50414676f9f5d50a65992c6dd2ed02641263226c # v2.82.10
         with:
           tool: cargo-fuzz
       - name: Cache Rust build artifacts

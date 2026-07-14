@@ -2,6 +2,9 @@
 //!
 //! - [Why qwertty](why_qwertty) — what it adds over crossterm, termwiz, termion, and termina, and
 //!   where it deliberately does less.
+//! - [Failure modes](failure_modes) — the ways terminal I/O goes wrong (interleaved query replies,
+//!   ambiguous silence, lone Escape, split reads, restore leaks, …) and which mechanism addresses
+//!   each.
 //! - [Terminal control](terminal_control) — building command bytes: cursor, screen, style, and OSC
 //!   helpers, plus the live query helpers under the `tokio` feature.
 //! - [Terminal device](terminal_device) — the low-level owner of a live terminal: raw/cooked mode,
@@ -46,6 +49,9 @@
 
 #[doc = include_str!("../docs/reference/why-qwertty.md")]
 pub mod why_qwertty {}
+
+#[doc = include_str!("../docs/reference/failure-modes.md")]
+pub mod failure_modes {}
 
 #[doc = include_str!("../docs/reference/terminal-control.md")]
 // The two live query-helper examples from the control reference use `TokioTerminalSession`, so they

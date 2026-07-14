@@ -13,6 +13,11 @@ entries.
 
 ### Added
 
+- A [failure-modes reference page](https://docs.rs/qwertty/latest/qwertty/docs/failure_modes/)
+  (`docs::failure_modes`): the public catalogue of the ways terminal I/O goes wrong — interleaved
+  query replies and typeahead, wrong-reply cross-completion, ambiguous silence, late replies, the
+  lone-Escape prefix problem, sequences split across reads, paste, restore leaks, async-over-
+  blocking races, and capability guesswork — each with the mechanism qwertty uses against it.
 - `Capabilities::iterm2_images`: identity-keyed iTerm2 inline-image support. The protocol has no
   support query, so the finding is inferred (never probed) from the resolved terminal identity —
   known-true under iTerm2 and WezTerm (which speaks the protocol too), honestly unknown for every

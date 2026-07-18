@@ -18,6 +18,12 @@ ignores:
   - "target"
   - "spikes"
   - "work"
+  # site/src/ is transient mdBook input populated by scripts/build_site.sh (gitignored, never
+  # committed). It is a copy of docs/reference/generated/ — already exempt below — plus the
+  # spec-index appendix, so linting it here is both redundant and a false failure (the copied
+  # generated pages carry the same unbreakable long lines). Running `just site-build` before
+  # `just check` would otherwise trip the markdown recipe on this build artifact.
+  - "site/src"
   # The generated qdb conformance reference (`qdb generate reference`): the per-family pages carry
   # unbreakable long citation URLs and per-target conformance lines, and the matrix/summary are
   # wide data tables (per-target cells) that cannot satisfy aligned table-column-style without

@@ -35,6 +35,10 @@ for f in "$generated"/*.md; do
     fi
 done
 
+# The hand-maintained specification index lives in docs/reference/ (a sibling of the generated
+# tree, so it is exempt from the generate freshness gate). Copy it in as an appendix page.
+cp "$generated/../spec-index.md" "$site_src/spec-index.md"
+
 {
     echo "# Summary"
     echo
@@ -42,6 +46,7 @@ done
     echo
     echo "- [Support matrix](matrix.md)"
     echo "- [Conformance summary](conformance-counts.md)"
+    echo "- [Specification index](spec-index.md)"
     echo
     grep -E '^- \[`' "$generated/README.md"
 } > "$site_src/SUMMARY.md"

@@ -11,6 +11,7 @@ on:
       - main
     paths:
       - docs/reference/generated/**
+      - docs/reference/spec-index.md
       - site/**
       - scripts/build_site.sh
       - .github/workflows/pages.yml

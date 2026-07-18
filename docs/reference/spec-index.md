@@ -38,6 +38,9 @@ The four resources that cover the most ground in one place:
 - [vt100.net (Paul Williams' terminal archive)][vt100net] — the home of the scanned DEC manuals
   below and of the canonical [VT500-series parser state machine][dec-parser], the reference diagram
   most terminal decoders (qwertty's syntax layer included) are validated against.
+- [All Known Control Sequences (Kermit 95 / CKW)][ckwin] **(gap as a cited source)** — David Goodwin's
+  exhaustive cross-referenced catalog of control sequences, each annotated with which hardware
+  terminals and emulators implement it. Strong for "who supports this and where did it come from".
 
 ## Core standards and the parser
 
@@ -53,8 +56,14 @@ The four resources that cover the most ground in one place:
 ## DEC VT-series manuals
 
 The primary sources for DEC private modes, charsets, rectangular editing, and the two DEC graphics
-languages. All are on [vt100.net][vt100net].
+languages. Most are on [vt100.net][vt100net]; DEC STD 070 is DEC's own internal standard.
 
+- [DEC STD 070: Video Systems Reference Manual][dec-std-070] **(gap)** — the internal DEC standard
+  every DEC video terminal was built to comply with: what each escape sequence does and *why*, with
+  pseudocode in many places. Far more detailed than any of DEC's public product documentation.
+  A more workable HTMLised edition by James Holderness is at [j4james.github.io/vtdocs][vtdocs].
+  This edition is ~VT420-era, so it predates the newer vendor extensions. (Thanks to David Goodwin
+  for the pointer.)
 - [VT320 Programmer Reference, Appendix E: Control Functions][vt320-e] **(in db)** — the compact
   control-function table backing much of the `dec` family.
 - [VT510 Programmer Information — contents][vt510] **(gap)** — the fullest online DEC reference.
@@ -170,6 +179,9 @@ where terminals disagree most:
 [ecma48]: https://ecma-international.org/publications-and-standards/standards/ecma-48/
 [vt100net]: https://vt100.net/
 [dec-parser]: https://vt100.net/emu/dec_ansi_parser
+[ckwin]: https://davidrg.github.io/ckwin/dev/all-ctlseqs.html
+[dec-std-070]: https://bitsavers.org/pdf/dec/standards/EL-SM070-00_DEC_STD_070_Video_Systems_Reference_Manual_Dec91.pdf
+[vtdocs]: https://j4james.github.io/vtdocs/
 [vt320-e]: https://vt100.net/docs/vt320-uu/appendixe.html
 [vt510]: https://vt100.net/docs/vt510-rm/contents.html
 [vt3xx-sixel]: https://vt100.net/docs/vt3xx-gp/chapter14.html

@@ -41,9 +41,39 @@ qwertty = { path = "../.." }
 # Floor consistent with the root crate's rustix dep (see the note there).
 rustix = { version = "1.1", features = ["fs", "stdio"] }
 
+# Windows console FFI for the `#[cfg(windows)]` ConPTY conformance target (issue #196 item 2): the
+# pseudo-console host (`src/targets/conpty.rs`), its relay child (`src/targets/relay_conpty.rs`),
+# and the shared handle/pipe primitives (`src/targets/conpty_sys.rs`). Only the raw entry points
+# those modules call are pulled in, matching the library's `windows-sys` major (0.59):
+#   - Win32_Foundation:          HANDLE/BOOL, CloseHandle, GetLastError, WAIT_OBJECT_0, error codes.
+#   - Win32_System_Console:      CreatePseudoConsole/Resize/Close, GetStdHandle, COORD, HPCON.
+#   - Win32_System_Threading:    STARTUPINFOEXW + proc-thread attribute list, CreateProcessW,
+#                                WaitForSingleObject/TerminateProcess.
+#   - Win32_System_Pipes:        CreatePipe, CreateNamedPipeW, ConnectNamedPipe, PeekNamedPipe.
+#   - Win32_Storage_FileSystem:  CreateFileW/ReadFile/WriteFile, OPEN_EXISTING, PIPE_ACCESS_DUPLEX.
+#   - Win32_Security:            SECURITY_ATTRIBUTES, a null-pointer parameter of CreatePipe /
+#                                CreateNamedPipeW / CreateFileW / CreateProcessW (required by those
+#                                signatures, hence beyond the first-pass feature list).
+#   - Win32_System_IO:           OVERLAPPED, a null-pointer parameter of ReadFile / WriteFile /
+#                                ConnectNamedPipe (likewise required by their signatures).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 [lints.rust]
 missing_docs = "warn"
-unsafe_code = "forbid"
+# `deny`, not `forbid`, so the `#[cfg(windows)]` ConPTY modules can each scope an
+# `#[allow(unsafe_code)]` over their `windows-sys` FFI (mirrors the root crate; ADR 0021). `forbid`
+# cannot be locally overridden. The Unix/pure qdb build carries no `unsafe` and stays effectively
+# forbidden — the only opt-ins are those `#[cfg(windows)]` FFI modules.
+unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"

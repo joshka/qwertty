@@ -15,33 +15,56 @@ use crate::capture::{
 };
 use crate::model::Database;
 use crate::runner::{self, IdentityCheck, RunnerOptions};
+#[cfg(unix)]
 use crate::targets::alacritty::AlacrittyTarget;
+#[cfg(unix)]
 use crate::targets::betamax::BetamaxTarget;
+#[cfg(windows)]
+use crate::targets::conpty::ConptyTarget;
+#[cfg(unix)]
 use crate::targets::foot::FootTarget;
+#[cfg(unix)]
 use crate::targets::kitty::KittyTarget;
+#[cfg(unix)]
 use crate::targets::tmux::TmuxTarget;
+#[cfg(unix)]
 use crate::targets::wezterm::WeztermTarget;
+#[cfg(unix)]
 use crate::targets::xterm::XtermTarget;
 use crate::targets::{AdapterKind, Target};
 
 /// Which adapter the orchestrator drives.
+///
+/// The roster is platform-specific: the Unix PTY-hosted targets on Unix, and the ConPTY host on
+/// Windows (issue #196 item 2 — a draft skeleton; the Windows capture path in `main`/`orchestrate`
+/// is not yet wired, so this variant is registered but not yet reachable from `qdb capture`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TargetKind {
     /// A detached tmux session hosting the byte relay.
+    #[cfg(unix)]
     Tmux,
     /// A betamax-hosted headless ghostty-vt hosting the byte relay via an on-the-fly tape.
+    #[cfg(unix)]
     Betamax,
     /// A minimized, task-hidden kitty OS window hosting the byte relay.
+    #[cfg(unix)]
     Kitty,
     /// A scripted, briefly-visible alacritty window hosting the byte relay (no headless mode
     /// exists for alacritty — the window closes itself when the relay session ends).
+    #[cfg(unix)]
     Alacritty,
     /// A headless `wezterm-mux-server` session hosting the byte relay.
+    #[cfg(unix)]
     Wezterm,
     /// A self-managed headless-sway foot session hosting the byte relay. Linux-only, CI-driven.
+    #[cfg(unix)]
     Foot,
     /// A self-managed headless-Xvfb xterm session hosting the byte relay. Linux-only, CI-driven.
+    #[cfg(unix)]
     Xterm,
+    /// A ConPTY-hosted pseudo-console with a relay child (Windows only).
+    #[cfg(windows)]
+    Conpty,
 }
 
 impl TargetKind {
@@ -49,13 +72,22 @@ impl TargetKind {
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            #[cfg(unix)]
             "tmux" => Some(Self::Tmux),
+            #[cfg(unix)]
             "betamax" => Some(Self::Betamax),
+            #[cfg(unix)]
             "kitty" => Some(Self::Kitty),
+            #[cfg(unix)]
             "alacritty" => Some(Self::Alacritty),
+            #[cfg(unix)]
             "wezterm" => Some(Self::Wezterm),
+            #[cfg(unix)]
             "foot" => Some(Self::Foot),
+            #[cfg(unix)]
             "xterm" => Some(Self::Xterm),
+            #[cfg(windows)]
+            "conpty" => Some(Self::Conpty),
             _ => None,
         }
     }
@@ -64,13 +96,22 @@ impl TargetKind {
     #[must_use]
     pub const fn slug(self) -> &'static str {
         match self {
+            #[cfg(unix)]
             Self::Tmux => "tmux",
+            #[cfg(unix)]
             Self::Betamax => "betamax",
+            #[cfg(unix)]
             Self::Kitty => "kitty",
+            #[cfg(unix)]
             Self::Alacritty => "alacritty",
+            #[cfg(unix)]
             Self::Wezterm => "wezterm",
+            #[cfg(unix)]
             Self::Foot => "foot",
+            #[cfg(unix)]
             Self::Xterm => "xterm",
+            #[cfg(windows)]
+            Self::Conpty => "conpty",
         }
     }
 
@@ -78,22 +119,32 @@ impl TargetKind {
     #[must_use]
     pub fn make(self) -> Box<dyn Target> {
         match self {
+            #[cfg(unix)]
             Self::Tmux => Box::new(TmuxTarget::new()),
+            #[cfg(unix)]
             Self::Betamax => Box::new(BetamaxTarget::new()),
+            #[cfg(unix)]
             Self::Kitty => Box::new(KittyTarget::new()),
+            #[cfg(unix)]
             Self::Alacritty => Box::new(AlacrittyTarget::new()),
+            #[cfg(unix)]
             Self::Wezterm => Box::new(WeztermTarget::new()),
+            #[cfg(unix)]
             Self::Foot => Box::new(FootTarget::new()),
+            #[cfg(unix)]
             Self::Xterm => Box::new(XtermTarget::new()),
+            #[cfg(windows)]
+            Self::Conpty => Box::new(ConptyTarget::new()),
         }
     }
 
     /// How this target is hosted, for the results `adapter` field. Every wired target is
-    /// PTY-hosted (relay-based); the value is per-adapter, not assumed, so a future in-process
-    /// adapter reports its own kind.
+    /// PTY-hosted (relay-based) — including ConPTY, a pseudo-console host — so the value is
+    /// per-adapter, not assumed; a future in-process adapter reports its own kind.
     #[must_use]
     pub const fn adapter_kind(self) -> AdapterKind {
         match self {
+            #[cfg(unix)]
             Self::Tmux
             | Self::Betamax
             | Self::Kitty
@@ -101,6 +152,8 @@ impl TargetKind {
             | Self::Wezterm
             | Self::Foot
             | Self::Xterm => AdapterKind::PtyHosted,
+            #[cfg(windows)]
+            Self::Conpty => AdapterKind::PtyHosted,
         }
     }
 }

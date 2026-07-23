@@ -7,7 +7,10 @@ pub mod escape;
 pub mod generate;
 pub mod matrix;
 pub mod model;
-#[cfg(unix)]
+// Compiled on Windows too so the `#[cfg(windows)]` ConPTY target registration in `TargetKind` is
+// real and type-checked by the msvc build. The Unix compilation is byte-for-byte unchanged; on
+// Windows the concrete target roster is just the ConPTY adapter.
+#[cfg(any(unix, windows))]
 pub mod orchestrate;
 pub mod runner;
 pub mod targets;

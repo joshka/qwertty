@@ -67,10 +67,11 @@ id          = "osc.10.foreground_report"
 name        = "Foreground Color Report"
 description = "Reports the terminal's current default foreground color."
 direction   = "terminal-to-host"
+syntax      = "OSC 10 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_10_foreground_report_report_capture_kitty.seq", "fixtures/osc/osc_10_foreground_report_report_capture_alacritty.seq", "fixtures/osc/osc_10_foreground_report_report_capture_wezterm.seq", "fixtures/osc/osc_10_foreground_report_report_capture_foot.seq", "fixtures/osc/osc_10_foreground_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target."
 
 [[sequence]]
 id          = "osc.10.foreground_set"
@@ -108,10 +109,11 @@ id          = "osc.11.background_report"
 name        = "Background Color Report"
 description = "Reports the terminal's current default background color."
 direction   = "terminal-to-host"
+syntax      = "OSC 11 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_11_background_report_report_capture_kitty.seq", "fixtures/osc/osc_11_background_report_report_capture_alacritty.seq", "fixtures/osc/osc_11_background_report_report_capture_wezterm.seq", "fixtures/osc/osc_11_background_report_report_capture_foot.seq", "fixtures/osc/osc_11_background_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target."
 
 [[sequence]]
 id          = "osc.11.background_set"
@@ -139,10 +141,11 @@ id          = "osc.12.cursor_report"
 name        = "Cursor Color Report"
 description = "Reports the terminal's current text-cursor color."
 direction   = "terminal-to-host"
+syntax      = "OSC 12 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_12_cursor_report_report_capture_kitty.seq", "fixtures/osc/osc_12_cursor_report_report_capture_wezterm.seq", "fixtures/osc/osc_12_cursor_report_report_capture_foot.seq", "fixtures/osc/osc_12_cursor_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query."
 
 [[sequence]]
 id          = "osc.12.cursor_set"
@@ -170,10 +173,11 @@ id          = "osc.4.palette_report"
 name        = "Palette Color Report"
 description = "Reports the RGB value of an indexed palette color."
 direction   = "terminal-to-host"
+syntax      = "OSC 4 ; index ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_4_palette_report_report_capture_kitty.seq", "fixtures/osc/osc_4_palette_report_report_capture_alacritty.seq", "fixtures/osc/osc_4_palette_report_report_capture_wezterm.seq", "fixtures/osc/osc_4_palette_report_report_capture_foot.seq", "fixtures/osc/osc_4_palette_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; echoes the queried `index` back, followed by xterm's typed `rgb:rrrr/gggg/bbbb` color form on every answering target."
 
 [[sequence]]
 id          = "osc.4.palette_set"
@@ -211,10 +215,11 @@ id          = "osc.5.special_report"
 name        = "Special Color Report"
 description = "Fixture reports special color index 1."
 direction   = "terminal-to-host"
+syntax      = "OSC 5 ; index ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_5_special_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live capture (xterm only — the sole target that answers this query); echoes the queried `index` back, followed by xterm's typed `rgb:rrrr/gggg/bbbb` color form."
 
 [[sequence]]
 id          = "osc.5.special_set"
@@ -252,10 +257,11 @@ id          = "osc.13.pointer_foreground_report"
 name        = "Pointer Foreground Color Report"
 description = "Reports the terminal's current mouse-pointer foreground color."
 direction   = "terminal-to-host"
+syntax      = "OSC 13 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_13_pointer_foreground_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live capture (xterm only — the sole target that answers this query); `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form."
 
 [[sequence]]
 id          = "osc.13.pointer_foreground_set"
@@ -293,10 +299,11 @@ id          = "osc.14.pointer_background_report"
 name        = "Pointer Background Color Report"
 description = "Reports the terminal's current mouse-pointer background color."
 direction   = "terminal-to-host"
+syntax      = "OSC 14 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_14_pointer_background_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live capture (xterm only — the sole target that answers this query); `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form."
 
 [[sequence]]
 id          = "osc.14.pointer_background_set"
@@ -334,10 +341,11 @@ id          = "osc.17.highlight_background_report"
 name        = "Highlight Background Color Report"
 description = "Reports the terminal's current selection-highlight background color."
 direction   = "terminal-to-host"
+syntax      = "OSC 17 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_17_highlight_background_report_report_capture_kitty.seq", "fixtures/osc/osc_17_highlight_background_report_report_capture_wezterm.seq", "fixtures/osc/osc_17_highlight_background_report_report_capture_foot.seq", "fixtures/osc/osc_17_highlight_background_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query."
 
 [[sequence]]
 id          = "osc.17.highlight_background_set"
@@ -375,10 +383,11 @@ id          = "osc.19.highlight_foreground_report"
 name        = "Highlight Foreground Color Report"
 description = "Reports the terminal's current selection-highlight foreground color."
 direction   = "terminal-to-host"
+syntax      = "OSC 19 ; color ST"
 refs        = [{ doc = "xterm-ctlseqs" }]
 fixtures    = ["fixtures/osc/osc_19_highlight_foreground_report_report_capture_kitty.seq", "fixtures/osc/osc_19_highlight_foreground_report_report_capture_wezterm.seq", "fixtures/osc/osc_19_highlight_foreground_report_report_capture_foot.seq", "fixtures/osc/osc_19_highlight_foreground_report_report_capture_xterm.seq"]
 replay      = "safe"
-notes       = "reply syntax pending live capture"
+notes       = "Syntax from live captures; `color` is xterm's typed `rgb:rrrr/gggg/bbbb` form on every answering target. alacritty does not answer this query."
 
 [[sequence]]
 id          = "osc.19.highlight_foreground_set"

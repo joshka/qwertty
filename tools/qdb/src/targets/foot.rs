@@ -9,8 +9,8 @@
 //! foot's own command-line takes the relay's command positionally (no `-e` flag, unlike
 //! xterm/alacritty): `foot bash <relay-script>` runs the same in-terminal byte relay every
 //! PTY-hosted adapter uses; the window and the compositor are torn down together in `end`.
-//! Linux-only in practice (sway/wlroots and foot are Linux tools) — CI-driven per
-//! `work/phase5/tasks/B-target-template.md`, B4 row.
+//! Linux-only in practice (sway/wlroots and foot are Linux tools) — CI-driven per the
+//! B-target-template task spec (maintainer-local record), B4 row.
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};

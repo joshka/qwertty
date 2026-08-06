@@ -6,7 +6,8 @@
 //! adapter never touches a real X server the host may already be running. `xterm -e bash
 //! <relay-script>` runs the same in-terminal byte relay every PTY-hosted adapter uses; the
 //! window and the Xvfb server are torn down together in `end`. Linux-only in practice (Xvfb and
-//! xterm are X11/Linux tools) — CI-driven per `work/phase5/tasks/B-target-template.md`, B4 row.
+//! xterm are X11/Linux tools) — CI-driven per the B-target-template task spec (maintainer-local
+//! record), B4 row.
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};

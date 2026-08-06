@@ -1,6 +1,6 @@
 //! The conformance `Target` trait — what a thing the runner tests must provide.
 //!
-//! This is the approved Phase 2 sketch (`work/phase2/design/conformance-target-interface.md`)
+//! This is the approved Phase 2 sketch (`docs/design/conformance-target-interface.md`)
 //! made concrete: in-process and PTY-hosted headless emulators are first-class; installed GUI
 //! apps are one adapter among several, not the model. The runner (`crate::runner`) owns policy
 //! — deadlines, retries, replay-class gating, identity verification — so targets stay dumb:

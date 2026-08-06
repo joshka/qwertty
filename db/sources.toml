@@ -2,7 +2,7 @@
 #
 # Every `refs` entry in a family file cites one of these doc keys. Each key maps to a full
 # citation: a human title, the canonical URL, and the date the reference was retrieved and
-# verified during the prototype evidence audit (work/audit/README.md). `qdb validate` checks
+# verified during the prototype evidence audit (maintainer-local record). `qdb validate` checks
 # that every ref key used by an entry resolves here.
 
 [ecma48]

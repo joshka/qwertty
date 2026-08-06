@@ -16,9 +16,11 @@ A prototype fixture is imported only if all hold:
 - Its registry `direction` is `host_to_terminal`, or `bidirectional` in an unambiguous command
   form (BEL, LF, SS3, APC/PM/SOS payloads, sixel/ReGIS/DECUDK framing, vendor user-vars, etc.).
   Every `terminal_to_host`-only fixture is excluded (reports re-enter only via `origin=capture:`).
-- It is not on the salvage discard list (`work/phase3/salvage.md` Part 2, applied verbatim).
+- It is not on the salvage discard list
+  ([docs/design/prototype-salvage.md](../docs/design/prototype-salvage.md) Part 2, applied
+  verbatim).
 - It is not flagged WRONG, and not flagged QUESTIONABLE for invalid/misdirected *bytes*, in the
-  audit family files (`work/audit/{ecma48-dec,xterm,kitty-rio,osc-vendor}.md`). QUESTIONABLE
+  audit family files (maintainer-local records). QUESTIONABLE
   fixtures whose bytes are a valid host command and whose only concern is a naming/semantic
   label are kept (the decoder tokenizes bytes, not labels).
 - Its decoded bytes tokenize cleanly through `qwertty::SyntaxParser` with no `Malformed` token

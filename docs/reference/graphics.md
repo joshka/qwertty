@@ -154,4 +154,5 @@ rendering out of band builds its own finding — the explicit escape hatch, same
 
 See the `kitty_graphics.rs` example for the full probed flow (probe, transmit, place, decode the
 acknowledgement, delete) and the `iterm2_inline_image.rs` example for the identity-gated flow. The
-full surface, capability, and policy design is in `work/phase2/design/11-graphics.md`.
+full surface, capability, and policy design is in
+[docs/design/11-graphics.md](../design/11-graphics.md).

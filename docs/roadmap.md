@@ -4,8 +4,9 @@ The project grows in reviewable slices.
 
 > **Current state and handoff:** see `work/STATUS.md` (maintainer checkout). In short — 0.1.x is
 > published on crates.io with releases automated via release-plz, `main` is current and CI-green,
-> and Phase 5 (conformance, Windows, breadth) is executing as parallel lanes planned in
-> `work/phase5/`. The `## Status` list below is the historical early-slice log; the
+> and the phase-5 production push (conformance, Windows, breadth) is closed out; its approved
+> architecture is published at [`docs/design/`](design/README.md). The `## Status` list below is
+> the historical early-slice log; the
 > [Forward Look](#forward-look-unpublished-work-in-progress) table is the milestone view.
 
 ## Status

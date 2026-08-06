@@ -64,8 +64,7 @@ decision and a superseding record; additive growth stays open because the enums 
 
 ## Reference Material
 
-- OQ-6 text-granularity spike: `work/phase2/spikes/text-granularity/`.
-- Decoder and vocabulary design: `work/phase2/design/02-decoder.md`,
-  `work/phase2/design/08-api-boundaries.md`.
-- Maintainer review and acknowledgement: `work/phase4/review-01-vocabulary-freeze.md` (acked
-  2026-07-07).
+- OQ-6 text-granularity spike: a maintainer-local record.
+- Decoder and vocabulary design: [docs/design/02-decoder.md](../design/02-decoder.md),
+  [docs/design/08-api-boundaries.md](../design/08-api-boundaries.md).
+- Maintainer review and acknowledgement: a maintainer-local record (acked 2026-07-07).

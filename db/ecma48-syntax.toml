@@ -1,5 +1,5 @@
 # ecma48-syntax sequence family. Harvested from the audited reference prototype
-# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2.
+# (joshka/qwertty-reference-prototype) per docs/design/prototype-salvage.md Part 2.
 
 [[sequence]]
 id          = "ecma48.c0.bel"

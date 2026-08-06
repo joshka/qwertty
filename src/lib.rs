@@ -122,7 +122,7 @@
 // console device (src/terminal/windows.rs) must scope a single `#[allow(unsafe_code)]` over its
 // `windows-sys` FFI, which a `forbid` cannot permit. Every Win32 console entry point is an unsafe
 // `extern "system"` call with no safe wrapper in the tree. This is the only `unsafe` opt-in in the
-// crate; see work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
+// crate; see the pre-freeze Windows-readiness finding on unsafe policy (maintainer-local record).
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 // docs.rs builds with `--cfg docsrs` (see `[package.metadata.docs.rs]` in Cargo.toml) and enables

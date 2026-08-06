@@ -1,8 +1,8 @@
 # kitty-graphics sequence family. Initially harvested from the audited reference prototype
-# (joshka/qwertty-reference-prototype) per work/phase3/salvage.md Part 2; extended for the G2
-# graphics slice from the kitty graphics protocol spec (sources.toml key `kitty-graphics`), per
-# the approved graphics design (work/phase2/design/11-graphics.md). Response syntax comes from
-# the spec text and live capture only — never invented.
+# (joshka/qwertty-reference-prototype) per docs/design/prototype-salvage.md Part 2; extended
+# for the G2 graphics slice from the kitty graphics protocol spec (sources.toml key
+# `kitty-graphics`), per the approved graphics design (docs/design/11-graphics.md). Response
+# syntax comes from the spec text and live capture only — never invented.
 
 [[sequence]]
 id          = "kitty.graphics.response"

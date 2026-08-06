@@ -54,8 +54,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
 # WaitForMultipleObjects, …) is an `unsafe extern "system"` call with no safe wrapper in the
 # dependency tree. The Unix/pure crate carries no `unsafe` and stays effectively forbidden: the only
 # `#[allow(unsafe_code)]` opt-ins in the tree are the `#[cfg(windows)]` FFI modules (the console
-# device, its input reader, the readiness worker, and the restore handle). See ADR 0021 and
-# work/phase4/windows-readiness-analysis.md (pre-freeze finding: unsafe policy).
+# device, its input reader, the readiness worker, and the restore handle). See ADR 0021 and the
+# pre-freeze Windows-readiness finding on unsafe policy (maintainer-local record).
 unsafe_code = "deny"
 
 [lints.clippy]

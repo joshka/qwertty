@@ -4,11 +4,11 @@
 //! skips the initial window entirely (unusable, since the relay needs a pty to attach to), and
 //! window startup mode is Windowed/Maximized/(Simple)Fullscreen only, no hidden mode like kitty's
 //! `--start-as=hidden`. The maintainer approved brief windowed captures for exactly this case
-//! (`work/phase5/tasks/B-target-template.md`, B2 row). `-e` runs the relay script directly as the
-//! pty's foreground command — no shell-typing dance like tmux/betamax need — and the window
-//! closes itself the moment the relay exits (no `--hold`), so the on-screen lifetime is one
-//! scripted probe pass, confirmed empirically to be well under a second after the feed FIFO
-//! closes. Geometry is set via `-o window.dimensions.{columns,lines}` (verified against the
+//! (B-target-template task spec, maintainer-local record, B2 row). `-e` runs the relay script
+//! directly as the pty's foreground command — no shell-typing dance like tmux/betamax need — and
+//! the window closes itself the moment the relay exits (no `--hold`), so the on-screen lifetime
+//! is one scripted probe pass, confirmed empirically to be well under a second after the feed
+//! FIFO closes. Geometry is set via `-o window.dimensions.{columns,lines}` (verified against the
 //! `CSI 18 t` text-area-cells report, not assumed). XTVERSION comes back empty — a recorded
 //! finding (alacritty does not implement it), not an adapter bug.
 

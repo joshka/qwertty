@@ -4,7 +4,7 @@
 //! qwertty exposes each protocol as its own submodule of typed, encode-only helpers — one protocol
 //! per submodule rather than a lowest-common-denominator abstraction, because the protocols differ
 //! in real ways (placement, deletion, animation, and whether the terminal answers) that a unifying
-//! type would erase. See `work/phase2/design/11-graphics.md` for the full surface, capability, and
+//! type would erase. See `docs/design/11-graphics.md` for the full surface, capability, and
 //! policy design, and [`docs::graphics`](crate::docs::graphics) for the concept page.
 //!
 //! Two protocols are implemented:

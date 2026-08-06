@@ -32,6 +32,20 @@ pub mod wezterm;
 #[cfg(unix)]
 pub mod xterm;
 
+// The ConPTY adapter (issue #196 item 2): a `#[cfg(windows)]` pseudo-console host with a relay
+// child, the Windows sibling of the Unix PTY-hosted targets. It is a draft skeleton — it compiles
+// (including cross-compiled for `x86_64-pc-windows-msvc`) but has never run on a real host, and is
+// not wired into CI. The side-channel framing is platform-neutral and its unit tests run on the
+// host under `--all-targets` (`cfg(test)`); everything else is `#[cfg(windows)]`.
+#[cfg(windows)]
+pub mod conpty;
+#[cfg(any(test, windows))]
+pub mod conpty_frame;
+#[cfg(windows)]
+pub mod conpty_sys;
+#[cfg(windows)]
+pub mod relay_conpty;
+
 /// How a target is hosted — recorded with results so the matrix never implies an automation
 /// level the adapter doesn't have (the attended-cells honesty rule).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

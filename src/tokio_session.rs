@@ -1736,6 +1736,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Errors
     ///
     /// Never returns an error today; the `Result` shape is kept for forward compatibility.
+    // Clippy 1.98 reports this intentional async API shape under a second lint name.
+    #[allow(clippy::unused_async_trait_impl)]
     #[expect(
         clippy::unused_async,
         reason = "raw-fd writes are unbuffered so there is nothing to flush; the async shape is \
@@ -1761,6 +1763,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Errors
     ///
     /// Returns an error when cooked mode cannot be restored.
+    // Clippy 1.98 reports this intentional async API shape under a second lint name.
+    #[allow(clippy::unused_async_trait_impl)]
     #[expect(
         clippy::unused_async,
         reason = "teardown is synchronous (design 04 forbids spawn_blocking here), but leave stays \
@@ -1845,6 +1849,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// # Errors
     ///
     /// Always returns [`terminal::Error::Unsupported`].
+    // Clippy 1.98 reports this intentional async API shape under a second lint name.
+    #[allow(clippy::unused_async_trait_impl)]
     #[expect(
         clippy::unused_async,
         reason = "mirrors the awaited Unix suspend so the call site is identical on both platforms"
@@ -2025,6 +2031,8 @@ impl<D: TerminalDevice> TokioTerminalSession<D> {
     /// Returns [`terminal::Error::DegenerateProcessGroup`] when the process group cannot safely be
     /// stopped, or a terminal-mode restoration error if the ledger undo fails. A stop-signal send
     /// error is surfaced as-is.
+    // Clippy 1.98 reports this intentional async API shape under a second lint name.
+    #[allow(clippy::unused_async_trait_impl)]
     #[expect(
         clippy::unused_async,
         reason = "suspend is synchronous today (ledger undo + a signal send), but stays an async \
@@ -2475,6 +2483,8 @@ impl ResizeStream {
     /// # Errors
     ///
     /// Never returns; the method cannot be called because no `ResizeStream` value exists.
+    // Clippy 1.98 reports this intentional async API shape under a second lint name.
+    #[allow(clippy::unused_async_trait_impl)]
     #[expect(
         clippy::unused_async,
         reason = "uninhabited-type method kept async for signature parity with the Unix next_resize"

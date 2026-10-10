@@ -463,18 +463,18 @@ mod tests {
     fn modifier_key_chatter_emits_nothing_but_is_consumed() {
         // VK_CONTROL (0x11) down with Uc=0 is modifier chatter: a well-formed win32 event that
         // carries no key. It is recognized (consumed) yet produces no event.
-        assert!(decode(b"\x1b[17;29;0;1;8_").is_empty());
+        assert_eq!(decode(b"\x1b[17;29;0;1;8_").len(), 0);
         // VK_SHIFT, VK_MENU (Alt), and VK_LWIN behave the same.
-        assert!(decode(b"\x1b[16;42;0;1;16_").is_empty());
-        assert!(decode(b"\x1b[18;56;0;1;10_").is_empty());
-        assert!(decode(b"\x1b[91;0;0;1_").is_empty());
+        assert_eq!(decode(b"\x1b[16;42;0;1;16_").len(), 0);
+        assert_eq!(decode(b"\x1b[18;56;0;1;10_").len(), 0);
+        assert_eq!(decode(b"\x1b[91;0;0;1_").len(), 0);
     }
 
     #[test]
     fn unknown_virtual_key_with_no_char_emits_nothing() {
         // An OEM/punctuation key qwertty does not name, with Uc=0, produces no event but does not
         // error (a fidelity gap, not a failure).
-        assert!(decode(b"\x1b[186;0;0;1_").is_empty());
+        assert_eq!(decode(b"\x1b[186;0;0;1_").len(), 0);
     }
 
     #[test]
@@ -560,14 +560,14 @@ mod tests {
         let mut decoder = Win32Decoder::default();
         let mut out = Vec::new();
         assert!(decoder.decode_key(&csi(b"\x1b[0;0;55357;1_"), &mut out));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
         decoder.flush(&mut out);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].key(), Key::Char(char::REPLACEMENT_CHARACTER));
         // Flushing again is a no-op; the pending half is gone.
         out.clear();
         decoder.flush(&mut out);
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -590,8 +590,8 @@ mod tests {
     #[test]
     fn degenerate_and_all_empty_events_are_consumed_without_a_key() {
         // `CSI _` and `CSI ;;;;;_` are legal degenerate events: all fields default, no key.
-        assert!(decode(b"\x1b[_").is_empty());
-        assert!(decode(b"\x1b[;;;;;_").is_empty());
+        assert_eq!(decode(b"\x1b[_").len(), 0);
+        assert_eq!(decode(b"\x1b[;;;;;_").len(), 0);
     }
 
     #[test]
@@ -599,7 +599,7 @@ mod tests {
         let mut decoder = Win32Decoder::default();
         let mut out = Vec::new();
         assert!(!decoder.decode_key(&csi(b"\x1b[65;30;97u"), &mut out));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -608,7 +608,7 @@ mod tests {
         let mut decoder = Win32Decoder::default();
         let mut out = Vec::new();
         assert!(!decoder.decode_key(&csi(b"\x1b[65:30;97;1_"), &mut out));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -618,6 +618,6 @@ mod tests {
         let mut decoder = Win32Decoder::default();
         let mut out = Vec::new();
         assert!(!decoder.decode_key(&csi(b"\x1b[?9001_"), &mut out));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 }

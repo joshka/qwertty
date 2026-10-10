@@ -68,7 +68,7 @@
 //!     }
 //!     other => panic!("expected CSI, got {other:?}"),
 //! }
-//! assert!(parser.finish().is_empty());
+//! assert_eq!(parser.finish().len(), 0);
 //! ```
 
 mod token;

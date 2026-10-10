@@ -342,9 +342,9 @@ mod tests {
 
         // A quiet relay drains empty without error — silence is data.
         let quiet = transport.drain(Some(Duration::from_millis(30))).unwrap();
-        assert!(quiet.is_empty());
+        assert_eq!(quiet.len(), 0);
         let now = transport.drain(None).unwrap();
-        assert!(now.is_empty());
+        assert_eq!(now.len(), 0);
 
         // Closing the feed ends the fake relay; a drain then reports the hangup as an error.
         transport.close_input();

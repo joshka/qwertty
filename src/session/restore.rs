@@ -465,7 +465,7 @@ mod tests {
     fn read_current_sees_the_latest_published_blob() {
         let blob = DoubleBuffered::default();
 
-        blob.read_current(|bytes| assert!(bytes.is_empty()));
+        blob.read_current(|bytes| assert_eq!(bytes.len(), 0));
 
         blob.publish(b"first");
         blob.read_current(|bytes| assert_eq!(bytes, b"first"));

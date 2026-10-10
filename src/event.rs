@@ -66,7 +66,7 @@
 //! assert_eq!(events[0].key_event().map(|k| k.key()), Some(Key::Char('h')));
 //! assert_eq!(events[1].key_event().map(|k| k.key()), Some(Key::Char('i')));
 //! assert_eq!(events[2].key_event().map(|k| k.key()), Some(Key::Up));
-//! assert!(decoder.finish().is_empty());
+//! assert_eq!(decoder.finish().len(), 0);
 //! ```
 
 mod focus;
@@ -205,12 +205,12 @@ impl Event {
 /// use qwertty::{Key, SemanticDecoder};
 ///
 /// let mut decoder = SemanticDecoder::new();
-/// assert!(decoder.feed(b"\x1b[").is_empty());
+/// assert_eq!(decoder.feed(b"\x1b[").len(), 0);
 ///
 /// let events = decoder.feed(b"A");
 /// assert_eq!(events.len(), 1);
 /// assert_eq!(events[0].key_event().map(|k| k.key()), Some(Key::Up));
-/// assert!(decoder.finish().is_empty());
+/// assert_eq!(decoder.finish().len(), 0);
 /// ```
 #[derive(Clone, Debug)]
 pub struct SemanticDecoder {

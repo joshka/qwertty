@@ -677,7 +677,7 @@ mod tests {
         let command = set_clipboard(ClipboardSelection::Clipboard, &data);
         let mut bytes = Vec::new();
         command.encode(&mut bytes);
-        assert!(!bytes.is_empty());
+        assert_ne!(bytes.len(), 0);
         assert!(bytes.starts_with(b"\x1b]52;c;"));
         assert!(bytes.ends_with(b"\x1b\\"));
     }

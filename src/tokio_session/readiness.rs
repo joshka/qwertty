@@ -546,6 +546,8 @@ mod windows_transport {
         /// # Errors
         ///
         /// Returns [`terminal::Error::WriteTerminal`] when a write fails or makes no progress.
+        // Clippy 1.98 reports the shared async transport shape under a second lint name.
+        #[allow(clippy::unused_async_trait_impl)]
         #[expect(
             clippy::unused_async,
             reason = "console WriteFile completes synchronously, but the async shape matches the \

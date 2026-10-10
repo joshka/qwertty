@@ -542,7 +542,7 @@ fn pty_session_empty_input_buffer_does_not_read() {
     let input = session
         .read_input(&mut [])
         .expect("read into empty input buffer");
-    assert!(input.is_empty());
+    assert_eq!(input.len(), 0);
 
     session.leave().expect("leave terminal session");
 }

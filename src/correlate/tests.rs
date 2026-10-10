@@ -656,7 +656,7 @@ fn cancel_one_waiter_keeps_the_others() {
         Feed::Completed { .. }
     ));
     assert!(correlator.take_reply(id).is_some());
-    assert!(correlator.is_empty());
+    assert_eq!(correlator.len(), 0);
 }
 
 #[test]
@@ -738,7 +738,7 @@ fn resolving_a_completed_expectation_decrements_unread_without_reopening() {
 
     // The remaining waiter reads and frees the slot.
     assert!(correlator.take_reply(id).is_some());
-    assert!(correlator.is_empty());
+    assert_eq!(correlator.len(), 0);
 }
 
 #[test]
@@ -809,7 +809,7 @@ fn stale_unsolicited_cpr_with_nothing_pending_passes_through() {
     let mut correlator = Correlator::new();
     let event = one_event(b"\x1b[12;34R");
     assert_eq!(correlator.feed(event.clone()), Feed::Passthrough(event));
-    assert!(correlator.is_empty());
+    assert_eq!(correlator.len(), 0);
 }
 
 // --- interleaved keystrokes pass through in order (rule 5, FM-Q1/Q6) ------------------------
@@ -877,7 +877,7 @@ fn two_replies_in_one_batch_both_complete() {
     );
     assert!(correlator.take_reply(cursor).is_some());
     assert!(correlator.take_reply(fence).is_some());
-    assert!(correlator.is_empty());
+    assert_eq!(correlator.len(), 0);
 }
 
 #[test]

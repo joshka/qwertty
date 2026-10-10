@@ -2051,7 +2051,7 @@ mod tests {
             gate: PolicyGate::ClipboardWrite,
         };
         let message = error.to_string();
-        assert!(!message.is_empty());
+        assert_ne!(message.len(), 0);
         assert!(
             message.contains("clipboard write"),
             "error message should name the gate: {message}",

@@ -171,7 +171,7 @@ fn decodes_standalone_escape_from_finish() {
     // and the decoder maps it to the Escape key. This mirrors the ESC timing boundary: a lone ESC
     // only resolves to Escape once the parser is finished.
     let mut decoder = SemanticDecoder::new();
-    assert!(decoder.feed(b"\x1b").is_empty());
+    assert_eq!(decoder.feed(b"\x1b").len(), 0);
     let events = decoder.finish();
 
     assert_eq!(events, vec![key_event(Key::Escape)]);
@@ -254,8 +254,8 @@ fn buffers_split_utf8_text() {
     // finish).
     let mut decoder = SemanticDecoder::new();
 
-    assert!(decoder.feed(&[0xc3]).is_empty());
-    assert!(decoder.feed(&[0xa9]).is_empty());
+    assert_eq!(decoder.feed(&[0xc3]).len(), 0);
+    assert_eq!(decoder.feed(&[0xa9]).len(), 0);
     assert_eq!(decoder.finish(), vec![char_event('é')]);
 }
 
@@ -264,8 +264,8 @@ fn buffers_split_arrow_key_input() {
     // Parity with input_decoder_buffers_split_arrow_key_input.
     let mut decoder = SemanticDecoder::new();
 
-    assert!(decoder.feed(b"\x1b").is_empty());
-    assert!(decoder.feed(b"[").is_empty());
+    assert_eq!(decoder.feed(b"\x1b").len(), 0);
+    assert_eq!(decoder.feed(b"[").len(), 0);
     assert_eq!(decoder.feed(b"A"), vec![key_event(Key::Up)]);
 }
 
@@ -698,7 +698,7 @@ fn has_settled_text_true_for_complete_trailing_text() {
 #[test]
 fn has_settled_text_true_for_ascii_run() {
     let mut decoder = SemanticDecoder::new();
-    assert!(decoder.feed(b"hi").is_empty());
+    assert_eq!(decoder.feed(b"hi").len(), 0);
     assert!(decoder.has_settled_text());
 }
 
@@ -978,7 +978,7 @@ fn win32_input_surrogate_pair_reassembles_across_chunk_boundaries() {
         events[0].key_event().map(KeyEvent::key),
         Some(Key::Char('\u{1f600}'))
     );
-    assert!(decoder.finish().is_empty());
+    assert_eq!(decoder.finish().len(), 0);
 }
 
 #[test]
@@ -995,7 +995,7 @@ fn win32_input_modifier_chatter_produces_no_event() {
     // A VK_CONTROL down carries no key: the sequence is consumed as a valid win32 event but emits
     // nothing, and it is not passed through as syntax.
     let events = decode_whole(b"\x1b[17;29;0;1;8_");
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 0);
 }
 
 #[test]
@@ -1003,7 +1003,7 @@ fn win32_input_dangling_high_surrogate_flushes_at_finish() {
     // A stream that ends on an unpaired high surrogate flushes U+FFFD at finish rather than
     // dropping the code unit.
     let mut decoder = SemanticDecoder::new();
-    assert!(decoder.feed(b"\x1b[0;0;55357;1_").is_empty());
+    assert_eq!(decoder.feed(b"\x1b[0;0;55357;1_").len(), 0);
     let events = decoder.finish();
     assert_eq!(events.len(), 1);
     assert_eq!(

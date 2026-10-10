@@ -427,13 +427,13 @@ mod tests {
         let mut carry = SurrogateCarry::default();
         let mut out = Vec::new();
         carry.push(0xD83D, &mut out);
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
         carry.flush(&mut out);
         assert_eq!(out, "\u{FFFD}".as_bytes());
         // A second flush is a no-op: the carry was consumed.
         let mut again = Vec::new();
         carry.flush(&mut again);
-        assert!(again.is_empty());
+        assert_eq!(again.len(), 0);
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
             y: 0,
         };
         let held = translate_mouse(noop, BUTTON_LEFT, &mut out);
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
         assert_eq!(held, BUTTON_LEFT);
     }
 

@@ -293,11 +293,11 @@ fn bounds_hold_parser_memory_for_unterminated_osc_stream() {
     // the default 64 KiB bound plus a small constant (the introducer).
     let limit = qwertty::DEFAULT_PAYLOAD_LIMIT;
     let mut parser = SyntaxParser::new();
-    assert!(parser.feed(b"\x1b]").is_empty());
+    assert_eq!(parser.feed(b"\x1b]").len(), 0);
 
     let chunk = vec![b'A'; 4096];
     for _ in 0..256 {
-        assert!(parser.feed(&chunk).is_empty());
+        assert_eq!(parser.feed(&chunk).len(), 0);
         assert!(
             parser.pending_bytes().len() <= limit + 16,
             "pending grew past the bound: {}",
@@ -476,15 +476,15 @@ fn bounds_hold_when_terminator_straddles_chunks_after_overflow() {
     // was exceeded: the token still carries the terminator and the exact dropped count.
     let limit = qwertty::DEFAULT_PAYLOAD_LIMIT;
     let mut parser = SyntaxParser::new();
-    assert!(parser.feed(b"\x1b]").is_empty());
+    assert_eq!(parser.feed(b"\x1b]").len(), 0);
 
     let chunk = vec![b'A'; 4096];
     for _ in 0..256 {
-        assert!(parser.feed(&chunk).is_empty());
+        assert_eq!(parser.feed(&chunk).len(), 0);
     }
 
     // The ESC lands alone at a chunk boundary; memory stays bounded while it is held.
-    assert!(parser.feed(b"\x1b").is_empty());
+    assert_eq!(parser.feed(b"\x1b").len(), 0);
     assert!(parser.pending_bytes().len() <= limit + 16);
 
     let tokens = parser.feed(b"\\");
@@ -499,7 +499,7 @@ fn bounds_hold_when_terminator_straddles_chunks_after_overflow() {
     // length (introducer + payload + terminator).
     let accounted = osc.as_bytes().len() + osc.dropped_bytes();
     assert_eq!(accounted, 2 + 256 * 4096 + 2);
-    assert!(parser.finish().is_empty());
+    assert_eq!(parser.finish().len(), 0);
 }
 
 #[test]

@@ -36,7 +36,7 @@ fn main() -> qwertty::Result<()> {
         Err(other) => return Err(other),
     }
     // Nothing was written by the denied call.
-    assert!(fake_terminal.output()?.is_empty());
+    assert_eq!(fake_terminal.output()?.len(), 0);
 
     session.leave()
 }

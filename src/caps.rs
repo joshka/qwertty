@@ -1414,7 +1414,7 @@ mod tests {
         let identity = identity_from_env(None, no_env);
         assert_eq!(identity.program, None);
         assert_eq!(identity.version, None);
-        assert!(identity.mux_stack.is_empty());
+        assert_eq!(identity.mux_stack.len(), 0);
     }
 
     #[test]

@@ -108,6 +108,10 @@ impl FdReadiness {
             .map_err(io::Error::from)
             .map_err(terminal::Error::open_terminal)?;
 
+        // `try_new` is deprecated (tokio#8587) because an arbitrary `AsRawFd` may change or close
+        // its fd behind the reactor's back. An `OwnedFd` cannot, so the replacement `unsafe fn
+        // register` buys nothing here and would break the crate's no-`unsafe` Unix policy.
+        #[allow(deprecated)]
         let inner = match AsyncFd::try_new(dup) {
             Ok(inner) => inner,
             Err(err) => {
@@ -283,6 +287,8 @@ impl FdReadiness {
     /// Returns [`terminal::Error::OpenTerminal`] when Tokio cannot register the fd (matching
     /// construction).
     pub(super) fn reattach(fd: OwnedFd, original_flags: OFlags) -> terminal::Result<Self> {
+        // See `new` for why the deprecated `try_new` is sound for an `OwnedFd`.
+        #[allow(deprecated)]
         let inner = AsyncFd::try_new(fd).map_err(|err| {
             let (_fd, err) = err.into_parts();
             terminal::Error::open_terminal(err)

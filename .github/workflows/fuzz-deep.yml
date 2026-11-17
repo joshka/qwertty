@@ -47,11 +47,11 @@ jobs:
         with:
           toolchain: nightly
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-fuzz
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
       # Cache entries are immutable, so the key is unique per run (always saves the grown
       # corpus) and restore-keys pulls the most recent prior corpus. The corpus directory is
       # gitignored; this cache is its only persistence between scheduled runs.
